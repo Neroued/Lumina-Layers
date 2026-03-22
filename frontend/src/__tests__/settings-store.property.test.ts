@@ -16,7 +16,7 @@ const arbSettings = fc.record({
   language: fc.constantFrom("zh" as const, "en" as const),
   theme: fc.constantFrom("light" as const, "dark" as const),
   lastLutName: fc.string({ maxLength: 100 }),
-  lastColorMode: fc.constantFrom("4-Color (CMYW)", "4-Color (RYBW)", "6-Color (Smart 1296)", "6-Color (RYBW 1296)", "8-Color Max"),
+  lastColorMode: fc.constantFrom("4-Color (CMYW)", "4-Color (RYBW)", "6-Color (CMYWGK 1296)", "6-Color (RYBWGK 1296)", "8-Color Max"),
   lastModelingMode: fc.constantFrom("high-fidelity", "pixel", "vector"),
   lastBedLabel: fc.string({ maxLength: 50 }),
   cropEnabled: fc.boolean(),

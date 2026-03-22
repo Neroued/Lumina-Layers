@@ -56,14 +56,14 @@ class TestDetect6ColorSubtype:
     """Tests for _detect_6color_subtype."""
 
     def test_metadata_rybw_returns_rybwgk(self):
-        """Metadata containing '6-Color (RYBW 1296)' → returns '6-Color-RYBWGK'."""
-        meta = LUTMetadata(color_mode="6-Color (RYBW 1296)")
+        """Metadata containing '6-Color (RYBWGK 1296)' → returns '6-Color-RYBWGK'."""
+        meta = LUTMetadata(color_mode="6-Color (RYBWGK 1296)")
         result = _detect_6color_subtype("/any/path/lut.npy", metadata=meta)
         assert result == "6-Color-RYBWGK"
 
     def test_metadata_cmyw_returns_cmywgk(self):
-        """Metadata containing '6-Color (Smart 1296)' → returns '6-Color-CMYWGK'."""
-        meta = LUTMetadata(color_mode="6-Color (Smart 1296)")
+        """Metadata containing '6-Color (CMYWGK 1296)' → returns '6-Color-CMYWGK'."""
+        meta = LUTMetadata(color_mode="6-Color (CMYWGK 1296)")
         result = _detect_6color_subtype("/any/path/lut.npy", metadata=meta)
         assert result == "6-Color-CMYWGK"
 
@@ -79,7 +79,7 @@ class TestDetect6ColorSubtype:
 
     def test_metadata_rybw_overrides_non_rybw_filename(self):
         """Metadata says RYBW but filename has no RYBW → metadata wins."""
-        meta = LUTMetadata(color_mode="6-Color (RYBW 1296)")
+        meta = LUTMetadata(color_mode="6-Color (RYBWGK 1296)")
         result = _detect_6color_subtype("/path/smart_1296_lut.npy", metadata=meta)
         assert result == "6-Color-RYBWGK"
 
@@ -171,10 +171,10 @@ class TestOldFormatLUTLoadCompatibility:
         finally:
             os.unlink(path)
 
-    # --- Requirement 7.5: old 1296-entry RYBW 6-color → "6-Color (RYBW 1296)" ---
+    # --- Requirement 7.5: old 1296-entry RYBW 6-color → "6-Color (RYBWGK 1296)" ---
 
     def test_old_1296_rybw_palette_inferred_as_6color_rybw(self):
-        """Old 1296-entry LUT with RYBW 6-color palette → inferred as '6-Color (RYBW 1296)'."""
+        """Old 1296-entry LUT with RYBW 6-color palette → inferred as '6-Color (RYBWGK 1296)'."""
         entries = [{"rgb": [0, 0, 0], "recipe": ["White"]} for _ in range(1296)]
         data = {
             "palette": {
@@ -190,14 +190,14 @@ class TestOldFormatLUTLoadCompatibility:
         path = _write_temp_json(data)
         try:
             result = LUTManager._infer_color_mode_from_json(path)
-            assert result == "6-Color (RYBW 1296)"
+            assert result == "6-Color (RYBWGK 1296)"
         finally:
             os.unlink(path)
 
-    # --- Requirement 7.6: old 1296-entry CMYW 6-color → "6-Color (Smart 1296)" ---
+    # --- Requirement 7.6: old 1296-entry CMYW 6-color → "6-Color (CMYWGK 1296)" ---
 
     def test_old_1296_cmyw_palette_inferred_as_6color_smart(self):
-        """Old 1296-entry LUT with CMYW 6-color palette → inferred as '6-Color (Smart 1296)'."""
+        """Old 1296-entry LUT with CMYW 6-color palette → inferred as '6-Color (CMYWGK 1296)'."""
         entries = [{"rgb": [0, 0, 0], "recipe": ["White"]} for _ in range(1296)]
         data = {
             "palette": {
@@ -213,7 +213,7 @@ class TestOldFormatLUTLoadCompatibility:
         path = _write_temp_json(data)
         try:
             result = LUTManager._infer_color_mode_from_json(path)
-            assert result == "6-Color (Smart 1296)"
+            assert result == "6-Color (CMYWGK 1296)"
         finally:
             os.unlink(path)
 

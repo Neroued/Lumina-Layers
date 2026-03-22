@@ -13,7 +13,7 @@ import { useConverterStore } from "./converterStore";
  * - 排除 Primary 自身和 Merged 模式
  *
  * primaryMode 来自 detect_color_mode() 的短格式: "BW", "4-Color", "6-Color", "8-Color", "Merged"
- * lutList 中的 color_mode 来自 infer_color_mode() 的长格式: "BW (Black & White)", "4-Color", "6-Color (Smart 1296)", "8-Color Max", "Merged"
+ * lutList 中的 color_mode 来自 infer_color_mode() 的长格式: "BW (Black & White)", "4-Color", "6-Color (CMYWGK 1296)", "8-Color Max", "Merged"
  */
 
 const ALLOWED_SECONDARY_MODES: Record<string, string[]> = {

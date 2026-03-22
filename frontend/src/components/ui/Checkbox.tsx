@@ -1,8 +1,16 @@
+import {
+  cx,
+  workstationChoiceRowActiveClass,
+  workstationChoiceRowClass,
+  workstationChoiceRowDisabledClass,
+} from "./panelPrimitives";
+
 interface CheckboxProps {
   label: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
   disabled?: boolean;
+  tooltip?: string;
 }
 
 export default function Checkbox({
@@ -10,23 +18,39 @@ export default function Checkbox({
   checked,
   onChange,
   disabled = false,
+  tooltip,
 }: CheckboxProps) {
   return (
     <label
-      className={`flex items-center gap-3 rounded-2xl border px-3 py-2 text-sm transition-colors ${
+      title={tooltip}
+      className={cx(
+        "flex items-center gap-3 text-sm",
+        workstationChoiceRowClass,
+        checked && workstationChoiceRowActiveClass,
         disabled
-          ? "cursor-not-allowed border-slate-200/60 bg-slate-100/70 opacity-45 dark:border-slate-800/60 dark:bg-slate-900/50"
-          : "cursor-pointer border-slate-200/80 bg-white/60 hover:border-slate-300 hover:bg-white/75 dark:border-slate-700/80 dark:bg-slate-900/55 dark:hover:border-slate-600 dark:hover:bg-slate-900/75"
-      }`}
+          ? workstationChoiceRowDisabledClass
+          : "cursor-pointer hover:border-slate-300 hover:bg-white/75 dark:hover:border-slate-600 dark:hover:bg-slate-900/75"
+      )}
     >
       <input
         type="checkbox"
         checked={checked}
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
-        className="h-4 w-4 rounded border-slate-300 bg-white text-blue-500 accent-blue-500 transition-all duration-200 focus:ring-4 focus:ring-[var(--focus-ring)] outline-none disabled:cursor-not-allowed dark:border-slate-600 dark:bg-slate-800"
+        className="sr-only"
       />
-      <span className="text-slate-700 dark:text-slate-200">{label}</span>
+      <span
+        aria-hidden="true"
+        className={cx(
+          "flex h-5 w-5 shrink-0 items-center justify-center rounded-xl border transition-all duration-200",
+          checked
+            ? "border-blue-500 bg-blue-500"
+            : "border-slate-300/80 bg-white dark:border-slate-600/80 dark:bg-slate-800"
+        )}
+      >
+        <span className={cx("h-2.5 w-2.5 rounded-sm", checked ? "bg-white" : "bg-transparent")} />
+      </span>
+      <span className="font-medium text-slate-700 dark:text-slate-200">{label}</span>
     </label>
   );
 }

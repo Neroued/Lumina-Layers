@@ -120,7 +120,7 @@ describe('Palette-LUT Merge Unit Tests', () => {
       expect(screen.getByTestId('lut-color-grid')).toBeInTheDocument();
     });
 
-    it('content is still in DOM when collapsed (uses CSS transform)', () => {
+    it('renders only the title bar when collapsed', () => {
       useWidgetStore.setState({
         activeTab: 'converter',
         colorWorkstationCollapsed: true,
@@ -129,10 +129,9 @@ describe('Palette-LUT Merge Unit Tests', () => {
       renderWithI18n(<ColorWorkstation />);
 
       // Title bar uses aria-label instead of visible text
-      expect(screen.getByLabelText('颜色工作站')).toBeInTheDocument();
-      // Content is still in DOM (collapsed via CSS transform, not conditional rendering)
-      expect(screen.getByTestId('palette-panel')).toBeInTheDocument();
-      expect(screen.getByTestId('lut-color-grid')).toBeInTheDocument();
+      expect(screen.getByLabelText(translations['widget.colorWorkstation'].zh)).toBeInTheDocument();
+      expect(screen.queryByTestId('palette-panel')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('lut-color-grid')).not.toBeInTheDocument();
     });
 
     it('returns null when activeTab is not converter', () => {

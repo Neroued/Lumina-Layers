@@ -6,6 +6,7 @@
 import { motion } from "framer-motion";
 import { useState, useEffect } from "react";
 import { useI18n } from "../i18n/context";
+import { useWorkspaceMode } from "../hooks/useWorkspaceMode";
 import { clearCache, getPrinters, getSlicers } from "../api/system";
 import { useSettingsStore } from "../stores/settingsStore";
 import type { PrinterInfo, SlicerOption } from "../api/types";
@@ -16,13 +17,15 @@ import {
 } from "../utils/settingsOptionIds";
 import { retryAsync } from "../utils/retryAsync";
 import Button from "./ui/Button";
-import { PanelIntro, StatusBanner, centeredPanelClass, sectionCardClass } from "./ui/panelPrimitives";
+import Dropdown from "./ui/Dropdown";
+import { PanelIntro, StatusBanner, resolvePanelSurfaceClass, resolveSectionCardClass } from "./ui/panelPrimitives";
 
 const SETTINGS_OPTIONS_RETRY_ATTEMPTS = 6;
 const SETTINGS_OPTIONS_RETRY_DELAY_MS = 1000;
 
 export default function SettingsPanel() {
   const { t } = useI18n();
+  const workspace = useWorkspaceMode();
 
   const [clearing, setClearing] = useState(false);
   const [cacheResult, setCacheResult] = useState<string | null>(null);
@@ -131,8 +134,7 @@ export default function SettingsPanel() {
   const filteredPrinters = filterCompatiblePrinters(printers, resolvedSlicerSoftware);
 
   // Handle printer selection change (task 5.3 + 6.1)
-  const handlePrinterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const id = e.target.value;
+  const handlePrinterChange = (id: string) => {
     setPrinterModel(id);
     const selected = printers.find((p) => p.id === id);
     if (selected) {
@@ -142,8 +144,7 @@ export default function SettingsPanel() {
   };
 
   // Handle slicer selection change — auto-select first compatible printer
-  const handleSlicerChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const id = e.target.value;
+  const handleSlicerChange = (id: string) => {
     setSlicerSoftware(id);
     // If current printer doesn't support the new slicer, switch to first compatible
     const compatible = filterCompatiblePrinters(printers, id);
@@ -185,15 +186,15 @@ export default function SettingsPanel() {
       animate={{ opacity: 1, y: 0 }}
       transition={{ type: "spring", damping: 25, stiffness: 300 }}
       data-testid="settings-panel"
-      className={`${centeredPanelClass} flex flex-col gap-5`}
-    >
+      className={`${resolvePanelSurfaceClass(workspace.mode)} flex flex-col gap-5`}
+      >
       <PanelIntro
         eyebrow={t("tab.settings")}
         title={t("settings.title")}
         description={t("settings.desc")}
       />
 
-      <section className={`${sectionCardClass} flex flex-col gap-4`}>
+      <section className={`${resolveSectionCardClass(workspace.mode)} flex flex-col gap-4`}>
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
             {t("settings.slicer_settings")}
@@ -202,43 +203,31 @@ export default function SettingsPanel() {
             {t("settings.printer_model")}
           </h4>
         </div>
-        <div className="grid gap-4 md:grid-cols-2">
-          <label className="flex flex-col gap-1.5">
-            <span className="text-sm text-slate-500 dark:text-slate-400">
-              {t("settings.slicer_software")}
-            </span>
-            <select
-              id="slicer-software-select"
+        <div className={`grid gap-4 ${workspace.isCompact ? "" : "xl:grid-cols-2"}`}>
+          <div>
+            <Dropdown
+              label={t("settings.slicer_software")}
               value={resolvedSlicerSoftware}
               onChange={handleSlicerChange}
               disabled={slicersLoading}
-              className="w-full rounded-xl border border-slate-200 bg-white/90 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200 disabled:cursor-wait disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-800"
-            >
-              {slicers.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.display_name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1.5">
-            <span className="text-sm text-slate-500 dark:text-slate-400">
-              {t("settings.printer_model")}
-            </span>
-            <select
-              id="printer-model-select"
+              options={slicers.map((s) => ({
+                label: s.display_name,
+                value: s.id,
+              }))}
+            />
+          </div>
+          <div>
+            <Dropdown
+              label={t("settings.printer_model")}
               value={resolvedPrinterModel}
               onChange={handlePrinterChange}
               disabled={printersLoading}
-              className="w-full rounded-xl border border-slate-200 bg-white/90 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200 disabled:cursor-wait disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-100 dark:focus:border-slate-500 dark:focus:ring-slate-800"
-            >
-              {filteredPrinters.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.display_name}
-                </option>
-              ))}
-            </select>
-          </label>
+              options={filteredPrinters.map((p) => ({
+                label: p.display_name,
+                value: p.id,
+              }))}
+            />
+          </div>
         </div>
         {selectedPrinter && (
           <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
@@ -259,7 +248,7 @@ export default function SettingsPanel() {
         )}
       </section>
 
-      <section className={`${sectionCardClass} flex flex-col gap-4`}>
+      <section className={`${resolveSectionCardClass(workspace.mode)} flex flex-col gap-4`}>
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
             {t("settings.maintenance")}

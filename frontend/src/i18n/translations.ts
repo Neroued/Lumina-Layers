@@ -168,12 +168,12 @@ export const translations: Record<string, Record<"zh" | "en", string>> = {
     en: "Structure",
   },
   conv_structure_double: {
-    zh: "双面 (钥匙扣)",
-    en: "Double-sided (Keychain)",
+    zh: "双面",
+    en: "Double-sided",
   },
   conv_structure_single: {
-    zh: "单面 (浮雕)",
-    en: "Single-sided (Relief)",
+    zh: "单面",
+    en: "Single-sided",
   },
   conv_modeling_mode: {
     zh: "🎨 建模模式",
@@ -517,10 +517,6 @@ export const translations: Record<string, Record<"zh" | "en", string>> = {
     zh: "校正参数",
     en: "Correction",
   },
-  ext_wb: {
-    zh: "自动白平衡",
-    en: "Auto WB",
-  },
   ext_vignette: {
     zh: "暗角校正",
     en: "Vignette",
@@ -716,6 +712,18 @@ export const translations: Record<string, Record<"zh" | "en", string>> = {
   palette_mode_region: {
     zh: "局部区域",
     en: "Region",
+  },
+  palette_multi_select_count: {
+    zh: "已选 {count} 色",
+    en: "{count} selected",
+  },
+  palette_multi_select_region_count: {
+    zh: "已选 {count} 个区域",
+    en: "{count} regions selected",
+  },
+  palette_multi_select_click_remove: {
+    zh: "点击取消选择",
+    en: "Click to deselect",
   },
 
   // ==================== Color Merging ====================
@@ -1482,10 +1490,6 @@ export const translations: Record<string, Record<"zh" | "en", string>> = {
     zh: "畸变校正 (distortion)",
     en: "Distortion Correction",
   },
-  ext_wb_label: {
-    zh: "白平衡校正",
-    en: "White Balance Correction",
-  },
   ext_vignette_label: {
     zh: "暗角校正",
     en: "Vignette Correction",
@@ -1655,13 +1659,39 @@ export const translations: Record<string, Record<"zh" | "en", string>> = {
     en: "Only JPG/PNG/SVG/WebP/HEIC formats are supported",
   },
 
+  // ==================== Large Format Mode ====================
+  slicer_download_zip: {
+    zh: "下载 ZIP",
+    en: "Download ZIP",
+  },
+  slicer_generate_download_zip: {
+    zh: "生成并下载 ZIP",
+    en: "Generate & Download ZIP",
+  },
+  basic_large_format: {
+    zh: "大画幅模式",
+    en: "Large Format Mode",
+  },
+  basic_large_format_hint: {
+    zh: "自动切割为多片 3MF 压缩包",
+    en: "Auto-tiled into a ZIP of 3MF files",
+  },
+  basic_tile_width: {
+    zh: "切片宽度",
+    en: "Tile Width",
+  },
+  basic_tile_height: {
+    zh: "切片高度",
+    en: "Tile Height",
+  },
+
   // ==================== Structure Mode Options ====================
   "structure_mode.Double-sided": {
-    zh: "双面（钥匙扣）",
+    zh: "双面",
     en: "Double-sided",
   },
   "structure_mode.Single-sided": {
-    zh: "单面（浮雕）",
+    zh: "单面",
     en: "Single-sided",
   },
 
@@ -2235,6 +2265,10 @@ export const translations: Record<string, Record<"zh" | "en", string>> = {
   upload_unified_hint: {
     zh: "拖拽图片或点击上传（支持多选）",
     en: "Drag & drop or click to upload (multi-select)",
+  },
+  upload_tap_to_change: {
+    zh: "点击更换",
+    en: "Tap to change",
   },
   upload_unified_aria: {
     zh: "拖拽图片或点击上传文件",

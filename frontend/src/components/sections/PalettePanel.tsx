@@ -3,7 +3,7 @@ import type { PaletteEntry } from "../../api/types";
 import Slider from "../ui/Slider";
 import Button from "../ui/Button";
 import { useI18n } from "../../i18n/context";
-import { cx, mutedSectionCardClass, sectionCardClass } from "../ui/panelPrimitives";
+import { cx, workstationInsetCardClass, workstationPanelCardClass } from "../ui/panelPrimitives";
 
 // ========== PaletteItem ==========
 
@@ -56,18 +56,18 @@ function PaletteItem({
             onSelect();
           }
         }}
-        className={`relative flex w-[56px] flex-col items-center gap-1 rounded-2xl px-1.5 py-2 cursor-pointer border transition-all duration-150 ${
+        className={`relative flex w-full min-w-0 flex-col items-center gap-1 rounded-2xl px-1.5 py-2 cursor-pointer border transition-all duration-150 ${
           isSelected
             ? "border-amber-400 bg-amber-400/10 ring-2 ring-amber-400/30"
             : "border-transparent bg-white/35 hover:border-slate-300 hover:bg-white/65 dark:bg-slate-900/35 dark:hover:border-slate-600 dark:hover:bg-slate-900/75"
         }`}
       >
         <span
-          className={`inline-block h-7 w-7 rounded-xl ${borderClass}`}
+          className={`inline-block h-[clamp(1.4rem,2vw,1.75rem)] w-[clamp(1.4rem,2vw,1.75rem)] rounded-xl ${borderClass}`}
           style={{ backgroundColor: `#${displayHex}` }}
           title={`#${displayHex}`}
         />
-        <span className="text-[10px] tabular-nums leading-none text-slate-500 dark:text-slate-400">
+        <span className="text-[clamp(0.55rem,0.75vw,0.625rem)] tabular-nums leading-none text-slate-500 dark:text-slate-400">
           {entry.percentage.toFixed(1)}%
         </span>
       </div>
@@ -88,7 +88,7 @@ function PaletteItem({
           onSelect();
         }
       }}
-      className={`relative flex flex-col gap-2 rounded-[20px] px-2.5 py-2 cursor-pointer border transition-all duration-150 ${
+      className={`relative flex h-full min-h-0 flex-col gap-2 rounded-[20px] px-2.5 py-2 cursor-pointer border transition-all duration-150 ${
         isSelected
           ? "border-amber-400 bg-amber-400/10 ring-2 ring-amber-400/30"
           : "border-transparent bg-white/35 hover:border-slate-300 hover:bg-white/65 dark:bg-slate-900/35 dark:hover:border-slate-600 dark:hover:bg-slate-900/75"
@@ -97,11 +97,11 @@ function PaletteItem({
       {/* Top row: swatch + percentage */}
       <div className="flex items-center gap-1.5">
         <span
-          className={`inline-block h-6 w-6 shrink-0 rounded-xl ${borderClass}`}
+          className={`inline-block h-[clamp(1.25rem,1.7vw,1.5rem)] w-[clamp(1.25rem,1.7vw,1.5rem)] shrink-0 rounded-xl ${borderClass}`}
           style={{ backgroundColor: `#${displayHex}` }}
           title={`#${displayHex}`}
         />
-        <span className="truncate text-[10px] tabular-nums text-slate-500 dark:text-slate-400">
+        <span className="truncate text-[clamp(0.55rem,0.75vw,0.625rem)] tabular-nums text-slate-500 dark:text-slate-400">
           {entry.percentage.toFixed(1)}%
         </span>
       </div>
@@ -134,12 +134,12 @@ interface ColorBlockProps {
 function ColorBlock({ label, hex }: ColorBlockProps) {
   return (
     <div className="flex flex-col items-center gap-1">
-      <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400">{label}</span>
+      <span className="text-[clamp(0.55rem,0.75vw,0.625rem)] font-medium text-slate-500 dark:text-slate-400">{label}</span>
       <span
-        className="inline-block h-11 w-11 rounded-2xl border border-slate-300/80 dark:border-slate-600/80"
+        className="inline-block h-[clamp(2rem,3vw,2.75rem)] w-[clamp(2rem,3vw,2.75rem)] rounded-2xl border border-slate-300/80 dark:border-slate-600/80"
         style={{ backgroundColor: `#${hex}` }}
       />
-      <span className="font-mono text-[10px] text-slate-600 dark:text-slate-300">#{hex}</span>
+      <span className="font-mono text-[clamp(0.55rem,0.75vw,0.625rem)] text-slate-600 dark:text-slate-300">#{hex}</span>
     </div>
   );
 }
@@ -154,7 +154,7 @@ interface SelectedColorDetailProps {
 function SelectedColorDetail({ entry, remappedHex }: SelectedColorDetailProps) {
   const { t } = useI18n();
   return (
-    <div className={cx(mutedSectionCardClass, "mb-1 flex items-start gap-4 px-4 py-3")}>
+    <div className={cx(workstationInsetCardClass, "mb-1 flex items-start gap-4")}>
       <ColorBlock label={t("palette_quantized")} hex={entry.quantized_hex} />
       <ColorBlock label={t("palette_matched")} hex={entry.matched_hex} />
       {remappedHex && <ColorBlock label={t("palette_replaced_label")} hex={remappedHex} />}
@@ -168,8 +168,8 @@ function FreeColorSummary({ freeColors }: { freeColors: Set<string> }) {
   const { t } = useI18n();
   if (freeColors.size === 0) return null;
   return (
-    <div className={cx(mutedSectionCardClass, "flex flex-wrap items-center gap-2 px-3 py-2.5")}>
-      <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">{t("conv_free_color_label")}:</span>
+    <div className={cx(workstationInsetCardClass, "flex flex-wrap items-center gap-2 px-3 py-2.5")}>
+      <span className="text-[clamp(0.65rem,0.8vw,0.7rem)] font-medium text-slate-500 dark:text-slate-400">{t("conv_free_color_label")}:</span>
       {Array.from(freeColors).sort().map(hex => (
         <span
           key={hex}
@@ -199,8 +199,8 @@ export default function PalettePanel() {
   const heightmap_max_height = useConverterStore((s) => s.heightmap_max_height);
   const selectionMode = useConverterStore((s) => s.selectionMode);
   const setSelectionMode = useConverterStore((s) => s.setSelectionMode);
-  const selectedColors = useConverterStore((s) => s.selectedColors);
-  const toggleColorInSelection = useConverterStore((s) => s.toggleColorInSelection);
+  const selectedRegions = useConverterStore((s) => s.selectedRegions);
+  const removeRegionFromSelection = useConverterStore((s) => s.removeRegionFromSelection);
   const free_color_set = useConverterStore((s) => s.free_color_set);
   const toggleFreeColor = useConverterStore((s) => s.toggleFreeColor);
   const clearFreeColors = useConverterStore((s) => s.clearFreeColors);
@@ -212,34 +212,29 @@ export default function PalettePanel() {
   const handleSelect = (hex: string) => {
     switch (selectionMode) {
       case 'current':
-        // 当前模式 = 单区域替换，调色板点击不响应（由 3D 预览处理）
+      case 'multi-select':
+      case 'region':
         break;
       case 'select-all':
-        // 全选模式 = 全局单色替换，点击调色板选中一个颜色
         setSelectedColor(selectedColor === hex ? null : hex);
-        break;
-      case 'multi-select':
-        // 多选模式 = 可复选，点击切换选中状态
-        // 同时设置 selectedColor 以触发 RGB 光带高亮
-        setSelectedColor(selectedColor === hex ? null : hex);
-        toggleColorInSelection(hex);
-        break;
-      case 'region':
-        // 局部区域模式，调色板点击不响应（由 3D 预览处理）
         break;
     }
   };
 
+  // Multi-select highlights colors that have at least one region selected
+  const multiSelectHexSet = selectionMode === 'multi-select'
+    ? new Set(selectedRegions.map((r) => r.colorHex.replace(/^#/, "")))
+    : null;
+
   const getIsSelected = (hex: string): boolean => {
-    if (selectionMode === 'multi-select') {
-      return selectedColors.has(hex);
+    if (multiSelectHexSet) {
+      return multiSelectHexSet.has(hex);
     }
-    // 所有其他模式统一使用 selectedColor 高亮（RGB 光带效果一致）
     return selectedColor === hex;
   };
 
   return (
-    <div className={cx(sectionCardClass, "h-full rounded-[26px] px-4 py-4")}>
+    <div className={workstationPanelCardClass}>
       {palette.length === 0 ? (
         <p className="py-4 text-sm text-slate-500 dark:text-slate-400">
           {t("palette_no_data")}
@@ -296,6 +291,28 @@ export default function PalettePanel() {
             />
           </div>
 
+          {/* Multi-select region indicator */}
+          {selectionMode === 'multi-select' && selectedRegions.length > 0 && (
+            <div className={cx(workstationInsetCardClass, "flex flex-wrap items-center gap-2 px-3 py-2.5")}>
+              <span className="text-[clamp(0.55rem,0.75vw,0.625rem)] font-medium text-amber-500 dark:text-amber-400">
+                {t("palette_multi_select_region_count").replace("{count}", String(selectedRegions.length))}
+              </span>
+              {selectedRegions.map((region) => {
+                const hex = region.colorHex.replace(/^#/, "");
+                return (
+                  <button
+                    key={region.regionId}
+                    type="button"
+                    onClick={() => removeRegionFromSelection(region.regionId)}
+                    className="h-5 w-5 rounded-lg border-2 border-amber-400 shadow-sm transition-transform hover:scale-110"
+                    style={{ backgroundColor: `#${hex}` }}
+                    title={`#${hex} (${region.pixelCount}px) — ${t("palette_multi_select_click_remove")}`}
+                  />
+                );
+              })}
+            </div>
+          )}
+
           {/* Free color buttons */}
           <div className="flex flex-wrap gap-2">
             <Button
@@ -326,8 +343,8 @@ export default function PalettePanel() {
             <div
               className={
                 enable_relief
-                  ? "grid grid-cols-3 gap-2"
-                  : "flex flex-wrap gap-2"
+                  ? "grid grid-cols-[repeat(auto-fit,minmax(7rem,1fr))] gap-2"
+                  : "grid grid-cols-[repeat(auto-fit,minmax(3.4rem,1fr))] gap-2"
               }
             >
               {palette.map((entry) => (

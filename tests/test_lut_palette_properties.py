@@ -520,7 +520,7 @@ def test_palette_length_matches_color_mode():
         ("BW", "BW (Black & White)", "/tmp/test_BW.npy", ColorSystem.BW),
         ("4-Color (RYBW)", "4-Color (RYBW)", "/tmp/test_4-Color_RYBW.npy", ColorSystem.RYBW),
         ("4-Color (CMYW)", "4-Color (CMYW)", "/tmp/test_4-Color_CMYW.npy", ColorSystem.CMYW),
-        ("6-Color", "6-Color (Smart 1296)", "/tmp/test_6-Color.npy", ColorSystem.SIX_COLOR),
+        ("6-Color", "6-Color (CMYWGK 1296)", "/tmp/test_6-Color.npy", ColorSystem.SIX_COLOR),
         ("5-Color Extended", "5-Color Extended", "/tmp/test_5-Color.npy", ColorSystem.FIVE_COLOR_EXTENDED),
         ("8-Color", "8-Color Max", "/tmp/test_8-Color.npy", ColorSystem.EIGHT_COLOR),
         # Merged 模式仅对 .npz 文件触发

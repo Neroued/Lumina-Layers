@@ -16,7 +16,6 @@ from pydantic import BaseModel, Field
 
 from api.schemas.lut import PaletteEntrySchema
 
-
 # ========== Enums ==========
 
 
@@ -33,8 +32,10 @@ class CalibrationColorMode(str, Enum):
             4 色 RYBW 模式 (1024 色)。
         FIVE_COLOR_EXT: 5-Color Extended mode (1444 colors).
             5 色扩展模式 (1444 色)。
-        SIX_COLOR: 6-Color extended smart mode (1296 colors).
-            6 色扩展智能模式 (1296 色)。
+        SIX_COLOR: 6-Color CMYWGK mode (1296 colors).
+            6 色 CMYWGK 模式 (1296 色)。
+        SIX_COLOR_RYBW: 6-Color RYBWGK mode (1296 colors).
+            6 色 RYBWGK 模式 (1296 色)。
         EIGHT_COLOR: 8-Color professional mode (2738 colors).
             8 色专业模式 (2738 色)。
     """
@@ -43,8 +44,8 @@ class CalibrationColorMode(str, Enum):
     FOUR_COLOR_CMYW = "4-Color (CMYW)"
     FOUR_COLOR_RYBW = "4-Color (RYBW)"
     FIVE_COLOR_EXT = "5-Color Extended (1444)"
-    SIX_COLOR = "6-Color (Smart 1296)"
-    SIX_COLOR_RYBW = "6-Color (RYBW 1296)"
+    SIX_COLOR = "6-Color (CMYWGK 1296)"
+    SIX_COLOR_RYBW = "6-Color (RYBWGK 1296)"
     EIGHT_COLOR = "8-Color Max"
 
 
@@ -87,17 +88,13 @@ class ExtractorExtractRequest(BaseModel):
             透视校正缩放。
         distortion: Lens distortion correction factor.
             畸变校正。
-        white_balance: Whether to apply white balance correction.
-            白平衡校正。
         vignette_correction: Whether to apply vignette correction.
             暗角校正。
         page: Page number for 8-Color two-page workflow.
             8-Color 页码。
     """
 
-    color_mode: CalibrationColorMode = Field(
-        CalibrationColorMode.FOUR_COLOR_RYBW, description="校准颜色模式"
-    )
+    color_mode: CalibrationColorMode = Field(CalibrationColorMode.FOUR_COLOR_RYBW, description="校准颜色模式")
     corner_points: List[Tuple[int, int]] = Field(
         ..., min_length=4, max_length=4, description="4 个角点坐标 [(x,y), ...]"
     )
@@ -105,11 +102,8 @@ class ExtractorExtractRequest(BaseModel):
     offset_y: int = Field(0, ge=-30, le=30, description="垂直采样偏移 (px)")
     zoom: float = Field(1.0, ge=0.8, le=1.2, description="透视校正缩放")
     distortion: float = Field(0.0, ge=-0.2, le=0.2, description="畸变校正")
-    white_balance: bool = Field(False, description="白平衡校正")
     vignette_correction: bool = Field(False, description="暗角校正")
-    page: ExtractorPage = Field(
-        ExtractorPage.PAGE_1, description="8-Color 页码"
-    )
+    page: ExtractorPage = Field(ExtractorPage.PAGE_1, description="8-Color 页码")
 
 
 class ExtractorManualFixRequest(BaseModel):
@@ -149,6 +143,4 @@ class ConfirmPaletteRequest(BaseModel):
     """
 
     session_id: str = Field(..., description="提取会话 ID")
-    palette: list[PaletteEntrySchema] = Field(
-        ..., min_length=1, description="用户确认的调色板数组"
-    )
+    palette: list[PaletteEntrySchema] = Field(..., min_length=1, description="用户确认的调色板数组")

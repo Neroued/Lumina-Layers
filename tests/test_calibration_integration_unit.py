@@ -82,7 +82,7 @@ class TestColorModeRouting:
             response = client.post(
                 "/api/calibration/generate",
                 json={
-                    "color_mode": "6-Color (Smart 1296)",
+                    "color_mode": "6-Color (CMYWGK 1296)",
                     "block_size": 5,
                     "gap": 0.82,
                     "backing": "White",

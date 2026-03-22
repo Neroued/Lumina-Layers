@@ -59,12 +59,12 @@ def calibration_generate(
                 gap_mm=request.gap,
                 backing_color=request.backing.value,
             )
-        elif mode == "6-Color (Smart 1296)":
+        elif mode == "6-Color (CMYWGK 1296)":
             path, preview_img, status = generate_smart_board(
                 block_size_mm=float(request.block_size),
                 gap_mm=request.gap,
             )
-        elif mode == "6-Color (RYBW 1296)":
+        elif mode == "6-Color (RYBWGK 1296)":
             path, preview_img, status = generate_smart_board_rybw(
                 block_size_mm=float(request.block_size),
                 gap_mm=request.gap,

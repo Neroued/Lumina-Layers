@@ -1,30 +1,82 @@
 /* eslint-disable react-refresh/only-export-components */
 import type { HTMLAttributes, ReactNode } from "react";
+import type { WorkspaceMode } from "../../types/workspace";
 
 export function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
 export const panelSurfaceClass =
-  "panel-surface h-full w-full overflow-auto px-5 py-4 sm:px-7 sm:py-5";
+  "panel-surface h-full w-full overflow-auto px-3 py-3 sm:px-5 sm:py-4 lg:px-7 lg:py-5";
 
 export const centeredPanelClass =
   `${panelSurfaceClass}`;
 
 export const sectionCardClass =
-  "panel-section px-0 py-4 sm:py-5";
+  "panel-section rounded-[28px] px-4 py-4 sm:px-5 sm:py-5";
 
 export const mutedSectionCardClass =
-  "panel-section-muted rounded-2xl px-4 py-3";
+  "panel-section-muted rounded-[22px] px-4 py-3";
+
+export const workstationPanelCardClass =
+  "panel-section-muted h-full rounded-[28px] px-4 py-4";
+
+export const workstationInsetCardClass =
+  "panel-section-muted rounded-[22px] px-4 py-3";
+
+export const workstationShellClass =
+  "rounded-t-[28px]";
+
+export const workstationFieldLabelClass =
+  "text-sm font-medium text-slate-700 dark:text-slate-200";
+
+export const workstationInputClass =
+  "min-h-11 w-full rounded-[22px] border border-slate-200/80 bg-white/82 px-3.5 py-2 text-sm text-slate-800 outline-none shadow-[var(--shadow-control)] transition-all duration-200 hover:border-slate-300 hover:bg-white/90 focus:border-blue-400 focus:ring-4 focus:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700/80 dark:bg-slate-900/72 dark:text-slate-100 dark:hover:border-slate-600";
+
+export const workstationChoiceRowClass =
+  "rounded-[22px] border border-slate-200/80 bg-white/60 px-3.5 py-3 shadow-[var(--shadow-control)] transition-all duration-200 dark:border-slate-700/80 dark:bg-slate-900/55";
+
+export const workstationChoiceRowActiveClass =
+  "border-blue-400 bg-white/92 dark:border-blue-400/80 dark:bg-slate-900/82";
+
+export const workstationChoiceRowDisabledClass =
+  "cursor-not-allowed opacity-45";
 
 export const desktopSplitLayoutClass =
-  "grid min-h-0 gap-6 xl:grid-cols-[minmax(360px,440px)_minmax(0,1fr)] xl:items-start";
+  "grid min-h-0 gap-5 xl:grid-cols-[minmax(18rem,24rem)_minmax(0,1fr)] xl:items-start 2xl:grid-cols-[minmax(22rem,27.5rem)_minmax(0,1fr)]";
 
 export const desktopPrimaryColumnClass =
   "flex min-w-0 flex-col gap-5";
 
 export const desktopSecondaryColumnClass =
   "flex min-w-0 flex-col gap-5";
+
+export function resolvePanelSurfaceClass(mode: WorkspaceMode) {
+  return cx(
+    panelSurfaceClass,
+    mode === "compact" && "px-3 py-3 sm:px-4 sm:py-4",
+    mode === "wide" && "xl:px-7 xl:py-5"
+  );
+}
+
+export function resolveSectionCardClass(mode: WorkspaceMode) {
+  return cx(
+    sectionCardClass,
+    mode === "compact" && "rounded-[24px] px-3.5 py-3.5 sm:px-4 sm:py-4"
+  );
+}
+
+export function resolveDesktopSplitLayoutClass(mode: WorkspaceMode) {
+  if (mode === "compact") {
+    return "grid min-h-0 gap-4";
+  }
+
+  if (mode === "wide") {
+    return desktopSplitLayoutClass;
+  }
+
+  return "grid min-h-0 gap-5 2xl:grid-cols-[minmax(20rem,24rem)_minmax(0,1fr)] 2xl:items-start";
+}
 
 interface PanelIntroProps {
   title: string;

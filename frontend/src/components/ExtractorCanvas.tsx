@@ -26,13 +26,13 @@ export const CORNER_LABELS: Record<string, string[]> = {
     "右下 / BR",
     "左下 / BL",
   ],
-  "6-Color (Smart 1296)": [
+  "6-Color (CMYWGK 1296)": [
     "白色 (左上) / White (TL)",
     "青色 (右上) / Cyan (TR)",
     "品红 (右下) / Magenta (BR)",
     "黄色 (左下) / Yellow (BL)",
   ],
-  "6-Color (RYBW 1296)": [
+  "6-Color (RYBWGK 1296)": [
     "白色 (左上) / White (TL)",
     "红色 (右上) / Red (TR)",
     "蓝色 (右下) / Blue (BR)",
@@ -117,6 +117,9 @@ export const LUT_GRID_SIZE: Record<string, number> = {
   [ExtractorColorMode.EIGHT_COLOR]: 37,
   [ExtractorColorMode.FIVE_COLOR_EXT]: 38,
 };
+
+const EXTRACTOR_RESULT_MEDIA_MAX_HEIGHT = "clamp(16rem, 48vh, 56rem)";
+const EXTRACTOR_CANVAS_MAX_HEIGHT = "min(78vh, calc(100dvh - 12rem))";
 
 // ========== Component ==========
 
@@ -235,10 +238,10 @@ export default function ExtractorCanvas() {
     return (
       <div
         data-testid="extractor-results"
-        className="flex h-full flex-1 flex-col gap-5 overflow-auto px-5 py-4 xl:px-7"
+        className="relative flex h-full min-h-0 flex-1 flex-col gap-5 overflow-auto px-3 py-3 sm:px-5 sm:py-4 xl:px-7"
       >
         {/* 色卡 + LUT 预览：左右并排，等宽 */}
-        <div className="flex h-full w-full flex-col gap-6 2xl:flex-row">
+        <div className="flex h-full min-h-0 w-full flex-col gap-6 2xl:flex-row">
           {warp_view_url && (
             <div className="flex min-w-0 flex-1 flex-col gap-2">
               <span className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
@@ -248,7 +251,8 @@ export default function ExtractorCanvas() {
                 data-testid="warp-view-image"
                 src={warp_view_url}
                 alt="Warp view"
-                className="h-full max-h-[42vh] w-full object-contain xl:max-h-[48vh] 2xl:max-h-[78vh]"
+                className="h-auto w-full object-contain"
+                style={{ maxHeight: EXTRACTOR_RESULT_MEDIA_MAX_HEIGHT }}
               />
             </div>
           )}
@@ -264,7 +268,8 @@ export default function ExtractorCanvas() {
                   src={lut_preview_url}
                   alt="LUT preview"
                   onClick={handleLutPreviewClick}
-                  className="h-full max-h-[42vh] w-full cursor-crosshair object-contain xl:max-h-[48vh] 2xl:max-h-[78vh]"
+                  className="h-auto w-full cursor-crosshair object-contain"
+                  style={{ maxHeight: EXTRACTOR_RESULT_MEDIA_MAX_HEIGHT }}
                 />
                 {selectedCell && renderedRect && (() => {
                   const gridSize = LUT_GRID_SIZE[color_mode] ?? 32;
@@ -290,11 +295,11 @@ export default function ExtractorCanvas() {
             </div>
           )}
         </div>
-        {/* 手动修正浮层：选中色块后显示 */}
+        {/* 手动修正浮层：选中色块后悬浮显示 */}
         {selectedCell && (
           <div
             data-testid="manual-fix-popup"
-            className="flex items-center gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/96 px-4 py-3 dark:border-slate-700/80 dark:bg-slate-900/96"
+            className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 flex items-center gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/96 px-4 py-3 shadow-lg dark:border-slate-700/80 dark:bg-slate-900/96"
           >
             <span className="text-sm text-slate-700 dark:text-slate-300">
               {t("ext_canvas_row")} {selectedCell[0] + 1} / {t("ext_canvas_col")} {selectedCell[1] + 1}
@@ -358,7 +363,7 @@ export default function ExtractorCanvas() {
 
   // ===== Canvas mode =====
   return (
-    <div className="flex h-full flex-1 flex-col items-center justify-center gap-4 px-5 py-4 xl:px-7 xl:py-5">
+    <div className="flex h-full min-h-0 flex-1 flex-col items-center justify-center gap-4 px-3 py-3 sm:px-5 sm:py-4 xl:px-7 xl:py-5">
       {/* Corner hint */}
       <p
         data-testid="corner-hint"
@@ -376,8 +381,8 @@ export default function ExtractorCanvas() {
         width={imageNaturalWidth ?? 800}
         height={imageNaturalHeight ?? 600}
         onClick={handleCanvasClick}
-        className="max-h-[82vh] max-w-full cursor-crosshair object-contain"
-        style={{ objectFit: "contain" }}
+        className="max-w-full cursor-crosshair object-contain"
+        style={{ objectFit: "contain", maxHeight: EXTRACTOR_CANVAS_MAX_HEIGHT }}
       />
     </div>
   );

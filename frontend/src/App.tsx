@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import apiClient from "./api/client";
 import type { HealthResponse } from "./api/types";
 import { useAutoPreview } from "./hooks/useAutoPreview";
+import { useWorkspaceMode } from "./hooks/useWorkspaceMode";
 import Scene3D from "./components/Scene3D";
 import ExtractorCanvas from "./components/ExtractorCanvas";
 import LoadingSpinner from "./components/LoadingSpinner";
@@ -178,6 +179,7 @@ function WidgetToggles() {
 function AppContent() {
   const { t } = useI18n();
   useAutoPreview();
+  const workspace = useWorkspaceMode();
 
   const [connected, setConnected] = useState<boolean | null>(null);
   const activeTab = useWidgetStore((s) => s.activeTab);
@@ -191,25 +193,23 @@ function AppContent() {
   }, []);
 
   return (
-    <div className="h-screen bg-gray-100 dark:bg-gray-950 text-gray-900 dark:text-white flex flex-col overflow-hidden">
-      <header className="relative flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-800 z-50">
-        <div className="flex-1 flex justify-start items-center gap-3">
-          <img src="/favicon.ico" alt="Lumina Studio Logo" className="w-8 h-8 rounded" />
-          <h1 className="text-xl font-semibold tracking-tight whitespace-nowrap hidden sm:block">
+    <div className="flex h-screen flex-col overflow-hidden bg-gray-100 text-gray-900 dark:bg-gray-950 dark:text-white">
+      <header
+        className={`relative z-50 border-b border-gray-200 dark:border-gray-800 ${
+          workspace.isCompact
+            ? "grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-3 py-2.5 sm:px-4"
+            : "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 py-3 sm:px-4 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:px-6 lg:py-4"
+        }`}
+      >
+        <div className="flex min-w-0 items-center gap-3">
+          <img src="/favicon.ico" alt="Lumina Studio Logo" className="h-8 w-8 shrink-0 rounded" />
+          <h1 className={`min-w-0 truncate font-semibold tracking-tight ${workspace.isCompact ? "hidden text-lg md:block" : "hidden text-xl sm:block"}`}>
             {t("app_header_title")}
           </h1>
         </div>
 
-        {/* Center: Tabs */}
-        <div className="flex-shrink-0 flex justify-center z-20">
-          <TabNavBar
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
-          />
-        </div>
-
         {/* Right Side: Controls */}
-        <div className="flex-1 flex justify-end items-center gap-2">
+        <div className={`flex min-w-0 flex-wrap items-center justify-end gap-2 ${workspace.isCompact ? "" : "lg:col-start-3 lg:row-start-1"}`}>
           {activeTab === 'converter' && <WidgetToggles />}
           <LanguageToggle />
           <ThemeToggle />
@@ -218,26 +218,35 @@ function AppContent() {
           ) : connected ? (
             <span
               data-testid="health-badge-ok"
-              className="inline-flex items-center gap-1.5 rounded-full bg-green-100 px-3 py-1 text-sm text-green-700 dark:bg-green-900/60 dark:text-green-300"
+              className={`inline-flex items-center gap-1.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/60 dark:text-green-300 ${workspace.isCompact ? "px-2.5 py-1 text-xs" : "px-3 py-1 text-sm"}`}
             >
               <span className="h-2 w-2 rounded-full bg-green-400" />
-              {t("app_backend_connected")}
+              <span className={workspace.isCompact ? "hidden" : "hidden sm:inline"}>{t("app_backend_connected")}</span>
             </span>
           ) : (
             <span
               data-testid="health-badge-fail"
-              className="inline-flex items-center gap-1.5 rounded-full bg-red-100 px-3 py-1 text-sm text-red-700 dark:bg-red-900/60 dark:text-red-300"
+              className={`inline-flex items-center gap-1.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/60 dark:text-red-300 ${workspace.isCompact ? "px-2.5 py-1 text-xs" : "px-3 py-1 text-sm"}`}
             >
               <span className="h-2 w-2 rounded-full bg-red-400" />
-              {t("app_backend_unreachable")}
+              <span className={workspace.isCompact ? "hidden" : "hidden sm:inline"}>{t("app_backend_unreachable")}</span>
             </span>
           )}
         </div>
+
+        {/* Center: Tabs */}
+        <div className={`min-w-0 ${workspace.isCompact ? "col-span-3 row-start-2" : "col-span-2 lg:col-span-1 lg:col-start-2 lg:row-start-1"}`}>
+          <TabNavBar
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            compact={workspace.isCompact}
+          />
+        </div>
       </header>
 
-      <main className="relative flex-1 overflow-hidden bg-slate-50 dark:bg-slate-950">
+      <main className="relative flex-1 min-h-0 overflow-hidden bg-slate-50 dark:bg-slate-950">
         {/* Converter: WidgetWorkspace + Scene3D */}
-        <div className={activeTab !== 'converter' ? 'hidden' : 'h-full'}>
+        <div className={activeTab !== 'converter' ? 'hidden' : 'h-full min-h-0'}>
           <WidgetWorkspace>
             <SceneErrorBoundary
               fallback={
@@ -256,16 +265,20 @@ function AppContent() {
         {activeTab === 'calibration' && <CalibrationPanel />}
 
         {activeTab === 'extractor' && (
-          <div className="flex h-full min-h-0 flex-col xl:flex-row">
+          <div className="flex h-full min-h-0">
             <ExtractorPanel />
-            <div className="relative min-h-0 flex-1 overflow-hidden border-t border-slate-200/70 xl:border-l xl:border-t-0 dark:border-slate-800/80">
+            <div className="relative min-h-0 flex-1 overflow-hidden border-l border-slate-200/70 dark:border-slate-800/80">
               <ExtractorCanvas />
             </div>
           </div>
         )}
 
         {activeTab === 'lut-manager' && <LutManagerPanel />}
-        {activeTab === 'five-color' && <FiveColorQueryPanel />}
+        {activeTab === 'five-color' && (
+          <div className="flex h-full min-h-0">
+            <FiveColorQueryPanel />
+          </div>
+        )}
         {activeTab === 'vectorizer' && <VectorizerPanel />}
         {activeTab === 'settings' && <SettingsPanel />}
       </main>

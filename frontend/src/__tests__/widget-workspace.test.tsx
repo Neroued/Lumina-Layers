@@ -8,7 +8,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { I18nProvider } from '../i18n/context';
 import { WidgetHeader } from '../components/widget/WidgetHeader';
 import { useWidgetStore, DEFAULT_LAYOUT } from '../stores/widgetStore';
-import { computeDockBottomInset } from '../utils/widgetUtils';
+import { computeDockBottomInset, resolveResponsiveWidgetWidth, WIDGET_WIDTH } from '../utils/widgetUtils';
 
 /** Render helper that wraps component in I18nProvider. */
 function renderWithI18n(ui: React.ReactElement) {
@@ -16,6 +16,17 @@ function renderWithI18n(ui: React.ReactElement) {
 }
 
 describe('Widget Workspace Unit Tests', () => {
+  describe('responsive widget sizing', () => {
+    it('caps widget width at the default width on wide workspaces', () => {
+      expect(resolveResponsiveWidgetWidth(2200)).toBe(WIDGET_WIDTH);
+    });
+
+    it('shrinks widget width on narrow workspaces while keeping a usable minimum', () => {
+      const width = resolveResponsiveWidgetWidth(900);
+      expect(width).toBeGreaterThanOrEqual(280);
+      expect(width).toBeLessThan(WIDGET_WIDTH);
+    });
+  });
   beforeEach(() => {
     useWidgetStore.setState({
       widgets: { ...DEFAULT_LAYOUT },

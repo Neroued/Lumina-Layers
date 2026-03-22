@@ -18,8 +18,8 @@ _VALID_COLOR_MODES = [
     "BW (Black & White)",
     "4-Color (CMYW)",
     "4-Color (RYBW)",
-    "6-Color (Smart 1296)",
-    "6-Color (RYBW 1296)",
+    "6-Color (CMYWGK 1296)",
+    "6-Color (RYBWGK 1296)",
     "5-Color Extended",
     "8-Color Max",
 ]
@@ -285,8 +285,8 @@ _CMYW_6COLOR_PALETTE = {"White": {"material": "PLA Basic"}, "Cyan": {"material":
 _VARIANT_CONFIGS = {
     ("RYBW", 1024): (_RYBW_4COLOR_PALETTE, "4-Color (RYBW)"),
     ("CMYW", 1024): (_CMYW_4COLOR_PALETTE, "4-Color (CMYW)"),
-    ("RYBW", 1296): (_RYBW_6COLOR_PALETTE, "6-Color (RYBW 1296)"),
-    ("CMYW", 1296): (_CMYW_6COLOR_PALETTE, "6-Color (Smart 1296)"),
+    ("RYBW", 1296): (_RYBW_6COLOR_PALETTE, "6-Color (RYBWGK 1296)"),
+    ("CMYW", 1296): (_CMYW_6COLOR_PALETTE, "6-Color (CMYWGK 1296)"),
 }
 
 
@@ -305,8 +305,8 @@ def test_palette_names_distinguish_color_mode_variants(
 
     - 1024 + RYBW palette → "4-Color (RYBW)"
     - 1024 + CMYW palette → "4-Color (CMYW)"
-    - 1296 + RYBW palette → "6-Color (RYBW 1296)"
-    - 1296 + CMYW palette → "6-Color (Smart 1296)"
+    - 1296 + RYBW palette → "6-Color (RYBWGK 1296)"
+    - 1296 + CMYW palette → "6-Color (CMYWGK 1296)"
 
     **Validates: Requirements 2.3, 2.4, 2.5, 2.6, 7.2, 7.3, 7.4, 7.5, 7.6**
     """

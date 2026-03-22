@@ -18,6 +18,7 @@ import {
   fetchLutList as apiFetchLutList,
   convertPreview as apiConvertPreview,
   convertGenerate as apiConvertGenerate,
+  convertGenerateLargeFormat as apiConvertGenerateLargeFormat,
   fetchBedSizes as apiFetchBedSizes,
   uploadHeightmap as apiUploadHeightmap,
   fetchLutColors as apiFetchLutColors,
@@ -51,6 +52,8 @@ export interface RegionData {
   pixelCount: number;
   previewUrl: string;
   contours?: number[][][] | null;
+  clickX?: number;
+  clickY?: number;
 }
 
 // ========== Pending Replacement Types ==========
@@ -59,7 +62,8 @@ export interface PendingReplacement {
   sourceHex: string; // 原色 hex（不带 #）
   targetHex: string; // 目标色 hex（不带 #）
   mode: SelectionMode; // 触发时的选择模式
-  sourceColors?: string[]; // multi-select 模式下的多个源色
+  sourceColors?: string[]; // select-all 批量模式下的多个源色
+  sourceRegions?: RegionData[]; // multi-select 模式下的多个连通区域
 }
 
 // ========== Helpers ==========
@@ -139,6 +143,11 @@ export interface ConverterState {
   // 涂层
   enable_coating: boolean;
   coating_height_mm: number;
+
+  // 大画幅
+  largeFormatEnabled: boolean;
+  tileWidthMm: number;
+  tileHeightMm: number;
 
   // 颜色替换
   replacement_regions: ColorReplacementItem[];
@@ -231,6 +240,7 @@ export interface ConverterState {
   selectionMode: SelectionMode;
   selectedColors: Set<string>;
   regionData: RegionData | null;
+  selectedRegions: RegionData[];
 
   // 待确认颜色替换
   pendingReplacement: PendingReplacement | null;
@@ -282,6 +292,11 @@ export interface ConverterActions {
   setEnableCoating: (enabled: boolean) => void;
   setCoatingHeightMm: (height: number) => void;
 
+  // 大画幅
+  setLargeFormatEnabled: (enabled: boolean) => void;
+  setTileWidthMm: (width: number) => void;
+  setTileHeightMm: (height: number) => void;
+
   // 热床尺寸
   setBedLabel: (label: string) => void;
   fetchBedSizes: () => Promise<void>;
@@ -295,6 +310,8 @@ export interface ConverterActions {
   toggleColorInSelection: (hex: string) => void;
   applyBatchColorRemap: (newHex: string) => Promise<void>;
   detectRegion: (x: number, y: number) => Promise<void>;
+  detectAndAccumulateRegion: (x: number, y: number) => Promise<void>;
+  removeRegionFromSelection: (regionId: string) => void;
   applyRegionReplace: (newHex: string) => Promise<void>;
 
   // 待确认颜色替换
@@ -429,6 +446,9 @@ const DEFAULT_STATE: ConverterState = {
   wire_height_mm: 0.4,
   enable_coating: false,
   coating_height_mm: 0.08,
+  largeFormatEnabled: false,
+  tileWidthMm: 250,
+  tileHeightMm: 250,
   replacement_regions: [],
   free_color_set: new Set(),
   selectedColor: null,
@@ -478,6 +498,7 @@ const DEFAULT_STATE: ConverterState = {
   selectionMode: "current" as SelectionMode,
   selectedColors: new Set<string>(),
   regionData: null,
+  selectedRegions: [],
   pendingReplacement: null,
   regionReplacementCount: 0,
   hasManualPreview: false,
@@ -522,7 +543,10 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         imagePreviewUrl: previewUrl,
         cropModalOpen: shouldOpenCrop,
         hasManualPreview: false,
+        layerImages: [],
+        layerImagesOpen: false,
       });
+      console.log('[DEBUG] setImageFile: cleared layerImages');
     },
 
     // --- 基础参数 ---
@@ -547,14 +571,15 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
 
     setTargetWidthMm: (width: number) =>
       set((state) => {
-        const clamped = clampValue(width, 10, 400);
+        const max = state.largeFormatEnabled ? 9999 : 400;
+        const clamped = clampValue(width, 10, max);
         if (state.aspectRatio) {
           return {
             target_width_mm: clamped,
             target_height_mm: clampValue(
               Math.round(clamped / state.aspectRatio),
               10,
-              400,
+              max,
             ),
             threemfDiskPath: null,
             downloadUrl: null,
@@ -569,14 +594,15 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
 
     setTargetHeightMm: (height: number) =>
       set((state) => {
-        const clamped = clampValue(height, 10, 400);
+        const max = state.largeFormatEnabled ? 9999 : 400;
+        const clamped = clampValue(height, 10, max);
         if (state.aspectRatio) {
           return {
             target_height_mm: clamped,
             target_width_mm: clampValue(
               Math.round(clamped * state.aspectRatio),
               10,
-              400,
+              max,
             ),
           };
         }
@@ -739,6 +765,14 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
     setCoatingHeightMm: (height: number) =>
       set({ coating_height_mm: clampValue(height, 0.04, 0.12) }),
 
+    // --- 大画幅 ---
+    setLargeFormatEnabled: (enabled: boolean) =>
+      set({ largeFormatEnabled: enabled, threemfDiskPath: null, downloadUrl: null }),
+    setTileWidthMm: (width: number) =>
+      set({ tileWidthMm: clampValue(width, 50, 500), threemfDiskPath: null, downloadUrl: null }),
+    setTileHeightMm: (height: number) =>
+      set({ tileHeightMm: clampValue(height, 50, 500), threemfDiskPath: null, downloadUrl: null }),
+
     // --- 热床尺寸 ---
     setBedLabel: (label: string) => {
       set({ bed_label: label });
@@ -749,28 +783,36 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
     setPalette: (entries: PaletteEntry[]) => set({ palette: entries }),
 
     // --- 颜色选择模式 ---
-    // current: 单区域替换（3D 预览点击 → region-detect → 只替换该连通区域）
+    // current: 单区域替换（3D 点击 → region-detect → 只替换该连通区域）
     // select-all: 全局单色替换（选一个颜色 → 全图该颜色都替换）
-    // multi-select: 多选批量替换（选多个颜色 → 批量替换）
+    // multi-select: 多区域替换（3D 点击累积多个连通区域 → 批量替换）
     // region: 保留的局部区域模式
     setSelectionMode: (mode: SelectionMode) => {
       switch (mode) {
         case "current":
-          // 当前模式 = 单区域替换，清空多选，清空 selectedColor，准备 region-detect
           set({
             selectionMode: mode,
             selectedColors: new Set<string>(),
             selectedColor: null,
             regionData: null,
+            selectedRegions: [],
           });
           break;
         case "select-all":
-          // 全选模式 = 全局单色替换，清空多选，保留 selectedColor 用于全局替换
-          set({ selectionMode: mode, selectedColors: new Set<string>() });
+          set({
+            selectionMode: mode,
+            selectedColors: new Set<string>(),
+            selectedRegions: [],
+          });
           break;
         case "multi-select":
-          // 多选模式 = 可复选多个颜色，清空多选集合等待用户逐个选择
-          set({ selectionMode: mode, selectedColors: new Set<string>() });
+          set({
+            selectionMode: mode,
+            selectedColors: new Set<string>(),
+            selectedColor: null,
+            regionData: null,
+            selectedRegions: [],
+          });
           break;
         case "region":
           set({
@@ -778,6 +820,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
             selectedColors: new Set<string>(),
             selectedColor: null,
             regionData: null,
+            selectedRegions: [],
           });
           break;
       }
@@ -836,7 +879,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       }
     },
 
-    // --- 连通区域检测 ---
+    // --- 连通区域检测（current 模式：单区域） ---
     detectRegion: async (x: number, y: number) => {
       const state = _get();
       if (!state.sessionId) {
@@ -852,6 +895,8 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
             pixelCount: response.pixel_count,
             previewUrl: response.preview_url,
             contours: response.contours ?? null,
+            clickX: x,
+            clickY: y,
           },
           selectedColor: response.color_hex.replace(/^#/, ""),
           previewImageUrl: `http://localhost:8000${response.preview_url}`,
@@ -861,6 +906,58 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           error: err instanceof Error ? err.message : "连通区域检测失败",
         });
       }
+    },
+
+    // --- 连通区域累积检测（multi-select 模式：多区域） ---
+    detectAndAccumulateRegion: async (x: number, y: number) => {
+      const state = _get();
+      if (!state.sessionId) {
+        set({ error: "请先预览图片" });
+        return;
+      }
+      try {
+        const response = await apiDetectRegion(state.sessionId, x, y);
+        const newRegion: RegionData = {
+          regionId: response.region_id,
+          colorHex: response.color_hex,
+          pixelCount: response.pixel_count,
+          previewUrl: response.preview_url,
+          contours: response.contours ?? null,
+          clickX: x,
+          clickY: y,
+        };
+        const existing = state.selectedRegions;
+        const idx = existing.findIndex((r) => r.regionId === newRegion.regionId);
+        if (idx >= 0) {
+          const next = existing.filter((_, i) => i !== idx);
+          const lastRegion = next.length > 0 ? next[next.length - 1] : null;
+          set({
+            selectedRegions: next,
+            selectedColor: lastRegion ? lastRegion.colorHex.replace(/^#/, "") : null,
+          });
+        } else {
+          set({
+            selectedRegions: [...existing, newRegion],
+            selectedColor: response.color_hex.replace(/^#/, ""),
+          });
+        }
+      } catch (err) {
+        set({
+          error: err instanceof Error ? err.message : "连通区域检测失败",
+        });
+      }
+    },
+
+    // --- 移除已选区域 ---
+    removeRegionFromSelection: (regionId: string) => {
+      set((state) => {
+        const next = state.selectedRegions.filter((r) => r.regionId !== regionId);
+        const lastRegion = next.length > 0 ? next[next.length - 1] : null;
+        return {
+          selectedRegions: next,
+          selectedColor: lastRegion ? lastRegion.colorHex.replace(/^#/, "") : null,
+        };
+      });
     },
 
     // --- 连通区域替换 ---
@@ -925,34 +1022,45 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           _get().applyColorRemap(pending.sourceHex, pending.targetHex);
           break;
         case "multi-select": {
-          // 使用 pending 中保存的 sourceColors，而非 state.selectedColors
-          const colors = pending.sourceColors ?? [];
-          if (colors.length === 0) break;
+          // 多区域模式：顺序 re-detect → replace 每个连通区域
+          const regions = pending.sourceRegions ?? [];
+          if (regions.length === 0) break;
           const curState = _get();
-          const snapshot = { ...curState.colorRemapMap };
-          const newHistory = [...curState.remapHistory, snapshot];
-          const newMap = { ...curState.colorRemapMap };
-          for (const hex of colors) {
-            newMap[hex] = pending.targetHex;
-          }
+          const sid = curState.sessionId;
+          if (!sid) break;
           set({
-            colorRemapMap: newMap,
-            remapHistory: newHistory,
             replacePreviewLoading: true,
+            regionReplacementCount: curState.regionReplacementCount + regions.length,
             threemfDiskPath: null,
             downloadUrl: null,
           });
           try {
-            for (const hex of colors) {
-              await _get().submitSingleReplace(hex, pending.targetHex);
+            for (const region of regions) {
+              if (region.clickX != null && region.clickY != null) {
+                await apiDetectRegion(sid, region.clickX, region.clickY);
+              }
+              const response = await apiRegionReplace(sid, `#${pending.targetHex}`);
+              const updates: Partial<ConverterState> = {
+                previewImageUrl: `http://localhost:8000${response.preview_url}`,
+              };
+              if (response.preview_glb_url) {
+                updates.previewGlbUrl = `http://localhost:8000${response.preview_glb_url}`;
+              }
+              if (response.color_contours) {
+                updates.colorContours = response.color_contours;
+              }
+              set(updates);
             }
-            set({ replacePreviewLoading: false });
-          } catch {
             set({
-              colorRemapMap: snapshot,
-              remapHistory: curState.remapHistory,
               replacePreviewLoading: false,
-              error: "批量颜色替换失败",
+              selectedRegions: [],
+              regionData: null,
+              selectedColor: null,
+            });
+          } catch (err) {
+            set({
+              replacePreviewLoading: false,
+              error: err instanceof Error ? err.message : "多区域颜色替换失败",
             });
           }
           break;
@@ -1024,6 +1132,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         threemfDiskPath: null,
         downloadUrl: null,
         regionData: null,
+        selectedRegions: [],
         regionReplacementCount: 0,
       });
       // 调用后端清空 replacement_regions 并从原始 matched_rgb 重新生成预览和 GLB
@@ -1117,7 +1226,16 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       set({ bedSizesLoading: true });
       try {
         const response = await apiFetchBedSizes();
-        set({ bedSizes: response.beds, bedSizesLoading: false });
+        const beds = response.beds;
+
+        const settingsPrinterModel = useSettingsStore.getState().printerModel;
+        const printerBed = beds.find((bed) => bed.printer_id === settingsPrinterModel);
+
+        set({
+          bedSizes: beds,
+          bedSizesLoading: false,
+          ...(printerBed ? { bed_label: printerBed.label } : {}),
+        });
       } catch (err) {
         set({
           bedSizesLoading: false,
@@ -1223,7 +1341,8 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       _previewAbortController = new AbortController();
       const { signal } = _previewAbortController;
 
-      set({ isLoading: true, error: null });
+      set({ isLoading: true, error: null, hasManualPreview: false, layerImages: [], layerImagesOpen: false });
+      console.log('[DEBUG] submitPreview: cleared layerImages');
       try {
         const response = await apiConvertPreview(
           state.imageFile,
@@ -1267,7 +1386,10 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           previewPixelWidth: response.dimensions?.width ?? null,
           previewPixelHeight: response.dimensions?.height ?? null,
           hasManualPreview: true,
+          layerImages: [],
+          layerImagesOpen: false,
         });
+        console.log('[DEBUG] submitPreview success: cleared layerImages for new sessionId');
       } catch (err) {
         // Ignore aborted requests (user started a new preview)
         if (err instanceof Error && err.name === "CanceledError") {
@@ -1318,8 +1440,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           mergedReplacements = [...(mergedReplacements ?? []), ...remapRegions];
         }
 
-        console.timeLog('[LUMINA] generate', 'request sent');
-        const response = await apiConvertGenerate(state.sessionId, {
+        const baseParams = {
           lut_name: state.lut_name,
           target_width_mm: state.target_width_mm,
           auto_bg: state.auto_bg,
@@ -1366,11 +1487,34 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
             state.free_color_set.size > 0
               ? Array.from(state.free_color_set).map((h) => `#${h}`)
               : undefined,
+          printer_id: useSettingsStore.getState().printerModel,
+          slicer: useSettingsStore.getState().slicerSoftware,
           use_cached_matched_rgb: state.regionReplacementCount > 0,
-        });
-        // 后端返回 download_url 和可选的 preview_3d_url
-        // preview_3d_url 指向 GLB 文件（Three.js 可加载）
-        // download_url 指向 3MF 文件（ZIP 格式，Three.js 无法加载）
+        } as const;
+
+        if (state.largeFormatEnabled) {
+          const lfResponse = await apiConvertGenerateLargeFormat(
+            state.sessionId!,
+            {
+              target_height_mm: state.target_height_mm,
+              tile_width_mm: state.tileWidthMm,
+              tile_height_mm: state.tileHeightMm,
+              params: baseParams,
+            },
+          );
+          set({
+            isLoading: false,
+            modelUrl: null,
+            threemfDiskPath: null,
+            downloadUrl: lfResponse.download_url
+              ? `http://localhost:8000${lfResponse.download_url}`
+              : null,
+          });
+          return null;
+        }
+
+        console.timeLog('[LUMINA] generate', 'request sent');
+        const response = await apiConvertGenerate(state.sessionId, baseParams);
         console.timeLog('[LUMINA] generate', 'response received');
         const modelUrl = response.preview_3d_url
           ? `http://localhost:8000${response.preview_3d_url}`
@@ -1573,7 +1717,10 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
             batchMode: false,
             hasManualPreview: false,
             cropModalOpen: state.enableCrop,
+            layerImages: [],
+            layerImagesOpen: false,
           });
+          console.log('[DEBUG] handleFilesSelect (replace): cleared layerImages');
         } else {
           // Empty state: set imageFile, enter SingleMode
           const previewUrl = URL.createObjectURL(validFiles[0]);
@@ -1589,7 +1736,10 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
             batchMode: false,
             hasManualPreview: false,
             cropModalOpen: state.enableCrop,
+            layerImages: [],
+            layerImagesOpen: false,
           });
+          console.log('[DEBUG] handleFilesSelect (new): cleared layerImages');
         }
         return;
       }
@@ -1614,7 +1764,10 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         previewGlbUrl: null,
         batchMode: true,
         hasManualPreview: false,
+        layerImages: [],
+        layerImagesOpen: false,
       });
+      console.log('[DEBUG] handleFilesSelect (batch): cleared layerImages');
     },
 
     submitBatch: async () => {

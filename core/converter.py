@@ -132,6 +132,7 @@ def convert_image_to_3d(image_path, lut_path, target_width_mm, spacer_thick,
                          loop_position_preset: Optional[str] = "top-center",
                          printer_id: str = 'bambu-h2d',
                          slicer: str = 'BambuStudio',
+                         relief_global_max_height: Optional[float] = None,
                          progress=None):
     """Main conversion function: Convert image to 3D model.
     主转换函数：将图像转换为 3D 模型。薄包装层，委托给 coordinator。
@@ -224,6 +225,7 @@ def generate_final_model(image_path, lut_path, target_width_mm, spacer_thick,
                         loop_position_preset: Optional[str] = "top-center",
                         printer_id: str = 'bambu-h2d',
                         slicer: str = 'BambuStudio',
+                        relief_global_max_height: Optional[float] = None,
                         progress=None):
     """Wrapper function for generating final model.
     生成最终模型的包装函数。
@@ -285,6 +287,7 @@ def generate_final_model(image_path, lut_path, target_width_mm, spacer_thick,
         loop_position_preset=loop_position_preset,
         printer_id=printer_id,
         slicer=slicer,
+        relief_global_max_height=relief_global_max_height,
         progress=progress,
     )
 
@@ -898,7 +901,7 @@ def detect_lut_color_mode(lut_path):
         lut_path: LUT文件路径
     
     Returns:
-        str: 颜色模式 ("BW (Black & White)", "Merged", "6-Color (Smart 1296)", "8-Color Max", etc.)
+        str: 颜色模式 ("BW (Black & White)", "Merged", "6-Color (CMYWGK 1296)", "8-Color Max", etc.)
     """
     if not lut_path or not os.path.exists(lut_path):
         return None
@@ -920,7 +923,7 @@ def detect_lut_color_mode(lut_path):
                     return "8-Color Max"
                 if total_colors >= 1200 and total_colors < 1400:
                     print(f"[AUTO_DETECT] Detected 6-Color mode from .npz ({total_colors} colors)")
-                    return "6-Color (Smart 1296)"
+                    return "6-Color (CMYWGK 1296)"
                 if total_colors >= 900 and total_colors < 1200:
                     print(f"[AUTO_DETECT] Detected 4-Color mode from .npz ({total_colors} colors)")
                     return "4-Color"
@@ -951,7 +954,7 @@ def detect_lut_color_mode(lut_path):
                 return "8-Color Max"
             if total_colors >= 1200 and total_colors < 1400:
                 print(f"[AUTO_DETECT] Detected 6-Color mode from .json ({total_colors} colors)")
-                return "6-Color (Smart 1296)"
+                return "6-Color (CMYWGK 1296)"
             if total_colors >= 900 and total_colors < 1200:
                 print(f"[AUTO_DETECT] Detected 4-Color mode from .json ({total_colors} colors)")
                 return "4-Color"
@@ -999,7 +1002,7 @@ def detect_lut_color_mode(lut_path):
         # 6色模式：1200-1400色
         elif total_colors >= 1200 and total_colors < 1400:
             print(f"[AUTO_DETECT] Detected 6-Color mode ({total_colors} colors)")
-            return "6-Color (Smart 1296)"
+            return "6-Color (CMYWGK 1296)"
         
         # 4色模式：900-1200色
         elif total_colors >= 900 and total_colors < 1200:

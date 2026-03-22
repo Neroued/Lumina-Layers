@@ -69,6 +69,7 @@ interface WidgetPanelProps {
   titleKey: string;
   children: ReactNode;
   dockOffsetX?: number;
+  width?: number;
 }
 
 /**
@@ -89,6 +90,7 @@ export const WidgetPanel = React.memo(function WidgetPanel({
   titleKey,
   children,
   dockOffsetX = 0,
+  width = WIDGET_WIDTH,
 }: WidgetPanelProps) {
   const widget = useWidgetStore((s) => s.widgets[widgetId]);
   const toggleCollapse = useWidgetStore((s) => s.toggleCollapse);
@@ -148,7 +150,7 @@ export const WidgetPanel = React.memo(function WidgetPanel({
   // interpolates smoothly from the drop point instead of jumping from 0.
   const style: React.CSSProperties = {
     position: 'absolute',
-    width: WIDGET_WIDTH,
+    width,
     borderRadius: WIDGET_PANEL_RADIUS,
     pointerEvents: isBeingDragged ? 'none' : 'auto',
     zIndex: isBeingDragged ? 50 : 30,

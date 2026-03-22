@@ -72,7 +72,7 @@ class WorkerPoolManager:
         self,
         fn: Callable[..., T],
         *args: Any,
-        timeout: float = 300.0,
+        timeout: float | None = None,
     ) -> T:
         """Submit a CPU task to the pool and await result.
         提交 CPU 任务到进程池并等待结果。
@@ -82,8 +82,8 @@ class WorkerPoolManager:
                                    (顶层函数，必须可序列化)
             *args (Any): Scalar args or file paths only.
                          (仅标量参数或文件路径)
-            timeout (float): Max seconds to wait. Defaults to 300.0.
-                             (最大等待秒数，默认 300.0)
+            timeout (float | None): Max seconds to wait, or None for no limit.
+                                    (最大等待秒数，None 表示不限时)
 
         Returns:
             T: Function return value. (函数返回值)

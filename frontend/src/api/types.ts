@@ -11,8 +11,8 @@ export enum ColorMode {
   FOUR_COLOR_CMYW = "4-Color (CMYW)",
   FOUR_COLOR_RYBW = "4-Color (RYBW)",
   FIVE_COLOR_EXT = "5-Color Extended",
-  SIX_COLOR = "6-Color (Smart 1296)",
-  SIX_COLOR_RYBW = "6-Color (RYBW 1296)",
+  SIX_COLOR = "6-Color (CMYWGK 1296)",
+  SIX_COLOR_RYBW = "6-Color (RYBWGK 1296)",
   EIGHT_COLOR = "8-Color Max",
   MERGED = "Merged",
 }
@@ -70,6 +70,8 @@ export interface ConvertGenerateRequest extends ConvertPreviewRequest {
   coating_height_mm: number;
   replacement_regions?: ColorReplacementItem[];
   free_color_set?: string[];
+  printer_id?: string;
+  slicer?: string;
   use_cached_matched_rgb?: boolean;
 }
 
@@ -127,6 +129,24 @@ export interface PreviewResponse {
   contours?: Record<string, number[][][]> | null; // hex -> list of contour polygons (world coords mm)
 }
 
+/** 大画幅生成请求，嵌套 ConvertGenerateRequest + 切片参数 */
+export interface LargeFormatGenerateRequest {
+  target_height_mm: number;
+  tile_width_mm: number;
+  tile_height_mm: number;
+  params: ConvertGenerateRequest;
+}
+
+/** 大画幅生成响应 */
+export interface LargeFormatGenerateResponse {
+  status: string;
+  message: string;
+  download_url: string;
+  tile_count: number;
+  grid_cols: number;
+  grid_rows: number;
+}
+
 /** 生成接口响应，包含下载 URL 和可选的 3D 预览 URL */
 export interface GenerateResponse {
   status: string;
@@ -151,6 +171,7 @@ export interface BedSizeItem {
   width_mm: number;
   height_mm: number;
   is_default: boolean;
+  printer_id?: string | null;
 }
 
 export interface BedSizeListResponse {
@@ -164,8 +185,8 @@ export enum CalibrationColorMode {
   FOUR_COLOR_CMYW = "4-Color (CMYW)",
   FOUR_COLOR_RYBW = "4-Color (RYBW)",
   FIVE_COLOR_EXT = "5-Color Extended (1444)",
-  SIX_COLOR = "6-Color (Smart 1296)",
-  SIX_COLOR_RYBW = "6-Color (RYBW 1296)",
+  SIX_COLOR = "6-Color (CMYWGK 1296)",
+  SIX_COLOR_RYBW = "6-Color (RYBWGK 1296)",
   EIGHT_COLOR = "8-Color Max",
 }
 
@@ -203,8 +224,8 @@ export enum ExtractorColorMode {
   FOUR_COLOR_CMYW = "4-Color (CMYW)",
   FOUR_COLOR_RYBW = "4-Color (RYBW)",
   FIVE_COLOR_EXT = "5-Color Extended",
-  SIX_COLOR = "6-Color (Smart 1296)",
-  SIX_COLOR_RYBW = "6-Color (RYBW 1296)",
+  SIX_COLOR = "6-Color (CMYWGK 1296)",
+  SIX_COLOR_RYBW = "6-Color (RYBWGK 1296)",
   EIGHT_COLOR = "8-Color Max",
 }
 
@@ -358,6 +379,7 @@ export interface BaseColorsResponse {
   lut_name: string;
   color_count: number;
   colors: BaseColorEntry[];
+  combinations?: number[][] | null;
 }
 
 export interface FiveColorQueryRequest {

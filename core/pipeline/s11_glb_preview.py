@@ -60,13 +60,9 @@ def _create_preview_mesh(
         new_height = height // scale_factor
         new_width = width // scale_factor
 
-        matched_rgb = cv2.resize(
-            matched_rgb, (new_width, new_height),
-            interpolation=cv2.INTER_AREA
-        )
+        matched_rgb = cv2.resize(matched_rgb, (new_width, new_height), interpolation=cv2.INTER_AREA)
         mask_solid = cv2.resize(
-            mask_solid.astype(np.uint8), (new_width, new_height),
-            interpolation=cv2.INTER_NEAREST
+            mask_solid.astype(np.uint8), (new_width, new_height), interpolation=cv2.INTER_NEAREST
         ).astype(bool)
 
         height, width = new_height, new_width
@@ -201,7 +197,7 @@ def _merge_low_frequency_colors(
     tail_rgb = unique_colors[tail_indices].astype(np.float64)
     # Vectorized nearest-neighbor via broadcasting: (T, 1, 3) - (1, K, 3)
     diff = tail_rgb[:, None, :] - kept_colors[None, :, :]
-    dist_sq = np.sum(diff ** 2, axis=2)
+    dist_sq = np.sum(diff**2, axis=2)
     nearest = np.argmin(dist_sq, axis=1)
 
     merged[tail_indices] = unique_colors[keep_indices[nearest]]
@@ -373,10 +369,10 @@ def generate_segmented_glb(cache: dict, max_meshes: int = 64) -> Optional[str]:
     if cache is None:
         return None
 
-    matched_rgb = cache.get('matched_rgb')
-    mask_solid = cache.get('mask_solid')
-    target_w = cache.get('target_w')
-    target_width_mm = cache.get('target_width_mm')
+    matched_rgb = cache.get("matched_rgb")
+    mask_solid = cache.get("mask_solid")
+    target_w = cache.get("target_w")
+    target_width_mm = cache.get("target_width_mm")
 
     if matched_rgb is None or mask_solid is None:
         return None
@@ -399,7 +395,8 @@ def generate_segmented_glb(cache: dict, max_meshes: int = 64) -> Optional[str]:
             new_w = width // scale_factor
             matched_rgb = cv2.resize(matched_rgb, (new_w, new_h), interpolation=cv2.INTER_AREA)
             mask_solid = cv2.resize(
-                mask_solid.astype(np.uint8), (new_w, new_h),
+                mask_solid.astype(np.uint8),
+                (new_w, new_h),
                 interpolation=cv2.INTER_NEAREST,
             ).astype(bool)
             height, width = new_h, new_w
@@ -414,7 +411,10 @@ def generate_segmented_glb(cache: dict, max_meshes: int = 64) -> Optional[str]:
             return None
 
         unique_colors, inverse, pixel_counts = np.unique(
-            solid_pixels, axis=0, return_inverse=True, return_counts=True,
+            solid_pixels,
+            axis=0,
+            return_inverse=True,
+            return_counts=True,
         )
         n_unique = len(unique_colors)
         print(f"[SEGMENTED_GLB] Found {n_unique} unique colors")
@@ -429,7 +429,10 @@ def generate_segmented_glb(cache: dict, max_meshes: int = 64) -> Optional[str]:
             matched_rgb_work[mask_solid] = new_solid
             solid_pixels = matched_rgb_work[mask_solid]
             unique_colors, _, pixel_counts = np.unique(
-                solid_pixels, axis=0, return_inverse=True, return_counts=True,
+                solid_pixels,
+                axis=0,
+                return_inverse=True,
+                return_counts=True,
             )
             matched_rgb = matched_rgb_work
             print(f"[SEGMENTED_GLB] After merge: {len(unique_colors)} colors ({time.perf_counter() - _t_merge:.3f}s)")
@@ -453,7 +456,12 @@ def generate_segmented_glb(cache: dict, max_meshes: int = 64) -> Optional[str]:
             color_match = np.all(matched_rgb == color_rgb, axis=2) & mask_solid
 
             mesh = _build_color_voxel_mesh(
-                color_match, height, width, total_layers, shrink, rgba,
+                color_match,
+                height,
+                width,
+                total_layers,
+                shrink,
+                rgba,
             )
             if mesh is None:
                 continue
@@ -527,6 +535,7 @@ def generate_segmented_glb(cache: dict, max_meshes: int = 64) -> Optional[str]:
     except Exception as e:
         print(f"[SEGMENTED_GLB] Failed: {e}")
         import traceback
+
         traceback.print_exc()
         return None
 
@@ -547,24 +556,26 @@ def generate_realtime_glb(cache: dict) -> Optional[str]:
     if cache is None:
         return None
 
-    matched_rgb = cache.get('matched_rgb')
-    mask_solid = cache.get('mask_solid')
-    target_w = cache.get('target_w')
-    target_h = cache.get('target_h')
-    target_width_mm = cache.get('target_width_mm')
-    color_conf = cache.get('color_conf')
+    matched_rgb = cache.get("matched_rgb")
+    mask_solid = cache.get("mask_solid")
+    target_w = cache.get("target_w")
+    target_h = cache.get("target_h")
+    target_width_mm = cache.get("target_width_mm")
+    color_conf = cache.get("color_conf")
 
     if matched_rgb is None or mask_solid is None:
         return None
 
     try:
         total_layers = 25
-        preview_colors = color_conf.get('preview') if color_conf else None
+        preview_colors = color_conf.get("preview") if color_conf else None
 
         preview_mesh = _create_preview_mesh(
-            matched_rgb, mask_solid, total_layers,
-            backing_color_id=cache.get('backing_color_id', 0),
-            preview_colors=preview_colors
+            matched_rgb,
+            mask_solid,
+            total_layers,
+            backing_color_id=cache.get("backing_color_id", 0),
+            preview_colors=preview_colors,
         )
 
         if preview_mesh is None:
@@ -617,31 +628,33 @@ def run(ctx: dict) -> dict:
     """
     _t0 = time.perf_counter()
 
-    matched_rgb = ctx['matched_rgb']
-    mask_solid = ctx['mask_solid']
-    total_layers = ctx['total_layers']
-    backing_color_id = ctx.get('backing_color_id', 0)
-    backing_metadata = ctx['backing_metadata']
-    preview_colors = ctx['preview_colors']
-    pixel_scale = ctx['pixel_scale']
-    loop_info = ctx.get('loop_info')
-    loop_added = ctx.get('loop_added', False)
-    image_path = ctx['image_path']
-    enable_outline = ctx.get('enable_outline', False)
-    outline_width = ctx.get('outline_width', 2.0)
-    outline_added = ctx.get('outline_added', False)
-    target_h = ctx['target_h']
-    transform = ctx['transform']
+    matched_rgb = ctx["matched_rgb"]
+    mask_solid = ctx["mask_solid"]
+    total_layers = ctx["total_layers"]
+    backing_color_id = ctx.get("backing_color_id", 0)
+    backing_metadata = ctx["backing_metadata"]
+    preview_colors = ctx["preview_colors"]
+    pixel_scale = ctx["pixel_scale"]
+    loop_info = ctx.get("loop_info")
+    loop_added = ctx.get("loop_added", False)
+    image_path = ctx["image_path"]
+    enable_outline = ctx.get("enable_outline", False)
+    outline_width = ctx.get("outline_width", 2.0)
+    outline_added = ctx.get("outline_added", False)
+    target_h = ctx["target_h"]
+    transform = ctx["transform"]
 
-    _prog = ctx.get('progress')
+    _prog = ctx.get("progress")
     if _prog is not None:
         _prog(0.90, "生成 3D 预览中... | Generating 3D preview...")
 
     preview_mesh = _create_preview_mesh(
-        matched_rgb, mask_solid, total_layers,
+        matched_rgb,
+        mask_solid,
+        total_layers,
         backing_color_id=backing_color_id,
-        backing_z_range=backing_metadata['backing_z_range'],
-        preview_colors=preview_colors
+        backing_z_range=backing_metadata["backing_z_range"],
+        preview_colors=preview_colors,
     )
 
     if preview_mesh:
@@ -650,17 +663,18 @@ def run(ctx: dict) -> dict:
         if loop_added and loop_info:
             try:
                 from core.geometry_utils import create_keychain_loop
+
                 preview_loop = create_keychain_loop(
-                    width_mm=loop_info['width_mm'],
-                    length_mm=loop_info['length_mm'],
-                    hole_dia_mm=loop_info['hole_dia_mm'],
+                    width_mm=loop_info["width_mm"],
+                    length_mm=loop_info["length_mm"],
+                    hole_dia_mm=loop_info["hole_dia_mm"],
                     thickness_mm=total_layers * PrinterConfig.LAYER_HEIGHT,
-                    attach_x_mm=loop_info['attach_x_mm'],
-                    attach_y_mm=loop_info['attach_y_mm'],
-                    angle_deg=loop_info.get('angle_deg', 0.0),
+                    attach_x_mm=loop_info["attach_x_mm"],
+                    attach_y_mm=loop_info["attach_y_mm"],
+                    angle_deg=loop_info.get("angle_deg", 0.0),
                 )
                 if preview_loop:
-                    loop_color = preview_colors[loop_info['color_id']]
+                    loop_color = preview_colors[loop_info["color_id"]]
                     preview_loop.visual.face_colors = [loop_color] * len(preview_loop.faces)
                     preview_mesh = trimesh.util.concatenate([preview_mesh, preview_loop])
             except Exception as e:
@@ -670,13 +684,14 @@ def run(ctx: dict) -> dict:
         if outline_added:
             try:
                 from core.pipeline.s08_auxiliary_meshes import _generate_outline_mesh
+
                 outline_thickness_mm = total_layers * PrinterConfig.LAYER_HEIGHT
                 preview_outline = _generate_outline_mesh(
                     mask_solid=mask_solid,
                     pixel_scale=pixel_scale,
                     outline_width_mm=outline_width,
                     outline_thickness_mm=outline_thickness_mm,
-                    target_h=target_h
+                    target_h=target_h,
                 )
                 if preview_outline:
                     outline_color = preview_colors[0]  # White
@@ -691,7 +706,7 @@ def run(ctx: dict) -> dict:
         glb_path = os.path.join(OUTPUT_DIR, generate_preview_filename(base_name))
         preview_mesh.export(glb_path)
 
-    ctx['glb_path'] = glb_path
+    ctx["glb_path"] = glb_path
 
     _elapsed = time.perf_counter() - _t0
     print(f"[S11] glb_preview done: {_elapsed:.3f}s")

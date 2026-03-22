@@ -41,8 +41,8 @@ class ColorMode(str, Enum):
     FOUR_COLOR_CMYW = "4-Color (CMYW)"
     FOUR_COLOR_RYBW = "4-Color (RYBW)"
     FIVE_COLOR_EXT = "5-Color Extended"
-    SIX_COLOR = "6-Color (Smart 1296)"
-    SIX_COLOR_RYBW = "6-Color (RYBW 1296)"
+    SIX_COLOR = "6-Color (CMYWGK 1296)"
+    SIX_COLOR_RYBW = "6-Color (RYBWGK 1296)"
     EIGHT_COLOR = "8-Color Max"
     MERGED = "Merged"
 
@@ -153,7 +153,7 @@ class ConvertPreviewRequest(BaseModel):
 
     lut_name: str = Field(..., description="LUT 名称")
     target_width_mm: float = Field(
-        60.0, ge=10, le=400, description="目标宽度 (mm)"
+        60.0, ge=10, le=9999, description="目标宽度 (mm)"
     )
     auto_bg: bool = Field(False, description="自动去背景")
     bg_tol: int = Field(40, ge=0, le=150, description="背景容差")
@@ -248,7 +248,7 @@ class ConvertGenerateRequest(BaseModel):
 
     lut_name: str = Field(..., description="LUT 名称")
     target_width_mm: float = Field(
-        60.0, ge=10, le=400, description="目标宽度 (mm)"
+        60.0, ge=10, le=9999, description="目标宽度 (mm)"
     )
     spacer_thick: float = Field(
         1.2, ge=0.2, le=3.5, description="底板厚度 (mm)"
@@ -327,10 +327,41 @@ class ConvertGenerateRequest(BaseModel):
     free_color_set: Optional[Set[str]] = Field(
         None, description="自由色集合 (hex)"
     )
+    printer_id: str = Field(
+        "bambu-h2d", description="????? ID"
+    )
+    slicer: str = Field(
+        "BambuStudio", description="??????"
+    )
     use_cached_matched_rgb: bool = Field(
         False,
         description="使用 Session 缓存的 matched_rgb 而非从原始图像重新处理",
     )
+
+
+class LargeFormatGenerateRequest(BaseModel):
+    """Request model for large-format tiled 3MF generation.
+    大画幅切片 3MF 生成的请求模型。
+
+    Splits the image into a grid of tiles, generates a 3MF for each tile,
+    and packages all results into a ZIP archive.
+    将图片切割为网格切片，每片生成一个 3MF，最终打包为 ZIP。
+
+    Attributes:
+        target_height_mm: Total output height in millimeters.
+            总输出高度 (mm)。
+        tile_width_mm: Width of each tile in millimeters.
+            切片宽度 (mm)。
+        tile_height_mm: Height of each tile in millimeters.
+            切片高度 (mm)。
+        params: Shared generation parameters for all tiles.
+            所有切片共享的生成参数。
+    """
+
+    target_height_mm: float = Field(..., gt=0, description="总输出高度 (mm)")
+    tile_width_mm: float = Field(250.0, gt=0, description="切片宽度 (mm)")
+    tile_height_mm: float = Field(250.0, gt=0, description="切片高度 (mm)")
+    params: ConvertGenerateRequest = Field(..., description="生成参数")
 
 
 class ConvertBatchRequest(BaseModel):
@@ -506,20 +537,23 @@ class BedSizeItem(BaseModel):
     单个打印热床尺寸选项。
 
     Attributes:
-        label: Display label for the bed size, e.g. "256×256 mm".
-            热床尺寸显示标签。
+        label: Display label for the bed size, e.g. "256×256 mm" or "Bambu Lab H2D".
+            热床尺寸显示标签（可以是尺寸或机型名）。
         width_mm: Bed width in millimeters.
             热床宽度 (mm)。
         height_mm: Bed height in millimeters.
             热床高度 (mm)。
         is_default: Whether this is the default bed size.
             是否为默认热床尺寸。
+        printer_id: Optional printer profile ID if this is from a printer model.
+            可选的打印机配置 ID（如果来自机型）。
     """
 
     label: str = Field(..., description="热床尺寸标签")
     width_mm: int = Field(..., description="热床宽度 (mm)")
     height_mm: int = Field(..., description="热床高度 (mm)")
     is_default: bool = Field(False, description="是否为默认热床尺寸")
+    printer_id: str | None = Field(None, description="打印机配置 ID（如果来自机型）")
 
 
 class BedSizeListResponse(BaseModel):

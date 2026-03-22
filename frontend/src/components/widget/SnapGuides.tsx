@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from 'react';
 import type { RefObject } from 'react';
-import { SNAP_THRESHOLD, WIDGET_PANEL_RADIUS, WIDGET_WIDTH } from '../../utils/widgetUtils';
+import { SNAP_THRESHOLD, WIDGET_PANEL_RADIUS } from '../../utils/widgetUtils';
 import type { WidgetId } from '../../types/widget';
 
 interface InsertPreviewState {
@@ -37,6 +37,7 @@ interface SnapGuidesProps {
   insertPreviewRef: RefObject<InsertPreviewState | null>;
   containerRef: RefObject<HTMLDivElement | null>;
   containerWidth: number;
+  widgetWidth: number;
 }
 
 const BOUNDS_REFRESH_INTERVAL = 10;
@@ -54,10 +55,11 @@ const EMPTY_OVERLAY_STATE: GuideOverlayState = {
 
 export function resolvePreviewLineLeft(
   edge: 'left' | 'right' | undefined,
-  effectiveWidth: number
+  effectiveWidth: number,
+  widgetWidth: number
 ): number {
   return edge === 'right'
-    ? Math.max(0, effectiveWidth - WIDGET_WIDTH)
+    ? Math.max(0, effectiveWidth - widgetWidth)
     : 0;
 }
 
@@ -117,6 +119,7 @@ export function SnapGuides({
   insertPreviewRef,
   containerRef,
   containerWidth,
+  widgetWidth,
 }: SnapGuidesProps) {
   const [overlayState, setOverlayState] = useState<GuideOverlayState>(EMPTY_OVERLAY_STATE);
 
@@ -145,7 +148,7 @@ export function SnapGuides({
       }
 
       const nearLeft = pos.x < SNAP_THRESHOLD;
-      const nearRight = effectiveWidth - (pos.x + WIDGET_WIDTH) < SNAP_THRESHOLD;
+      const nearRight = effectiveWidth - (pos.x + widgetWidth) < SNAP_THRESHOLD;
       const previewKey = insertPreview
         ? `${insertPreview.edge}:${insertPreview.upperId ?? ''}:${insertPreview.lowerId ?? ''}`
         : '';
@@ -186,14 +189,14 @@ export function SnapGuides({
 
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [isDragging, dragPositionRef, insertPreviewRef, containerRef, containerWidth]);
+  }, [isDragging, dragPositionRef, insertPreviewRef, containerRef, containerWidth, widgetWidth]);
 
   const { effectiveWidth, nearLeft, nearRight, insertPreview, lowerHighlight, upperHighlight } = overlayState;
   if (!nearLeft && !nearRight && !insertPreview && !lowerHighlight && !upperHighlight) {
     return null;
   }
 
-  const previewLineLeft = resolvePreviewLineLeft(insertPreview?.edge, effectiveWidth);
+  const previewLineLeft = resolvePreviewLineLeft(insertPreview?.edge, effectiveWidth, widgetWidth);
 
   const createEdgeHighlightStyle = (
     bounds: HighlightBounds,
@@ -201,7 +204,7 @@ export function SnapGuides({
   ) => ({
     top: Math.max(0, bounds.top),
     left: previewLineLeft,
-    width: WIDGET_WIDTH,
+    width: widgetWidth,
     height: bounds.height,
     borderRadius: WIDGET_PANEL_RADIUS,
     border: '1px solid rgba(96,165,250,0.24)',
@@ -245,7 +248,7 @@ export function SnapGuides({
           style={{
             top: Math.max(0, insertPreview.lineY) - INSERT_LINE_HEIGHT / 2,
             left: previewLineLeft + INSERT_LINE_INSET,
-            width: Math.max(0, WIDGET_WIDTH - INSERT_LINE_INSET * 2),
+            width: Math.max(0, widgetWidth - INSERT_LINE_INSET * 2),
             height: INSERT_LINE_HEIGHT,
             borderRadius: 999,
             background: 'linear-gradient(to right, rgba(96,165,250,0.18), rgba(96,165,250,0.42), rgba(96,165,250,0.18))',

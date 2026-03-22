@@ -1,4 +1,4 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useConverterStore, ACCEPT_IMAGE_FORMATS } from "../../stores/converterStore";
 import {
@@ -10,13 +10,60 @@ import UnifiedUploader from "../ui/UnifiedUploader";
 import Checkbox from "../ui/Checkbox";
 import Dropdown from "../ui/Dropdown";
 import Slider from "../ui/Slider";
+import Button from "../ui/Button";
 import RadioGroup from "../ui/RadioGroup";
 import { CropModal } from "../ui/CropModal";
 import type { CropData } from "../ui/CropModal";
 import { useI18n } from "../../i18n/context";
+import { useWorkspaceMode } from "../../hooks/useWorkspaceMode";
+
+const COLOR_MODE_DOTS: Record<string, string[]> = {
+  [ColorMode.BW]: ["#000000", "#ffffff"],
+  [ColorMode.FOUR_COLOR_RYBW]: ["#dc143c", "#ffe600", "#0064f0", "#ffffff"],
+  [ColorMode.FOUR_COLOR_CMYW]: ["#0086d6", "#ec008c", "#f4ee2a", "#ffffff"],
+  [ColorMode.FIVE_COLOR_EXT]: ["#ffffff", "#dc143c", "#ffe600", "#0064f0", "#141414"],
+  [ColorMode.SIX_COLOR]: ["#ffffff", "#0086d6", "#ec008c", "#00ae42", "#f4ee2a", "#000000"],
+  [ColorMode.SIX_COLOR_RYBW]: ["#ffffff", "#dc143c", "#ffe600", "#0064f0", "#00ae42", "#000000"],
+  [ColorMode.EIGHT_COLOR]: [
+    "#ffffff", "#0086d6", "#ec008c", "#f4ee2a",
+    "#000000", "#c12e1f", "#0a2989", "#00ae42",
+  ],
+};
+
+const DOT_CLS = "inline-block size-2 rounded-full shrink-0 ring-1 ring-black/10 dark:ring-white/20";
+
+function ColorModeDots({ mode }: { mode: string }) {
+  if (mode === ColorMode.MERGED) {
+    return (
+      <span
+        className={`${DOT_CLS} animate-spin [animation-duration:3s]`}
+        style={{
+          background:
+            "conic-gradient(#dc143c, #f4ee2a, #00ae42, #0086d6, #ec008c, #dc143c)",
+        }}
+      />
+    );
+  }
+
+  const dots = COLOR_MODE_DOTS[mode];
+  if (!dots) return null;
+
+  return (
+    <span className="inline-flex items-center gap-0.5">
+      {dots.map((color, i) => (
+        <span
+          key={i}
+          className={DOT_CLS}
+          style={{ backgroundColor: color }}
+        />
+      ))}
+    </span>
+  );
+}
 
 export default function BasicSettings() {
   const { t } = useI18n();
+  const workspace = useWorkspaceMode();
 
   const structureModeOptions = Object.values(StructureMode).map((v) => ({
     label: t(`structure_mode.${v}`),
@@ -45,6 +92,10 @@ export default function BasicSettings() {
     isCropping,
     batchMode,
     batchFiles,
+    largeFormatEnabled,
+    tileWidthMm,
+    tileHeightMm,
+    previewImageUrl,
   } = useConverterStore(useShallow((s) => ({
     imageFile: s.imageFile,
     imagePreviewUrl: s.imagePreviewUrl,
@@ -62,7 +113,21 @@ export default function BasicSettings() {
     isCropping: s.isCropping,
     batchMode: s.batchMode,
     batchFiles: s.batchFiles,
+    largeFormatEnabled: s.largeFormatEnabled,
+    tileWidthMm: s.tileWidthMm,
+    tileHeightMm: s.tileHeightMm,
+    previewImageUrl: s.previewImageUrl,
   })));
+
+  const [uploaderExpanded, setUploaderExpanded] = useState(true);
+
+  useEffect(() => {
+    if (previewImageUrl) setUploaderExpanded(false);
+  }, [previewImageUrl]);
+
+  useEffect(() => {
+    if (!imageFile) setUploaderExpanded(true);
+  }, [imageFile]);
 
   // Action 函数单独提取（函数引用稳定，不需要 shallow）
   const handleFilesSelect = useConverterStore((s) => s.handleFilesSelect);
@@ -77,6 +142,9 @@ export default function BasicSettings() {
   const submitCrop = useConverterStore((s) => s.submitCrop);
   const uploadLut = useConverterStore((s) => s.uploadLut);
   const removeBatchFile = useConverterStore((s) => s.removeBatchFile);
+  const setLargeFormatEnabled = useConverterStore((s) => s.setLargeFormatEnabled);
+  const setTileWidthMm = useConverterStore((s) => s.setTileWidthMm);
+  const setTileHeightMm = useConverterStore((s) => s.setTileHeightMm);
 
   const lutOptions = lutList.map((name) => ({ label: name, value: name }));
 
@@ -102,16 +170,49 @@ export default function BasicSettings() {
     void submitCrop(data.x, data.y, data.width, data.height);
   };
 
+  const dimMax = largeFormatEnabled ? 9999 : 400;
+
+  const tileGrid = useMemo(() => {
+    if (!largeFormatEnabled) return null;
+    const cols = Math.max(1, Math.ceil(target_width_mm / tileWidthMm));
+    const rows = Math.max(1, Math.ceil(target_height_mm / tileHeightMm));
+    const lastW = Math.round(target_width_mm - (cols - 1) * tileWidthMm);
+    const lastH = Math.round(target_height_mm - (rows - 1) * tileHeightMm);
+    return { cols, rows, total: cols * rows, lastW, lastH };
+  }, [largeFormatEnabled, target_width_mm, target_height_mm, tileWidthMm, tileHeightMm]);
+
   return (
     <div className="flex flex-col gap-4">
-      <UnifiedUploader
-        singlePreview={imagePreviewUrl ?? undefined}
-        batchFiles={batchFiles}
-        isBatchMode={batchMode}
-        onFilesSelect={handleFilesSelect}
-        onBatchFileRemove={removeBatchFile}
-        accept={ACCEPT_IMAGE_FORMATS}
-      />
+      {uploaderExpanded ? (
+        <UnifiedUploader
+          singlePreview={imagePreviewUrl ?? undefined}
+          batchFiles={batchFiles}
+          isBatchMode={batchMode}
+          onFilesSelect={handleFilesSelect}
+          onBatchFileRemove={removeBatchFile}
+          accept={ACCEPT_IMAGE_FORMATS}
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => setUploaderExpanded(true)}
+          className="flex items-center gap-2 rounded-2xl border border-slate-200/80 bg-white/60 px-3 py-2 text-left transition-colors hover:bg-white/90 dark:border-slate-700/60 dark:bg-slate-900/50 dark:hover:bg-slate-900/80"
+        >
+          {imagePreviewUrl && (
+            <img
+              src={imagePreviewUrl}
+              alt=""
+              className="h-8 w-8 shrink-0 rounded-lg object-cover"
+            />
+          )}
+          <span className="min-w-0 flex-1 truncate text-[clamp(0.65rem,0.85vw,0.75rem)] text-slate-600 dark:text-slate-300">
+            {imageFile?.name ?? t("upload_unified_hint")}
+          </span>
+          <span className="shrink-0 text-[10px] text-slate-400 dark:text-slate-500">
+            {t("upload_tap_to_change")}
+          </span>
+        </button>
+      )}
 
       {batchFiles.length === 0 && imageFile !== null && (
         <>
@@ -132,8 +233,8 @@ export default function BasicSettings() {
         </>
       )}
 
-      <div className="flex items-end gap-2">
-        <div className="flex-1">
+      <div className={`gap-2 ${workspace.isCompact ? "grid grid-cols-1" : "flex items-end"}`}>
+        <div className="min-w-0 flex-1">
           <Dropdown
             label={t("basic_lut_label")}
             value={lut_name}
@@ -149,19 +250,19 @@ export default function BasicSettings() {
           className="hidden"
           onChange={(e) => void handleLutUpload(e)}
         />
-        <button
-          type="button"
+        <Button
+          label={`+ ${t("basic_lut_upload")}`}
+          variant="secondary"
           onClick={() => lutFileRef.current?.click()}
-          className="px-3 py-2 text-xs rounded-md border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors whitespace-nowrap"
-          title={t("basic_lut_upload")}
-        >
-          📁 {t("basic_lut_upload")}
-        </button>
+          className={workspace.isCompact ? "w-full px-3" : "shrink-0 whitespace-nowrap px-3"}
+        />
       </div>
 
       {lut_name && (
-        <div className="text-xs text-gray-500 -mt-2 px-1">
-          {t("basic_color_mode_label")}: {color_mode}
+        <div className="-mt-2 px-1 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+          <span>{t("basic_color_mode_label")}:</span>
+          <ColorModeDots mode={color_mode} />
+          <span>{color_mode}</span>
         </div>
       )}
 
@@ -169,7 +270,7 @@ export default function BasicSettings() {
         label={t("basic_width")}
         value={target_width_mm}
         min={10}
-        max={400}
+        max={dimMax}
         step={1}
         unit="mm"
         onChange={setTargetWidthMm}
@@ -179,11 +280,49 @@ export default function BasicSettings() {
         label={t("basic_height")}
         value={target_height_mm}
         min={10}
-        max={400}
+        max={dimMax}
         step={1}
         unit="mm"
         onChange={setTargetHeightMm}
       />
+
+      <Checkbox
+        label={t("basic_large_format")}
+        checked={largeFormatEnabled}
+        onChange={setLargeFormatEnabled}
+        tooltip={t("basic_large_format_hint")}
+      />
+
+      {largeFormatEnabled && (
+        <div className="flex flex-col gap-3 rounded-lg border border-slate-200/60 bg-slate-100/50 p-3 dark:border-slate-700/40 dark:bg-slate-900/40">
+          <Slider
+            label={t("basic_tile_width")}
+            value={tileWidthMm}
+            min={50}
+            max={500}
+            step={10}
+            unit="mm"
+            onChange={setTileWidthMm}
+          />
+          <Slider
+            label={t("basic_tile_height")}
+            value={tileHeightMm}
+            min={50}
+            max={500}
+            step={10}
+            unit="mm"
+            onChange={setTileHeightMm}
+          />
+          {tileGrid && (
+            <div className="-mt-1 px-1 text-xs text-slate-500 dark:text-slate-400">
+              {tileGrid.cols}×{tileGrid.rows} = {tileGrid.total}
+              {tileGrid.total > 1 && (tileGrid.lastW !== tileWidthMm || tileGrid.lastH !== tileHeightMm)
+                ? ` (${tileGrid.lastW}×${tileGrid.lastH}mm)`
+                : ""}
+            </div>
+          )}
+        </div>
+      )}
 
       <Slider
         label={t("basic_thickness")}

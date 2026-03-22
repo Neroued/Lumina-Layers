@@ -1,4 +1,11 @@
 import { useId } from "react";
+import {
+  cx,
+  workstationChoiceRowActiveClass,
+  workstationChoiceRowClass,
+  workstationChoiceRowDisabledClass,
+  workstationFieldLabelClass,
+} from "./panelPrimitives";
 
 interface RadioGroupProps {
   label: string;
@@ -21,25 +28,49 @@ export default function RadioGroup({
 
   return (
     <fieldset className="flex flex-col gap-1.5" disabled={disabled}>
-      <legend className="text-sm text-gray-700 dark:text-gray-300">{label}</legend>
-      <div className="flex flex-col gap-1">
+      <legend className={workstationFieldLabelClass}>{label}</legend>
+      <div className="grid gap-2">
         {options.map((opt) => {
           const isDisabled = disabled || disabledValues.includes(opt.value);
+          const isActive = value === opt.value;
           return (
             <label
               key={opt.value}
-              className={`flex items-center gap-2 text-sm ${isDisabled ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
+              className={cx(
+                "flex items-center gap-3 text-sm",
+                workstationChoiceRowClass,
+                isActive && workstationChoiceRowActiveClass,
+                isDisabled
+                  ? workstationChoiceRowDisabledClass
+                  : "cursor-pointer hover:border-slate-300 hover:bg-white/75 dark:hover:border-slate-600 dark:hover:bg-slate-900/75"
+              )}
             >
               <input
                 type="radio"
                 name={`${groupId}-${label}`}
                 value={opt.value}
-                checked={value === opt.value}
+                checked={isActive}
                 disabled={isDisabled}
                 onChange={() => onChange(opt.value)}
-                className="h-4 w-4 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-blue-500 accent-blue-500 disabled:cursor-not-allowed"
+                className="sr-only"
               />
-              <span className="text-gray-700 dark:text-gray-300">{opt.label}</span>
+              <span
+                aria-hidden="true"
+                className={cx(
+                  "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-all duration-200",
+                  isActive
+                    ? "border-blue-500 bg-blue-500"
+                    : "border-slate-300/80 bg-white dark:border-slate-600/80 dark:bg-slate-800"
+                )}
+              >
+                <span
+                  className={cx(
+                    "h-2.5 w-2.5 rounded-full transition-all duration-200",
+                    isActive ? "bg-white" : "bg-transparent"
+                  )}
+                />
+              </span>
+              <span className="font-medium text-slate-700 dark:text-slate-200">{opt.label}</span>
             </label>
           );
         })}

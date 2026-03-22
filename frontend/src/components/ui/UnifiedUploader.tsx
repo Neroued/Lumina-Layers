@@ -105,7 +105,7 @@ export default function UnifiedUploader({
           {batchFiles.map((file, index) => (
             <li
               key={`${file.name}-${index}`}
-              className="flex items-center justify-between rounded bg-gray-100 dark:bg-gray-800 px-2 py-1 text-sm text-gray-700 dark:text-gray-200 border border-transparent dark:border-gray-700"
+              className="flex items-center justify-between rounded-2xl border border-transparent bg-gray-100 px-2 py-1 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
             >
               <span className="truncate mr-2">{file.name}</span>
               <button
@@ -132,7 +132,7 @@ export default function UnifiedUploader({
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
-          className={`flex items-center justify-center rounded-md border-2 cursor-pointer transition-colors ${borderClass} min-h-[60px]`}
+          className={`flex min-h-[60px] items-center justify-center rounded-2xl border-2 cursor-pointer transition-colors ${borderClass}`}
         >
           <input
             ref={addMoreInputRef}
@@ -164,7 +164,7 @@ export default function UnifiedUploader({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className={`flex items-center justify-center rounded-md border-2 cursor-pointer transition-colors ${borderClass} min-h-[120px]`}
+      className={`flex min-h-[120px] items-center justify-center rounded-2xl border-2 cursor-pointer transition-colors ${borderClass}`}
     >
       <input
         ref={inputRef}
@@ -176,11 +176,12 @@ export default function UnifiedUploader({
         aria-hidden="true"
       />
       {singlePreview ? (
-        <div className="rounded p-2 bg-[length:16px_16px] bg-[image:linear-gradient(45deg,_#e0e0e0_25%,_transparent_25%),linear-gradient(-45deg,_#e0e0e0_25%,_transparent_25%),linear-gradient(45deg,_transparent_75%,_#e0e0e0_75%),linear-gradient(-45deg,_transparent_75%,_#e0e0e0_75%)] dark:bg-[image:linear-gradient(45deg,_#374151_25%,_transparent_25%),linear-gradient(-45deg,_#374151_25%,_transparent_25%),linear-gradient(45deg,_transparent_75%,_#374151_75%),linear-gradient(-45deg,_transparent_75%,_#374151_75%)] bg-[position:0_0,0_8px,8px_-8px,-8px_0px]">
+        <div className="rounded-2xl p-2 bg-[length:16px_16px] bg-[image:linear-gradient(45deg,_#e0e0e0_25%,_transparent_25%),linear-gradient(-45deg,_#e0e0e0_25%,_transparent_25%),linear-gradient(45deg,_transparent_75%,_#e0e0e0_75%),linear-gradient(-45deg,_transparent_75%,_#e0e0e0_75%)] dark:bg-[image:linear-gradient(45deg,_#374151_25%,_transparent_25%),linear-gradient(-45deg,_#374151_25%,_transparent_25%),linear-gradient(45deg,_transparent_75%,_#374151_75%),linear-gradient(-45deg,_transparent_75%,_#374151_75%)] bg-[position:0_0,0_8px,8px_-8px,-8px_0px]">
           <img
             src={singlePreview}
             alt="preview"
-            className="max-h-[160px] max-w-full rounded object-contain"
+            className="max-w-full rounded-2xl object-contain"
+              style={{ maxHeight: "clamp(10rem, 22vh, 18rem)" }}
           />
         </div>
       ) : (

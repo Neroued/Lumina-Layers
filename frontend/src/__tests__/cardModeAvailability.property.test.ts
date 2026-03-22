@@ -12,7 +12,7 @@ const nonMergedMode = fc
   .constantFrom(
     "BW (Black & White)",
     "4-Color",
-    "6-Color (Smart 1296)",
+    "6-Color (CMYWGK 1296)",
     "8-Color Max",
   );
 
