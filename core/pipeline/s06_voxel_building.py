@@ -11,6 +11,7 @@ S06 — 体素矩阵构建（5 种模式）。
 - _build_cloisonne_voxel_matrix: 掐丝珐琅体素矩阵
 """
 
+import time
 import numpy as np
 
 from config import PrinterConfig
@@ -396,6 +397,8 @@ def run(ctx: dict) -> dict:
         - total_layers (int): 总层数
         - heightmap_stats (dict | None): 高度图统计信息
     """
+    _t0 = time.perf_counter()
+
     material_matrix = ctx['material_matrix']
     mask_solid = ctx['mask_solid']
     spacer_thick = ctx['spacer_thick']
@@ -540,4 +543,7 @@ def run(ctx: dict) -> dict:
     # Update structure_mode in case it was forced
     ctx['structure_mode'] = structure_mode
 
+    _elapsed = time.perf_counter() - _t0
+    print(f"[S06] voxel_build done: {_elapsed:.3f}s")
+    ctx.setdefault('_hifi_timings', {})['voxel_build_s'] = _elapsed
     return ctx

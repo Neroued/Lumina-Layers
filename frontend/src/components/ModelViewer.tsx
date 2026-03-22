@@ -37,6 +37,9 @@ interface ModelViewerProps {
 function ModelViewer({ url }: ModelViewerProps) {
   const { scene } = useGLTF(url);
   const { camera, controls } = useThree();
+  useEffect(() => {
+    console.timeLog('[LUMINA] generate', 'GLB loaded (useGLTF resolved)');
+  }, [scene]);
 
   const preparedScene = useMemo(() => {
     const clone = scene.clone(true);
@@ -85,6 +88,10 @@ function ModelViewer({ url }: ModelViewerProps) {
     return clone;
   }, [scene]);
 
+  useEffect(() => {
+    console.timeLog('[LUMINA] generate', 'GLB scene processed (useMemo done)');
+  }, [preparedScene]);
+
   // Auto-fit camera to model after load
   useEffect(() => {
     // Need a wrapper to get correct world bounds after position offset
@@ -117,6 +124,8 @@ function ModelViewer({ url }: ModelViewerProps) {
       oc.update();
     }
 
+    console.timeLog('[LUMINA] generate', 'camera fitted (model fully visible)');
+    console.timeEnd('[LUMINA] generate');
     wrapper.clear();
   }, [preparedScene, camera, controls]);
 

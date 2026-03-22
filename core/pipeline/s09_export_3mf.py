@@ -97,6 +97,7 @@ def run(ctx: dict) -> dict:
     if _prog is not None:
         _prog(0.50, "导出 3MF 中... | Exporting 3MF...")
 
+    print(f"[S09] export_3mf start")
     _export_t0 = time.perf_counter() if _bench_enabled else None
 
     base_name = os.path.splitext(os.path.basename(image_path))[0]
@@ -140,8 +141,10 @@ def run(ctx: dict) -> dict:
             slicer=ctx.get('slicer', 'BambuStudio'),
         )
         if _bench_enabled and _export_t0 is not None:
-            _hifi_timings['export_3mf_s'] = time.perf_counter() - _export_t0
+            _export_elapsed = time.perf_counter() - _export_t0
+            _hifi_timings['export_3mf_s'] = _export_elapsed
             ctx['_hifi_timings'] = _hifi_timings
+            print(f"[S09] export_3mf done: {_export_elapsed:.3f}s")
         print(f"[S09] 3MF exported with embedded settings: {out_path}")
     except Exception as e:
         print(f"[S09] Error exporting 3MF: {e}")

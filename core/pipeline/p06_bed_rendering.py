@@ -8,6 +8,7 @@ P06 — 热床网格渲染与最终预览输出。
 - _create_bed_mesh: 创建圆角打印热床 3D 网格（带 UV 贴图纹理）
 """
 
+import time
 import numpy as np
 import trimesh
 from PIL import Image, ImageDraw, ImageFont
@@ -364,6 +365,7 @@ def run(ctx: dict) -> dict:
         KeyError: 缺少必需的输入键时抛出
     """
     # ---- 读取必需输入 ----
+    _t0 = time.perf_counter()
     preview_rgba = ctx['preview_rgba']
     cache = ctx['cache']
     color_conf = ctx['color_conf']
@@ -386,4 +388,7 @@ def run(ctx: dict) -> dict:
     # ---- 写入输出 ----
     ctx['display_image'] = display
     ctx['status_msg'] = status_msg
+    _elapsed = time.perf_counter() - _t0
+    ctx.setdefault('_preview_timings', {})['p06_s'] = _elapsed
+    print(f"[P06] bed_rendering done: {_elapsed:.3f}s")
     return ctx

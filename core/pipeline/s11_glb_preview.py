@@ -12,6 +12,7 @@ S11 — GLB 3D 预览导出。
 """
 
 import os
+import time
 from typing import Optional
 
 import cv2
@@ -73,115 +74,100 @@ def _create_preview_mesh(
     else:
         shrink = 0.0
 
-    vertices = []
-    faces = []
-    face_colors = []
+    # --- numpy vectorized mesh build ---
+    _CUBE_FACES = np.array([
+        [0,2,1],[0,3,2],
+        [4,5,6],[4,6,7],
+        [0,1,5],[0,5,4],
+        [1,2,6],[1,6,5],
+        [2,3,7],[2,7,6],
+        [3,0,4],[3,4,7],
+    ], dtype=np.int64)  # (12, 3)
 
-    for y in range(height):
-        for x in range(width):
-            if not mask_solid[y, x]:
-                continue
+    def _boxes_np(px, py, z0_scalar, z1_scalar, colors_rgba):
+        """Build voxel boxes for N pixels, all at same z range."""
+        n = len(px)
+        if n == 0:
+            return np.empty((0,3)), np.empty((0,3),dtype=np.int64), np.empty((0,4),dtype=np.uint8)
+        x0 = px + shrink
+        x1 = px + 1 - shrink
+        y0 = py + shrink
+        y1 = py + 1 - shrink
+        z0 = np.full(n, z0_scalar, dtype=np.float64)
+        z1 = np.full(n, z1_scalar, dtype=np.float64)
+        # verts: (n,8,3)
+        verts = np.stack([
+            np.column_stack([x0,y0,z0]),
+            np.column_stack([x1,y0,z0]),
+            np.column_stack([x1,y1,z0]),
+            np.column_stack([x0,y1,z0]),
+            np.column_stack([x0,y0,z1]),
+            np.column_stack([x1,y0,z1]),
+            np.column_stack([x1,y1,z1]),
+            np.column_stack([x0,y1,z1]),
+        ], axis=1)  # (n,8,3)
+        all_verts = verts.reshape(-1, 3)
+        offsets = (np.arange(n, dtype=np.int64) * 8)[:,None,None]
+        all_faces = (_CUBE_FACES[None] + offsets).reshape(-1, 3)
+        if colors_rgba.ndim == 1:
+            all_colors = np.tile(colors_rgba, (n*12, 1))
+        else:
+            all_colors = np.repeat(colors_rgba, 12, axis=0)
+        return all_verts, all_faces, all_colors
 
-            rgb = matched_rgb[y, x]
-            rgba = [int(rgb[0]), int(rgb[1]), int(rgb[2]), 255]
+    ys_all, xs_all = np.where(mask_solid)
+    world_ys = (height - 1 - ys_all).astype(np.float64)
+    xs_f = xs_all.astype(np.float64)
 
-            world_y = (height - 1 - y)
-            x0, x1 = x + shrink, x + 1 - shrink
-            y0, y1 = world_y + shrink, world_y + 1 - shrink
+    all_v_list, all_f_list, all_c_list = [], [], []
+    face_offset = 0
 
-            # Determine Z range for this pixel
-            if backing_z_range is not None and preview_colors is not None:
-                backing_start, backing_end = backing_z_range
+    if backing_z_range is not None and preview_colors is not None:
+        backing_start, backing_end = backing_z_range
+        backing_color_rgba = np.array(preview_colors[backing_color_id], dtype=np.uint8)[:4]
+        pixel_colors = np.column_stack([
+            matched_rgb[ys_all, xs_all].astype(np.uint8),
+            np.full(len(ys_all), 255, dtype=np.uint8)
+        ])  # (N,4)
 
-                # Create backing layer box
-                z0_backing = backing_start
-                z1_backing = backing_end + 1
+        # backing box
+        v, f, c = _boxes_np(xs_f, world_ys, float(backing_start), float(backing_end+1), backing_color_rgba)
+        if len(v):
+            all_v_list.append(v); all_f_list.append(f + face_offset); all_c_list.append(c)
+            face_offset += len(v)
 
-                base_idx = len(vertices)
-                vertices.extend([
-                    [x0, y0, z0_backing], [x1, y0, z0_backing], [x1, y1, z0_backing], [x0, y1, z0_backing],
-                    [x0, y0, z1_backing], [x1, y0, z1_backing], [x1, y1, z1_backing], [x0, y1, z1_backing]
-                ])
+        # bottom box (z 0 -> backing_start)
+        if backing_start > 0:
+            v, f, c = _boxes_np(xs_f, world_ys, 0.0, float(backing_start), pixel_colors)
+            if len(v):
+                all_v_list.append(v); all_f_list.append(f + face_offset); all_c_list.append(c)
+                face_offset += len(v)
 
-                # Apply backing color
-                actual_backing_color_id = 0 if backing_color_id == -2 else backing_color_id
-                backing_rgba = [int(preview_colors[actual_backing_color_id][0]),
-                               int(preview_colors[actual_backing_color_id][1]),
-                               int(preview_colors[actual_backing_color_id][2]), 255]
+        # top box (backing_end+1 -> total_layers)
+        if backing_end + 1 < total_layers:
+            v, f, c = _boxes_np(xs_f, world_ys, float(backing_end+1), float(total_layers), pixel_colors)
+            if len(v):
+                all_v_list.append(v); all_f_list.append(f + face_offset); all_c_list.append(c)
+                face_offset += len(v)
+    else:
+        pixel_colors = np.column_stack([
+            matched_rgb[ys_all, xs_all].astype(np.uint8),
+            np.full(len(ys_all), 255, dtype=np.uint8)
+        ])
+        v, f, c = _boxes_np(xs_f, world_ys, 0.0, float(total_layers), pixel_colors)
+        if len(v):
+            all_v_list.append(v); all_f_list.append(f); all_c_list.append(c)
 
-                cube_faces = [
-                    [0, 2, 1], [0, 3, 2],
-                    [4, 5, 6], [4, 6, 7],
-                    [0, 1, 5], [0, 5, 4],
-                    [1, 2, 6], [1, 6, 5],
-                    [2, 3, 7], [2, 7, 6],
-                    [3, 0, 4], [3, 4, 7]
-                ]
-
-                for f in cube_faces:
-                    faces.append([v + base_idx for v in f])
-                    face_colors.append(backing_rgba)
-
-                # Bottom layers (0 to backing_start)
-                if backing_start > 0:
-                    z0_bottom = 0
-                    z1_bottom = backing_start
-
-                    base_idx = len(vertices)
-                    vertices.extend([
-                        [x0, y0, z0_bottom], [x1, y0, z0_bottom], [x1, y1, z0_bottom], [x0, y1, z0_bottom],
-                        [x0, y0, z1_bottom], [x1, y0, z1_bottom], [x1, y1, z1_bottom], [x0, y1, z1_bottom]
-                    ])
-
-                    for f in cube_faces:
-                        faces.append([v + base_idx for v in f])
-                        face_colors.append(rgba)
-
-                # Top layers (backing_end+1 to total_layers)
-                if backing_end + 1 < total_layers:
-                    z0_top = backing_end + 1
-                    z1_top = total_layers
-
-                    base_idx = len(vertices)
-                    vertices.extend([
-                        [x0, y0, z0_top], [x1, y0, z0_top], [x1, y1, z0_top], [x0, y1, z0_top],
-                        [x0, y0, z1_top], [x1, y0, z1_top], [x1, y1, z1_top], [x0, y1, z1_top]
-                    ])
-
-                    for f in cube_faces:
-                        faces.append([v + base_idx for v in f])
-                        face_colors.append(rgba)
-            else:
-                # Original behavior: single box from 0 to total_layers
-                z0, z1 = 0, total_layers
-
-                base_idx = len(vertices)
-                vertices.extend([
-                    [x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0],
-                    [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]
-                ])
-
-                cube_faces = [
-                    [0, 2, 1], [0, 3, 2],
-                    [4, 5, 6], [4, 6, 7],
-                    [0, 1, 5], [0, 5, 4],
-                    [1, 2, 6], [1, 6, 5],
-                    [2, 3, 7], [2, 7, 6],
-                    [3, 0, 4], [3, 4, 7]
-                ]
-
-                for f in cube_faces:
-                    faces.append([v + base_idx for v in f])
-                    face_colors.append(rgba)
-
-    if not vertices:
+    if not all_v_list:
         return None
 
-    mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
-    mesh.visual.face_colors = np.array(face_colors, dtype=np.uint8)
+    vertices_np = np.concatenate(all_v_list, axis=0)
+    faces_np = np.concatenate(all_f_list, axis=0)
+    face_colors_np = np.concatenate(all_c_list, axis=0)
 
+    mesh = trimesh.Trimesh(vertices=vertices_np, faces=faces_np, process=False)
+    mesh.visual.face_colors = face_colors_np
     print(f"[PREVIEW] Generated: {len(mesh.vertices):,} vertices, {len(mesh.faces):,} faces")
-
     return mesh
 
 
@@ -249,11 +235,6 @@ def _build_color_voxel_mesh(
     if n_pixels == 0:
         return None
 
-    # Pre-allocate arrays for all cubes (8 verts, 12 faces each)
-    all_verts = np.empty((n_pixels * 8, 3), dtype=np.float64)
-    all_faces = np.empty((n_pixels * 12, 3), dtype=np.int64)
-    all_colors = np.empty((n_pixels * 12, 4), dtype=np.uint8)
-
     cube_faces_template = np.array([
         [0, 2, 1], [0, 3, 2],
         [4, 5, 6], [4, 6, 7],
@@ -271,22 +252,72 @@ def _build_color_voxel_mesh(
     z0 = np.zeros(n_pixels, dtype=np.float64)
     z1 = np.full(n_pixels, float(total_layers), dtype=np.float64)
 
-    # Vectorized vertex construction: 8 corners per pixel
-    for i, (vx0, vx1, vy0, vy1, vz0, vz1) in enumerate(
-        zip(x0, x1, y0, y1, z0, z1)
-    ):
-        base = i * 8
-        all_verts[base:base + 8] = [
-            [vx0, vy0, vz0], [vx1, vy0, vz0], [vx1, vy1, vz0], [vx0, vy1, vz0],
-            [vx0, vy0, vz1], [vx1, vy0, vz1], [vx1, vy1, vz1], [vx0, vy1, vz1],
-        ]
-        face_base = i * 12
-        all_faces[face_base:face_base + 12] = cube_faces_template + base
-        all_colors[face_base:face_base + 12] = rgba
+    # 纯 numpy 向量化：(N,8,3) → (N*8,3)
+    all_verts = np.stack([
+        np.column_stack([x0, y0, z0]),  # v0
+        np.column_stack([x1, y0, z0]),  # v1
+        np.column_stack([x1, y1, z0]),  # v2
+        np.column_stack([x0, y1, z0]),  # v3
+        np.column_stack([x0, y0, z1]),  # v4
+        np.column_stack([x1, y0, z1]),  # v5
+        np.column_stack([x1, y1, z1]),  # v6
+        np.column_stack([x0, y1, z1]),  # v7
+    ], axis=1).reshape(-1, 3)
+
+    # 面索引向量化：(N,12,3) → (N*12,3)
+    offsets = (np.arange(n_pixels, dtype=np.int64) * 8)[:, None, None]
+    all_faces = (cube_faces_template[None, :, :] + offsets).reshape(-1, 3)
+
+    all_colors = np.tile(rgba, (n_pixels * 12, 1))
 
     mesh = trimesh.Trimesh(vertices=all_verts, faces=all_faces, process=False)
     mesh.visual.face_colors = all_colors
     return mesh
+
+
+
+def _build_backing_plate_mesh(
+    mask_solid: np.ndarray,
+    height: int,
+    pixel_scale: float,
+    rgba: np.ndarray,
+) -> Optional[trimesh.Trimesh]:
+    """用 cv2.findContours 轮廓拉伸构建底板，替代逐像素体素方案。
+    顶点数从 ~3M 降至 <5k，节省约 2.5s。
+    """
+    from shapely.geometry import Polygon
+    mask_u8 = mask_solid.astype(np.uint8) * 255
+    contours, _ = cv2.findContours(mask_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_KCOS)
+    if not contours:
+        return None
+
+    extrude_h = float(PrinterConfig.LAYER_HEIGHT)
+    meshes = []
+    for cnt in contours:
+        if len(cnt) < 3:
+            continue
+        pts = cnt.squeeze(1).astype(np.float64)
+        world_pts = np.column_stack([
+            pts[:, 0] * pixel_scale,
+            (height - pts[:, 1]) * pixel_scale,
+        ])
+        try:
+            poly = Polygon(world_pts)
+            if not poly.is_valid:
+                poly = poly.buffer(0)
+            if poly.is_empty or poly.area < 1e-4:
+                continue
+            m = trimesh.creation.extrude_polygon(poly, height=extrude_h)
+            meshes.append(m)
+        except Exception:
+            continue
+
+    if not meshes:
+        return None
+
+    result = trimesh.util.concatenate(meshes) if len(meshes) > 1 else meshes[0]
+    result.visual.face_colors = np.tile(rgba, (len(result.faces), 1))
+    return result
 
 
 def generate_empty_bed_glb(
@@ -351,6 +382,8 @@ def generate_segmented_glb(cache: dict, max_meshes: int = 64) -> Optional[str]:
         return None
 
     try:
+        _glb_t0 = time.perf_counter()
+
         # 1. Downsample large images
         height, width = matched_rgb.shape[:2]
         total_pixels = width * height
@@ -387,6 +420,7 @@ def generate_segmented_glb(cache: dict, max_meshes: int = 64) -> Optional[str]:
         print(f"[SEGMENTED_GLB] Found {n_unique} unique colors")
 
         # 3. Merge low-frequency colors if exceeding max_meshes
+        _t_merge = time.perf_counter()
         if n_unique > max_meshes:
             print(f"[SEGMENTED_GLB] Merging {n_unique} colors down to {max_meshes}")
             merged_colors = _merge_low_frequency_colors(unique_colors, pixel_counts, max_meshes)
@@ -398,9 +432,10 @@ def generate_segmented_glb(cache: dict, max_meshes: int = 64) -> Optional[str]:
                 solid_pixels, axis=0, return_inverse=True, return_counts=True,
             )
             matched_rgb = matched_rgb_work
-            print(f"[SEGMENTED_GLB] After merge: {len(unique_colors)} colors")
+            print(f"[SEGMENTED_GLB] After merge: {len(unique_colors)} colors ({time.perf_counter() - _t_merge:.3f}s)")
 
         # 4. Build per-color Meshes
+        _t_mesh = time.perf_counter()
         total_layers = 25
         scene = trimesh.Scene()
 
@@ -435,22 +470,22 @@ def generate_segmented_glb(cache: dict, max_meshes: int = 64) -> Optional[str]:
             print("[SEGMENTED_GLB] No meshes generated")
             return None
 
-        # 4.5 Build backing plate mesh
-        backing_mesh = _build_color_voxel_mesh(
-            mask_solid, height, width,
-            total_layers=1,
-            shrink=shrink,
+        print(f"[SEGMENTED_GLB] color_meshes ({len(scene.geometry)} colors) done: {time.perf_counter() - _t_mesh:.3f}s")
+
+        # 4.5 Build backing plate mesh (contour extrusion)
+        _t_backing = time.perf_counter()
+        backing_mesh = _build_backing_plate_mesh(
+            mask_solid=mask_solid,
+            height=height,
+            pixel_scale=pixel_scale,
             rgba=np.array([245, 245, 245, 255], dtype=np.uint8),
         )
         if backing_mesh is not None:
-            backing_mesh.apply_transform(scale_transform)
-            min_z = backing_mesh.vertices[:, 2].min()
-            if min_z != 0.0:
-                backing_mesh.vertices[:, 2] -= min_z
             scene.add_geometry(backing_mesh, node_name="backing_plate")
-            print(f"[SEGMENTED_GLB] Backing plate added ({backing_mesh.vertices.shape[0]} vertices)")
+            print(f"[SEGMENTED_GLB] Backing plate added ({backing_mesh.vertices.shape[0]} vertices) ({time.perf_counter() - _t_backing:.3f}s)")
 
         # 5. Extract 2D contours for each color
+        _t_contours = time.perf_counter()
         contours_data: dict[str, list[list[list[float]]]] = {}
         for color_rgb in unique_colors:
             r, g, b = int(color_rgb[0]), int(color_rgb[1]), int(color_rgb[2])
@@ -479,12 +514,14 @@ def generate_segmented_glb(cache: dict, max_meshes: int = 64) -> Optional[str]:
                 contours_data[hex_name] = color_contour_list
 
         cache['color_contours'] = contours_data
-        print(f"[SEGMENTED_GLB] Extracted contours for {len(contours_data)} colors")
+        print(f"[SEGMENTED_GLB] Extracted contours for {len(contours_data)} colors ({time.perf_counter() - _t_contours:.3f}s)")
 
         # 6. Export GLB
+        _t_export = time.perf_counter()
         glb_path = os.path.join(OUTPUT_DIR, "segmented_preview.glb")
         scene.export(glb_path)
-        print(f"[SEGMENTED_GLB] Exported {len(scene.geometry)} meshes -> {glb_path}")
+        print(f"[SEGMENTED_GLB] Exported {len(scene.geometry)} meshes -> {glb_path} ({time.perf_counter() - _t_export:.3f}s)")
+        print(f"[SEGMENTED_GLB] glb_gen done: {time.perf_counter() - _glb_t0:.3f}s")
         return glb_path
 
     except Exception as e:
@@ -578,6 +615,8 @@ def run(ctx: dict) -> dict:
     PipelineContext 输出键 / Output keys:
         - glb_path (str | None): GLB 预览文件路径
     """
+    _t0 = time.perf_counter()
+
     matched_rgb = ctx['matched_rgb']
     mask_solid = ctx['mask_solid']
     total_layers = ctx['total_layers']
@@ -654,4 +693,7 @@ def run(ctx: dict) -> dict:
 
     ctx['glb_path'] = glb_path
 
+    _elapsed = time.perf_counter() - _t0
+    print(f"[S11] glb_preview done: {_elapsed:.3f}s")
+    ctx.setdefault('_hifi_timings', {})['glb_preview_s'] = _elapsed
     return ctx

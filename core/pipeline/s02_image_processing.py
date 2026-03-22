@@ -99,7 +99,9 @@ def run(ctx: dict) -> dict:
         return ctx
 
     _elapsed = time.perf_counter() - _hifi_t0
-    print(f"[S02] Image processing took {_elapsed:.3f}s")
+    print(f"[S02] image_proc done: {_elapsed:.3f}s")
+    _hifi_timings = ctx.setdefault('_hifi_timings', {})
+    _hifi_timings['image_proc_s'] = _elapsed
 
     # Extract results into context
     ctx['matched_rgb'] = result['matched_rgb']

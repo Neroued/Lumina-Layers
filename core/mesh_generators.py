@@ -198,20 +198,19 @@ class HighFidelityMesher(BaseMesher):
     def generate_mesh(self, voxel_matrix, mat_id, height_px):
         """
         Generate high-fidelity mode mesh (Greedy Rectangle Merging)
-        
+
         Supports both regular materials (0-7) and backing layer (-2).
-        
         Returns a watertight mesh with optimized face count.
         """
         # Step 1: Vertical layer compression with dilation
         layer_groups = self._merge_layers_with_dilation(voxel_matrix, mat_id)
-        
+
         if not layer_groups:
             return None
-        
+
         mesh_type = "Backing" if mat_id == -2 else f"Mat ID {mat_id}"
         print(f"[HIGH_FIDELITY] {mesh_type}: Merged {voxel_matrix.shape[0]} layers → {len(layer_groups)} groups")
-        
+
         layer_rectangles = []
         total_rects = 0
         for start_z, end_z, mask in layer_groups:
@@ -279,24 +278,59 @@ class HighFidelityMesher(BaseMesher):
             base[:, 7, 2] = z_top
 
             v_start = rect_idx * 8
-            v_end = (rect_idx + n) * 8
-            all_vertices[v_start:v_end] = base.reshape(-1, 3)
+            all_vertices[v_start:v_start + n * 8] = base.reshape(-1, 3)
 
             offsets = (np.arange(n, dtype=np.int64) * 8 + v_start).reshape(-1, 1, 1)
             faces = face_template.reshape(1, 12, 3) + offsets
             f_start = rect_idx * 12
-            f_end = (rect_idx + n) * 12
-            all_faces[f_start:f_end] = faces.reshape(-1, 3)
+            all_faces[f_start:f_start + n * 12] = faces.reshape(-1, 3)
             rect_idx += n
 
         mesh = trimesh.Trimesh(vertices=all_vertices, faces=all_faces)
         mesh.merge_vertices()
         mesh.update_faces(mesh.unique_faces())
-        
+
         print(f"[HIGH_FIDELITY] {mesh_type}: {total_rects} rects → {len(mesh.vertices):,} verts, {len(mesh.faces):,} faces")
-        
         return mesh
-    
+
+    def _merge_layers_with_dilation(self, voxel_matrix, mat_id):
+        """
+        Merge identical vertical layers and apply morphological dilation.
+        Groups consecutive Z-layers with identical masks to reduce geometry.
+        """
+        kernel = np.ones((3, 3), np.uint8)
+        layer_groups = []
+        prev_mask = None
+        start_z = 0
+
+        for z in range(voxel_matrix.shape[0]):
+            curr_mask = (voxel_matrix[z] == mat_id)
+
+            if not np.any(curr_mask):
+                if prev_mask is not None and np.any(prev_mask):
+                    layer_groups.append((start_z, z - 1, prev_mask))
+                    prev_mask = None
+                continue
+
+            dilated_mask = cv2.dilate(
+                curr_mask.astype(np.uint8), kernel, iterations=1
+            ).astype(bool)
+
+            if prev_mask is None:
+                start_z = z
+                prev_mask = dilated_mask.copy()
+            elif np.array_equal(dilated_mask, prev_mask):
+                pass
+            else:
+                layer_groups.append((start_z, z - 1, prev_mask))
+                start_z = z
+                prev_mask = dilated_mask.copy()
+
+        if prev_mask is not None and np.any(prev_mask):
+            layer_groups.append((start_z, voxel_matrix.shape[0] - 1, prev_mask))
+
+        return layer_groups
+
     def _greedy_rect_merge(self, mask, height_px):
         """
         Greedy rectangle merging algorithm (Vectorized Version)
@@ -374,52 +408,6 @@ class HighFidelityMesher(BaseMesher):
                 rectangles.append((float(x_start), float(y), float(x_end), float(y_end)))
         
         return rectangles
-    
-    def _merge_layers_with_dilation(self, voxel_matrix, mat_id):
-        """
-        Merge identical vertical layers and apply morphological dilation
-        
-        Groups consecutive Z-layers with identical masks to reduce geometry.
-        Applies morphological dilation to ensure thin features are printable.
-        
-        Returns:
-            list of tuples: [(start_z, end_z, dilated_mask), ...]
-        """
-        kernel = np.ones((3, 3), np.uint8)
-        
-        layer_groups = []
-        prev_mask = None
-        start_z = 0
-        
-        for z in range(voxel_matrix.shape[0]):
-            curr_mask = (voxel_matrix[z] == mat_id)
-            
-            if not np.any(curr_mask):
-                if prev_mask is not None and np.any(prev_mask):
-                    layer_groups.append((start_z, z - 1, prev_mask))
-                    prev_mask = None
-                continue
-            
-            dilated_mask = cv2.dilate(
-                curr_mask.astype(np.uint8), 
-                kernel, 
-                iterations=1
-            ).astype(bool)
-            
-            if prev_mask is None:
-                start_z = z
-                prev_mask = dilated_mask.copy()
-            elif np.array_equal(dilated_mask, prev_mask):
-                pass
-            else:
-                layer_groups.append((start_z, z - 1, prev_mask))
-                start_z = z
-                prev_mask = dilated_mask.copy()
-        
-        if prev_mask is not None and np.any(prev_mask):
-            layer_groups.append((start_z, voxel_matrix.shape[0] - 1, prev_mask))
-        
-        return layer_groups
 
 
 # ========== Factory Method ==========

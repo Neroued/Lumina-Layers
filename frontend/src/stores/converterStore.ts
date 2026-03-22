@@ -188,6 +188,7 @@ export interface ConverterState {
 
   // UI 状态
   isLoading: boolean;
+  isGenerating: boolean;
   error: string | null;
   previewImageUrl: string | null;
   modelUrl: string | null;
@@ -450,6 +451,7 @@ const DEFAULT_STATE: ConverterState = {
   isCropping: false,
   autoDetectColorsLoading: false,
   isLoading: false,
+  isGenerating: false,
   error: null,
   previewImageUrl: null,
   modelUrl: null,
@@ -1298,7 +1300,9 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         return null;
       }
 
-      set({ isLoading: true, error: null });
+      set({ isGenerating: true, error: null });
+      console.time('[LUMINA] generate');
+      console.timeLog('[LUMINA] generate', 'request sending');
       try {
         // 合并 colorRemapMap 转换的 replacement_regions 与已有的 replacement_regions
         let mergedReplacements: ColorReplacementItem[] | undefined =
@@ -1314,6 +1318,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           mergedReplacements = [...(mergedReplacements ?? []), ...remapRegions];
         }
 
+        console.timeLog('[LUMINA] generate', 'request sent');
         const response = await apiConvertGenerate(state.sessionId, {
           lut_name: state.lut_name,
           target_width_mm: state.target_width_mm,
@@ -1366,21 +1371,23 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         // 后端返回 download_url 和可选的 preview_3d_url
         // preview_3d_url 指向 GLB 文件（Three.js 可加载）
         // download_url 指向 3MF 文件（ZIP 格式，Three.js 无法加载）
+        console.timeLog('[LUMINA] generate', 'response received');
         const modelUrl = response.preview_3d_url
           ? `http://localhost:8000${response.preview_3d_url}`
           : null;
         set({
-          isLoading: false,
+          isGenerating: false,
           modelUrl,
           threemfDiskPath: response.threemf_disk_path ?? null,
           downloadUrl: response.download_url
             ? `http://localhost:8000${response.download_url}`
             : null,
         });
+        console.timeLog('[LUMINA] generate', 'UI unlocked (isGenerating=false, modelUrl set)');
         return modelUrl;
       } catch (err) {
         set({
-          isLoading: false,
+          isGenerating: false,
           error: err instanceof Error ? err.message : "生成失败",
         });
         return null;

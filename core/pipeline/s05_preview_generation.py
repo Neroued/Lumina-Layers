@@ -8,6 +8,7 @@ S05 — 2D 预览图生成与挂件环绘制。
 - _draw_loop_on_preview: 在预览图上绘制挂件环
 """
 
+import time
 import numpy as np
 from PIL import Image, ImageDraw
 from typing import Optional, Dict, Tuple
@@ -312,6 +313,8 @@ def run(ctx: dict) -> dict:
         - preview_img (PIL.Image): PIL RGBA 预览图像
         - loop_info (dict | None): 挂件环信息
     """
+    _t0 = time.perf_counter()
+
     matched_rgb = ctx['matched_rgb']
     mask_solid = ctx['mask_solid']
     target_w = ctx['target_w']
@@ -353,4 +356,9 @@ def run(ctx: dict) -> dict:
     ctx['preview_img'] = preview_img
     ctx['loop_info'] = loop_info
 
+    _elapsed = time.perf_counter() - _t0
+    _hifi_timings = ctx.get('_hifi_timings', {})
+    _hifi_timings['preview_gen_s'] = _elapsed
+    ctx['_hifi_timings'] = _hifi_timings
+    print(f"[S05] preview_gen done: {_elapsed:.3f}s")
     return ctx

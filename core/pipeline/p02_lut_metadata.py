@@ -7,6 +7,8 @@ P02 — LUT 元数据加载与颜色系统配置。
 - LUT 元数据加载（通过 LUTManager.load_lut_with_metadata）
 """
 
+import time
+
 from config import ColorSystem
 
 # Try to import LUTManager for metadata loading
@@ -32,6 +34,7 @@ def run(ctx: dict) -> dict:
         KeyError: 缺少必需的输入键时抛出
     """
     # ---- 读取必需输入 ----
+    _t0 = time.perf_counter()
     actual_lut_path = ctx['actual_lut_path']
     color_mode = ctx['color_mode']
 
@@ -49,4 +52,7 @@ def run(ctx: dict) -> dict:
     # ---- 写入输出 ----
     ctx['color_conf'] = color_conf
     ctx['lut_metadata'] = lut_metadata
+    _elapsed = time.perf_counter() - _t0
+    ctx.setdefault('_preview_timings', {})['p02_s'] = _elapsed
+    print(f"[P02] lut_metadata done: {_elapsed:.3f}s")
     return ctx

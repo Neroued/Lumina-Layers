@@ -160,6 +160,8 @@ def run_preview_pipeline(ctx: dict) -> dict:
     Returns:
         更新后的 PipelineContext 字典
     """
+    _preview_pipeline_t0 = time.perf_counter()
+
     # ---- P01: Preview validation ----
     _report_progress(ctx, 0.0, "预览验证中... | Validating preview inputs...")
     try:
@@ -186,6 +188,24 @@ def run_preview_pipeline(ctx: dict) -> dict:
         if ctx.get('error'):
             return ctx
         _report_progress(ctx, prog_after)
+
+    # ---- PREVIEW TIMING summary ----
+    _preview_total = time.perf_counter() - _preview_pipeline_t0
+    _pt = ctx.get('_preview_timings', {})
+    _keys_order = [
+        ('p01_s', 'P01 validation'),
+        ('p02_s', 'P02 lut_meta'),
+        ('p03_s', 'P03 core_proc'),
+        ('p04_s', 'P04 cache_build'),
+        ('p05_s', 'P05 palette'),
+        ('p06_s', 'P06 bed_render'),
+    ]
+    _lines = []
+    for key, name in _keys_order:
+        if key in _pt:
+            _lines.append(f"  {name:<18} {_pt[key]:.3f}s")
+    _lines.append(f"  {'TOTAL':<18} {_preview_total:.3f}s")
+    print("[PREVIEW TIMING]\n" + "\n".join(_lines))
 
     return ctx
 

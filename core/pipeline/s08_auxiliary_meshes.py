@@ -13,6 +13,7 @@ S08 — 附加网格生成（底板、掐丝、自由颜色、挂件环、涂层
 """
 
 import os
+import time
 import traceback
 
 import cv2
@@ -208,6 +209,8 @@ def run(ctx: dict) -> dict:
         - loop_added (bool): 挂件环是否成功添加
         - outline_added (bool): 描边是否成功添加
     """
+    _t0 = time.perf_counter()
+
     scene = ctx['scene']
     valid_slot_names = ctx['valid_slot_names']
     full_matrix = ctx['full_matrix']
@@ -236,6 +239,7 @@ def run(ctx: dict) -> dict:
 
     # ========== Separate Backing Mesh ==========
     if separate_backing:
+        _s08_t_backing = time.perf_counter()
         print(f"[S08] Attempting to generate separate backing mesh (mat_id=-2)...")
         try:
             backing_mesh = mesher.generate_mesh(full_matrix, mat_id=-2, height_px=target_h)
@@ -266,9 +270,12 @@ def run(ctx: dict) -> dict:
             print(f"[S08] Continuing with other material meshes...")
     else:
         print(f"[S08] Backing merged with first layer (original behavior)")
+    if separate_backing:
+        print(f"[S08] backing: {time.perf_counter() - _s08_t_backing:.3f}s")
 
     # ========== Cloisonné Wire Mesh ==========
     if enable_cloisonne and backing_metadata.get('is_cloisonne'):
+        _s08_t_wire = time.perf_counter()
         print(f"[S08] Generating cloisonné wire mesh (mat_id=-3)...")
         try:
             wire_mesh = mesher.generate_mesh(full_matrix, mat_id=-3, height_px=target_h)
@@ -285,9 +292,11 @@ def run(ctx: dict) -> dict:
         except Exception as e:
             print(f"[S08] Error generating wire mesh: {e}")
             traceback.print_exc()
+        print(f"[S08] wire: {time.perf_counter() - _s08_t_wire:.3f}s")
 
     # ========== Free Color Mesh Extraction ==========
     if free_color_set:
+        _s08_t_free = time.perf_counter()
         _free_set = {c.lower() for c in free_color_set if c}
         if _free_set:
             print(f"[S08] Free Color mode: {len(_free_set)} colors marked")
@@ -327,9 +336,11 @@ def run(ctx: dict) -> dict:
                         print(f"[S08]   {hex_c}: mesh empty, skipping")
                 except Exception as e:
                     print(f"[S08]   Error extracting free color {hex_c}: {e}")
+        print(f"[S08] free_color: {time.perf_counter() - _s08_t_free:.3f}s")
 
     # ========== Keychain Loop ==========
     if add_loop and loop_info is not None:
+        _s08_t_loop = time.perf_counter()
         try:
             loop_thickness = total_layers * PrinterConfig.LAYER_HEIGHT
             loop_mesh = create_keychain_loop(
@@ -355,9 +366,11 @@ def run(ctx: dict) -> dict:
                 print(f"[S08] Loop added successfully")
         except Exception as e:
             print(f"[S08] Loop creation failed: {e}")
+        print(f"[S08] loop: {time.perf_counter() - _s08_t_loop:.3f}s")
 
     # ========== Coating Mesh ==========
     if enable_coating:
+        _s08_t_coating = time.perf_counter()
         try:
             coating_layers = max(1, int(round(coating_height_mm / PrinterConfig.LAYER_HEIGHT)))
             print(f"[S08] Generating coating: height={coating_height_mm}mm ({coating_layers} layers), bottom side")
@@ -400,9 +413,11 @@ def run(ctx: dict) -> dict:
         except Exception as e:
             print(f"[S08] Coating generation failed: {e}")
             traceback.print_exc()
+        print(f"[S08] coating: {time.perf_counter() - _s08_t_coating:.3f}s")
 
     # ========== Outline Mesh ==========
     if enable_outline:
+        _s08_t_outline = time.perf_counter()
         try:
             outline_thickness_mm = total_layers * PrinterConfig.LAYER_HEIGHT
             outline_z_offset = 0.0
@@ -441,10 +456,15 @@ def run(ctx: dict) -> dict:
         except Exception as e:
             print(f"[S08] Outline generation failed: {e}")
             traceback.print_exc()
+        print(f"[S08] outline: {time.perf_counter() - _s08_t_outline:.3f}s")
 
     ctx['scene'] = scene
     ctx['valid_slot_names'] = valid_slot_names
     ctx['loop_added'] = loop_added
     ctx['outline_added'] = outline_added
+
+    _elapsed = time.perf_counter() - _t0
+    print(f"[S08] aux_meshes done: {_elapsed:.3f}s")
+    ctx.setdefault('_hifi_timings', {})['aux_meshes_s'] = _elapsed
 
     return ctx

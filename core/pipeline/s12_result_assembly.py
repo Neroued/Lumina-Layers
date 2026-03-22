@@ -50,19 +50,32 @@ def run(ctx: dict) -> dict:
     # Step 10: Generate Status Message
     Stats.increment("conversions")
 
-    # Output detailed timing for HiFi mode
+    # Output detailed timing summary
     if _hifi_timings:
-        image_proc_s = _hifi_timings.get('image_proc_s', 0.0)
-        mesh_gen_s = _hifi_timings.get('mesh_gen_s', 0.0)
-        export_3mf_s = _hifi_timings.get('export_3mf_s', 0.0)
-        total_s = image_proc_s + mesh_gen_s + export_3mf_s
-        print(
-            "[S12] HiFi timings (s): "
-            f"image_proc={image_proc_s:.3f}, "
-            f"mesh_gen={mesh_gen_s:.3f}, "
-            f"export_3mf={export_3mf_s:.3f}, "
-            f"total={total_s:.3f}"
-        )
+        _keys_order = [
+            ('input_val_s',    'input_val'),
+            ('image_proc_s',   'image_proc'),
+            ('color_replace_s','color_replace'),
+            ('debug_preview_s','debug_preview'),
+            ('preview_gen_s',  'preview_gen'),
+            ('voxel_build_s',  'voxel_build'),
+            ('mesh_gen_s',     'mesh_gen'),
+            ('aux_meshes_s',   'aux_meshes'),
+            ('color_recipe_s', 'color_recipe'),
+            ('export_3mf_s',   'export_3mf'),
+            ('glb_preview_s',  'glb_preview'),
+        ]
+        label_w = max(len(label) for _, label in _keys_order)
+        lines = ["[S12] TIMING ----"]
+        total_s = 0.0
+        for key, label in _keys_order:
+            val = _hifi_timings.get(key, 0.0)
+            if val > 0:
+                lines.append(f"[S12]   {label:<{label_w}} : {val:>8.3f}s")
+                total_s += val
+        lines.append(f"[S12]   {'TOTAL':<{label_w}} : {total_s:>8.3f}s")
+        lines.append("[S12] ---------")
+        print("\n".join(lines))
 
     mode_name = mode_info['mode'].get_display_name()
     msg = f"Conversion complete ({mode_name})! Resolution: {target_w}x{target_h}px"

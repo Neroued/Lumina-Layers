@@ -7,6 +7,7 @@ S04 — 调试预览图保存（可选步骤）。
 """
 
 import os
+import time
 import numpy as np
 import cv2
 from PIL import Image
@@ -90,6 +91,7 @@ def run(ctx: dict) -> dict:
     PipelineContext 输出键 / Output keys:
         (无新键，仅副作用：写文件)
     """
+    _t0 = time.perf_counter()
     debug_data = ctx.get('debug_data')
     mode_info = ctx['mode_info']
 
@@ -107,4 +109,9 @@ def run(ctx: dict) -> dict:
         except Exception as e:
             print(f"[S04] Warning: Failed to save debug preview: {e}")
 
+    _elapsed = time.perf_counter() - _t0
+    _hifi_timings = ctx.get('_hifi_timings', {})
+    _hifi_timings['debug_preview_s'] = _elapsed
+    ctx['_hifi_timings'] = _hifi_timings
+    print(f"[S04] debug_preview done: {_elapsed:.3f}s")
     return ctx

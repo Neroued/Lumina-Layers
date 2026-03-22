@@ -53,6 +53,13 @@ export function useAutoPreview(): void {
       return;
     }
 
+    // hasManualPreview just flipped to true (manual preview completed).
+    // Seed the ref so we don't re-trigger what was just manually run.
+    if (last.imageFile === null) {
+      lastTriggeredRef.current = { imageFile, lut_name, hue_enable, chroma_gate };
+      return;
+    }
+
     // Debounce 300ms then trigger preview
     timerRef.current = setTimeout(() => {
       lastTriggeredRef.current = {

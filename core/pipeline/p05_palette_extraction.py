@@ -7,6 +7,8 @@ P05 — 调色板提取。
 - 将 color_palette 写入 cache 字典
 """
 
+import time
+
 from core.pipeline.pipeline_utils import extract_color_palette
 
 
@@ -24,6 +26,7 @@ def run(ctx: dict) -> dict:
         KeyError: 缺少必需的输入键时抛出
     """
     # ---- 读取必需输入 ----
+    _t0 = time.perf_counter()
     cache = ctx['cache']
 
     # ---- 提取调色板 ----
@@ -32,4 +35,7 @@ def run(ctx: dict) -> dict:
 
     # ---- 写入输出（cache 已就地更新）----
     ctx['cache'] = cache
+    _elapsed = time.perf_counter() - _t0
+    ctx.setdefault('_preview_timings', {})['p05_s'] = _elapsed
+    print(f"[P05] palette_extraction done: {_elapsed:.3f}s")
     return ctx

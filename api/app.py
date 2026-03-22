@@ -11,11 +11,19 @@ background tasks lifecycle.
 """
 
 import asyncio
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+
+from api.logger import setup_file_logging
+
+# Install file logging as early as possible so all startup prints are captured.
+_log_path = setup_file_logging()
+if _log_path is not None:
+    os.environ["LUMINA_LOG_PATH"] = str(_log_path.resolve())
 
 from api.dependencies import (
     file_registry,

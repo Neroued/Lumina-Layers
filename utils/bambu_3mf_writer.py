@@ -6,6 +6,7 @@ Enhanced 3MF export with BambuStudio-compatible metadata and configurations
 import os
 import io
 import sys
+import time
 import zipfile
 import xml.etree.ElementTree as ET
 import json
@@ -158,37 +159,44 @@ class BambuStudio3MFWriter:
             raise ValueError("[BAMBU_3MF] Refusing to export 3MF: no mesh objects were added")
 
         print(f"[BAMBU_3MF] Exporting {len(self.objects)} objects to {self.output_path}")
-        
+        _exp_t0 = time.perf_counter()
+
         # Create a temporary directory for 3MF contents
         import tempfile
         import shutil
-        
+
         with tempfile.TemporaryDirectory() as tmpdir:
             # 1. Create directory structure
             os.makedirs(os.path.join(tmpdir, '3D', 'Objects'), exist_ok=True)
             os.makedirs(os.path.join(tmpdir, '3D', '_rels'), exist_ok=True)
             os.makedirs(os.path.join(tmpdir, 'Metadata'), exist_ok=True)
             os.makedirs(os.path.join(tmpdir, '_rels'), exist_ok=True)
-            
+
             # 2. Write [Content_Types].xml
             self._write_content_types(tmpdir)
-            
+
             # 3. Write _rels/.rels
             self._write_root_rels(tmpdir)
-            
+
             # 4. Write 3D/3dmodel.model (main assembly file)
+            _t_model = time.perf_counter()
             self._write_main_model(tmpdir)
-            
+            print(f"[BAMBU_3MF]   write_main_model: {time.perf_counter() - _t_model:.3f}s")
+
             # 5. Write 3D/_rels/3dmodel.model.rels
             self._write_model_rels(tmpdir)
-            
+
             # 6. Write Metadata files
+            _t_meta = time.perf_counter()
             self._write_metadata_files(tmpdir)
-            
+            print(f"[BAMBU_3MF]   write_metadata: {time.perf_counter() - _t_meta:.3f}s")
+
             # 7. Package everything into a ZIP file
+            _t_zip = time.perf_counter()
             self._create_zip(tmpdir, include_object_model=True)
-        
-        print(f"[BAMBU_3MF] [OK] Export complete: {self.output_path}")
+            print(f"[BAMBU_3MF]   create_zip: {time.perf_counter() - _t_zip:.3f}s")
+
+        print(f"[BAMBU_3MF] [OK] Export complete: {self.output_path} ({time.perf_counter() - _exp_t0:.3f}s total)")
         return self.output_path
     
     def _write_content_types(self, tmpdir: str):
@@ -331,20 +339,20 @@ class BambuStudio3MFWriter:
     @staticmethod
     def _write_vertices_bytes(raw, vertices):
         """Write vertices as ASCII bytes directly to a binary stream (no TextIOWrapper).
-        Uses %.2f (0.01 mm precision) — safe since printer resolution is 0.1 mm.
-        Batches chunks into one encode() call to minimise Python overhead."""
+        Uses %.2f (0.01 mm precision) — safe since printer resolution is 0.1 mm."""
         if len(vertices) == 0:
             return
         verts = np.asarray(vertices, dtype=np.float64)
-        x = np.char.mod('%.2f', verts[:, 0])
-        y = np.char.mod('%.2f', verts[:, 1])
-        z = np.char.mod('%.2f', verts[:, 2])
-        chunk = 100_000
+        chunk = 500_000
         total = len(verts)
         for i in range(0, total, chunk):
-            j = min(i + chunk, total)
-            lines = '     <vertex x="' + x[i:j] + '" y="' + y[i:j] + '" z="' + z[i:j] + '"/>\n'
-            raw.write(''.join(lines.tolist()).encode('ascii'))
+            block = verts[i:min(i + chunk, total)]
+            flat = block.ravel().tolist()
+            it = iter(flat)
+            raw.write(''.join(
+                f'     <vertex x="{x:.2f}" y="{y:.2f}" z="{z:.2f}"/>\n'
+                for x, y, z in zip(it, it, it)
+            ).encode('ascii'))
 
     @staticmethod
     def _write_triangles_bytes(raw, faces):
@@ -352,15 +360,16 @@ class BambuStudio3MFWriter:
         if len(faces) == 0:
             return
         f = np.asarray(faces, dtype=np.int64)
-        v1 = np.char.mod('%d', f[:, 0])
-        v2 = np.char.mod('%d', f[:, 1])
-        v3 = np.char.mod('%d', f[:, 2])
-        chunk = 100_000
+        chunk = 500_000
         total = len(f)
         for i in range(0, total, chunk):
-            j = min(i + chunk, total)
-            lines = '     <triangle v1="' + v1[i:j] + '" v2="' + v2[i:j] + '" v3="' + v3[i:j] + '"/>\n'
-            raw.write(''.join(lines.tolist()).encode('ascii'))
+            block = f[i:min(i + chunk, total)]
+            flat = block.ravel().tolist()
+            it = iter(flat)
+            raw.write(''.join(
+                f'     <triangle v1="{v1}" v2="{v2}" v3="{v3}"/>\n'
+                for v1, v2, v3 in zip(it, it, it)
+            ).encode('ascii'))
 
     @staticmethod
     def _format_vertices(vertices):
@@ -709,32 +718,40 @@ class BambuStudio3MFWriter:
             tree.write(f, encoding='utf-8', xml_declaration=False)
     
     def _write_object_file_to_zip(self, zf: zipfile.ZipFile):
-        """Stream mesh data directly into ZIP with DEFLATE compression and ZIP64 support.
-        将 mesh 数据以流式方式直接写入 ZIP，启用 DEFLATE 压缩和 ZIP64 大文件支持。
-        """
-        # Use ZipInfo to enable DEFLATE compression for the streamed entry.
-        # zf.open('name', 'w') alone defaults to ZIP_STORED (no compression),
-        # which causes "file size too large" errors on large models (>2 GiB).
+        """Build mesh XML into BytesIO first (fast), then compress in one shot (level 1)."""
+        import time as _time
+        import io as _io
+        buf = _io.BytesIO()
+        buf.write(b'<?xml version="1.0" encoding="UTF-8"?>\n')
+        buf.write(b'<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06" unit="millimeter" xml:lang="en-US" requiredextensions="p">\n')
+        buf.write(b' <resources>\n')
+
+        _t_fmt = 0.0
+        for idx, (mesh, name, color_rgb) in enumerate(self.objects, start=1):
+            buf.write(f'  <object id="{idx}" type="model">\n'.encode())
+            buf.write(b'   <mesh>\n    <vertices>\n')
+            _ts = _time.perf_counter()
+            self._write_vertices_bytes(buf, mesh.vertices)
+            _t_fmt += _time.perf_counter() - _ts
+            buf.write(b'    </vertices>\n    <triangles>\n')
+            _ts = _time.perf_counter()
+            self._write_triangles_bytes(buf, mesh.faces)
+            _t_fmt += _time.perf_counter() - _ts
+            buf.write(b'    </triangles>\n   </mesh>\n  </object>\n')
+
+        buf.write(b' </resources>\n <build/>\n</model>\n')
+        _t_compress_start = _time.perf_counter()
         zi = zipfile.ZipInfo('3D/Objects/object_1.model')
         zi.compress_type = zipfile.ZIP_DEFLATED
-        with zf.open(zi, 'w', force_zip64=True) as raw:
-            raw.write(b'<?xml version="1.0" encoding="UTF-8"?>\n')
-            raw.write(b'<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06" unit="millimeter" xml:lang="en-US" requiredextensions="p">\n')
-            raw.write(b' <resources>\n')
-
-            for idx, (mesh, name, color_rgb) in enumerate(self.objects, start=1):
-                raw.write(f'  <object id="{idx}" type="model">\n'.encode())
-                raw.write(b'   <mesh>\n    <vertices>\n')
-                self._write_vertices_bytes(raw, mesh.vertices)
-                raw.write(b'    </vertices>\n    <triangles>\n')
-                self._write_triangles_bytes(raw, mesh.faces)
-                raw.write(b'    </triangles>\n   </mesh>\n  </object>\n')
-
-            raw.write(b' </resources>\n <build/>\n</model>\n')
+        zf.writestr(zi, buf.getvalue(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=1)
+        _t_compress = _time.perf_counter() - _t_compress_start
+        print(f'[BAMBU_3MF]     format+write: {_t_fmt:.3f}s (compress: {_t_compress:.3f}s, total: {_t_fmt+_t_compress:.3f}s)')
 
     def _create_zip(self, tmpdir: str, include_object_model: bool = False):
-        """Package all files into a ZIP archive (.3mf)"""
-        with zipfile.ZipFile(self.output_path, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
+        """Package all files into a ZIP archive (.3mf) with fast compression (level 1)."""
+        with zipfile.ZipFile(self.output_path, 'w',
+                             compression=zipfile.ZIP_DEFLATED,
+                             compresslevel=1) as zf:
             for root, dirs, files in os.walk(tmpdir):
                 for file in files:
                     if include_object_model and file == 'object_1.model':

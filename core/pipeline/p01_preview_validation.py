@@ -9,6 +9,8 @@ P01 — 预览输入验证与参数规范化。
 - quantize_colors 范围 clamp（8-256）
 """
 
+import time
+
 from config import ModelingMode
 
 
@@ -31,6 +33,7 @@ def run(ctx: dict) -> dict:
         KeyError: 缺少必需的输入键时抛出
     """
     # ---- 读取必需输入 ----
+    _t0 = time.perf_counter()
     image_path = ctx['image_path']
     lut_path = ctx['lut_path']
     modeling_mode = ctx.get('modeling_mode')
@@ -67,4 +70,7 @@ def run(ctx: dict) -> dict:
     ctx['actual_lut_path'] = actual_lut_path
     ctx['modeling_mode'] = modeling_mode
     ctx['quantize_colors'] = quantize_colors
+    _elapsed = time.perf_counter() - _t0
+    ctx.setdefault('_preview_timings', {})['p01_s'] = _elapsed
+    print(f"[P01] validation done: {_elapsed:.3f}s")
     return ctx
