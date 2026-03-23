@@ -351,7 +351,7 @@ def generate_empty_bed_glb(
         return None
 
 
-def generate_segmented_glb(cache: dict, max_meshes: int = 64) -> Optional[str]:
+def generate_segmented_glb(cache: dict, max_meshes: int = 64, output_path: Optional[str] = None) -> Optional[str]:
     """Generate a color-segmented GLB preview with one named Mesh per color.
     生成按颜色分段的 GLB 预览，每种颜色一个独立 Mesh。
 
@@ -526,7 +526,7 @@ def generate_segmented_glb(cache: dict, max_meshes: int = 64) -> Optional[str]:
 
         # 6. Export GLB
         _t_export = time.perf_counter()
-        glb_path = os.path.join(OUTPUT_DIR, "segmented_preview.glb")
+        glb_path = output_path if output_path else os.path.join(OUTPUT_DIR, "segmented_preview.glb")
         scene.export(glb_path)
         print(f"[SEGMENTED_GLB] Exported {len(scene.geometry)} meshes -> {glb_path} ({time.perf_counter() - _t_export:.3f}s)")
         print(f"[SEGMENTED_GLB] glb_gen done: {time.perf_counter() - _glb_t0:.3f}s")
@@ -630,81 +630,26 @@ def run(ctx: dict) -> dict:
 
     matched_rgb = ctx["matched_rgb"]
     mask_solid = ctx["mask_solid"]
-    total_layers = ctx["total_layers"]
-    backing_color_id = ctx.get("backing_color_id", 0)
-    backing_metadata = ctx["backing_metadata"]
-    preview_colors = ctx["preview_colors"]
     pixel_scale = ctx["pixel_scale"]
-    loop_info = ctx.get("loop_info")
-    loop_added = ctx.get("loop_added", False)
     image_path = ctx["image_path"]
-    enable_outline = ctx.get("enable_outline", False)
-    outline_width = ctx.get("outline_width", 2.0)
-    outline_added = ctx.get("outline_added", False)
-    target_h = ctx["target_h"]
-    transform = ctx["transform"]
 
     _prog = ctx.get("progress")
     if _prog is not None:
         _prog(0.90, "生成 3D 预览中... | Generating 3D preview...")
 
-    preview_mesh = _create_preview_mesh(
-        matched_rgb,
-        mask_solid,
-        total_layers,
-        backing_color_id=backing_color_id,
-        backing_z_range=backing_metadata["backing_z_range"],
-        preview_colors=preview_colors,
-    )
+    height, width = matched_rgb.shape[:2]
+    target_width_mm = pixel_scale * width
+    base_name = os.path.splitext(os.path.basename(image_path))[0]
+    out_path = os.path.join(OUTPUT_DIR, generate_preview_filename(base_name))
 
-    if preview_mesh:
-        preview_mesh.apply_transform(transform)
-
-        if loop_added and loop_info:
-            try:
-                from core.geometry_utils import create_keychain_loop
-
-                preview_loop = create_keychain_loop(
-                    width_mm=loop_info["width_mm"],
-                    length_mm=loop_info["length_mm"],
-                    hole_dia_mm=loop_info["hole_dia_mm"],
-                    thickness_mm=total_layers * PrinterConfig.LAYER_HEIGHT,
-                    attach_x_mm=loop_info["attach_x_mm"],
-                    attach_y_mm=loop_info["attach_y_mm"],
-                    angle_deg=loop_info.get("angle_deg", 0.0),
-                )
-                if preview_loop:
-                    loop_color = preview_colors[loop_info["color_id"]]
-                    preview_loop.visual.face_colors = [loop_color] * len(preview_loop.faces)
-                    preview_mesh = trimesh.util.concatenate([preview_mesh, preview_loop])
-            except Exception as e:
-                print(f"[S11] Preview loop failed: {e}")
-
-        # Add outline to preview
-        if outline_added:
-            try:
-                from core.pipeline.s08_auxiliary_meshes import _generate_outline_mesh
-
-                outline_thickness_mm = total_layers * PrinterConfig.LAYER_HEIGHT
-                preview_outline = _generate_outline_mesh(
-                    mask_solid=mask_solid,
-                    pixel_scale=pixel_scale,
-                    outline_width_mm=outline_width,
-                    outline_thickness_mm=outline_thickness_mm,
-                    target_h=target_h,
-                )
-                if preview_outline:
-                    outline_color = preview_colors[0]  # White
-                    preview_outline.visual.face_colors = [outline_color] * len(preview_outline.faces)
-                    preview_mesh = trimesh.util.concatenate([preview_mesh, preview_outline])
-            except Exception as e:
-                print(f"[S11] Preview outline failed: {e}")
-
-    glb_path = None
-    if preview_mesh:
-        base_name = os.path.splitext(os.path.basename(image_path))[0]
-        glb_path = os.path.join(OUTPUT_DIR, generate_preview_filename(base_name))
-        preview_mesh.export(glb_path)
+    cache = {
+        "matched_rgb": matched_rgb,
+        "mask_solid": mask_solid,
+        "target_w": width,
+        "target_h": height,
+        "target_width_mm": target_width_mm,
+    }
+    glb_path = generate_segmented_glb(cache, output_path=out_path)
 
     ctx["glb_path"] = glb_path
 
