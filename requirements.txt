@@ -24,4 +24,4 @@ numba
 # Vectorizer (C++ image-to-SVG)
 neroued-vectorizer>=0.1.1
 # 3MF writer (C++ streaming 3MF with Production Extension)
-neroued-3mf>=0.1.0
+neroued-3mf>=0.2.0
