@@ -29,8 +29,8 @@ def _save_debug_preview(debug_data, material_matrix, mask_solid, image_path, mod
         mode_name (str): 模式名称
         num_materials (int): 材料数量 (4 或 6)，默认 4
     """
-    quantized_image = debug_data['quantized_image']
-    num_colors = debug_data['num_colors']
+    quantized_image = debug_data["quantized_image"]
+    num_colors = debug_data["num_colors"]
 
     print(f"[DEBUG_PREVIEW] Saving {mode_name} debug preview...")
     print(f"[DEBUG_PREVIEW] Quantized to {num_colors} colors")
@@ -51,9 +51,7 @@ def _save_debug_preview(debug_data, material_matrix, mask_solid, image_path, mod
             if not np.any(mat_mask):
                 continue
 
-            contours, _ = cv2.findContours(
-                mat_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE
-            )
+            contours, _ = cv2.findContours(mat_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
             cv2.drawContours(contour_overlay, contours, -1, (0, 0, 0), 1)
 
@@ -66,8 +64,8 @@ def _save_debug_preview(debug_data, material_matrix, mask_solid, image_path, mod
     base_name = os.path.splitext(os.path.basename(image_path))[0]
     debug_path = os.path.join(OUTPUT_DIR, f"{base_name}_{mode_name}_Debug.png")
 
-    debug_pil = Image.fromarray(debug_img, mode='RGB')
-    debug_pil.save(debug_path, 'PNG')
+    debug_pil = Image.fromarray(debug_img, mode="RGB")
+    debug_pil.save(debug_path, "PNG")
 
     print(f"[DEBUG_PREVIEW] Saved: {debug_path}")
     print(f"[DEBUG_PREVIEW] This is the EXACT image the vectorizer sees before meshing")
@@ -84,25 +82,25 @@ def run(ctx: dict) -> dict:
         - material_matrix (np.ndarray): 材料矩阵
         - mask_solid (np.ndarray): 实体掩码
         - image_path (str): 原始图像路径
-        - mode_info (dict): 模式信息（包含 'mode' 和 'name'）
+        - mode_info (dict): 模式信息（包含 'mode': ModelingMode）
         - slot_names (list): 材料槽名称列表
 
     PipelineContext 输出键 / Output keys:
         (无新键，仅副作用：写文件)
     """
-    debug_data = ctx.get('debug_data')
-    mode_info = ctx['mode_info']
+    debug_data = ctx.get("debug_data")
+    mode_info = ctx["mode_info"]
 
-    if debug_data is not None and mode_info['mode'] == ModelingMode.HIGH_FIDELITY:
+    if debug_data is not None and mode_info["mode"] == ModelingMode.HIGH_FIDELITY:
         try:
-            num_materials = len(ctx['slot_names'])
+            num_materials = len(ctx["slot_names"])
             _save_debug_preview(
                 debug_data=debug_data,
-                material_matrix=ctx['material_matrix'],
-                mask_solid=ctx['mask_solid'],
-                image_path=ctx['image_path'],
-                mode_name=mode_info['name'],
-                num_materials=num_materials
+                material_matrix=ctx["material_matrix"],
+                mask_solid=ctx["mask_solid"],
+                image_path=ctx["image_path"],
+                mode_name=mode_info["mode"].get_display_name(),
+                num_materials=num_materials,
             )
         except Exception as e:
             print(f"[S04] Warning: Failed to save debug preview: {e}")
