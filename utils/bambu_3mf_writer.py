@@ -197,7 +197,11 @@ class BambuStudio3MFWriter:
         self._inject_metadata_parts(builder, object_ids, assembly_id)
 
         doc = builder.build()
-        n3mf.write_to_file(self.output_path, doc)
+
+        opts = n3mf.WriteOptions()
+        opts.vertex_precision = 6
+        opts.compact_xml = True
+        n3mf.write_to_file(self.output_path, doc, opts)
 
         print(f"[BAMBU_3MF] [OK] Export complete: {self.output_path}")
         return self.output_path
