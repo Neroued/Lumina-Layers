@@ -3,6 +3,16 @@ import { useThree } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 
+function _clog(label: string) {
+  const start = (window as any).__luminaGenerateStart as number | undefined;
+  const elapsed_ms = start != null ? performance.now() - start : null;
+  fetch('http://localhost:8000/api/client-log', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ label, elapsed_ms }),
+  }).catch(() => {});
+}
+
 /**
  * Compute the offset needed to center a bounding box at the origin.
  * Pure function, independently testable.
@@ -39,6 +49,7 @@ function ModelViewer({ url }: ModelViewerProps) {
   const { camera, controls } = useThree();
   useEffect(() => {
     console.timeLog('[LUMINA] generate', 'GLB loaded (useGLTF resolved)');
+    _clog('generate: GLB loaded (useGLTF resolved)');
   }, [scene]);
 
   const preparedScene = useMemo(() => {
@@ -90,6 +101,7 @@ function ModelViewer({ url }: ModelViewerProps) {
 
   useEffect(() => {
     console.timeLog('[LUMINA] generate', 'GLB scene processed (useMemo done)');
+    _clog('generate: GLB scene processed (useMemo done)');
   }, [preparedScene]);
 
   // Auto-fit camera to model after load
@@ -126,6 +138,7 @@ function ModelViewer({ url }: ModelViewerProps) {
 
     console.timeLog('[LUMINA] generate', 'camera fitted (model fully visible)');
     console.timeEnd('[LUMINA] generate');
+    _clog('generate: camera fitted (model fully visible)');
     wrapper.clear();
   }, [preparedScene, camera, controls]);
 

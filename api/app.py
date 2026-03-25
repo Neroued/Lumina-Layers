@@ -123,6 +123,17 @@ def create_app() -> FastAPI:
         path, filename = result
         return file_to_response(path, filename)
 
+    @app.post("/api/client-log")
+    async def client_log(payload: dict):
+        """Receive frontend timing events and write to server log."""
+        label = payload.get("label", "?")
+        elapsed = payload.get("elapsed_ms", None)
+        msg = f"[CLIENT] {label}"
+        if elapsed is not None:
+            msg += f" (+{elapsed:.0f}ms)"
+        print(msg)
+        return {"ok": True}
+
     return app
 
 

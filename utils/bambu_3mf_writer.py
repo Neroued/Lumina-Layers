@@ -726,14 +726,13 @@ class BambuStudio3MFWriter:
             tree.write(f, encoding="utf-8", xml_declaration=False)
 
     def _write_object_file_to_zip(self, zf: zipfile.ZipFile):
-        """Build mesh XML into BytesIO first (fast), then compress in one shot (level 1)."""
+        """Write mesh XML to BytesIO, then compress into ZIP (level 1)."""
         import time as _time
         import io as _io
         buf = _io.BytesIO()
         buf.write(b'<?xml version="1.0" encoding="UTF-8"?>\n')
         buf.write(b'<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06" unit="millimeter" xml:lang="en-US" requiredextensions="p">\n')
         buf.write(b' <resources>\n')
-
         _t_fmt = 0.0
         for idx, (mesh, name, color_rgb) in enumerate(self.objects, start=1):
             buf.write(f'  <object id="{idx}" type="model">\n'.encode())
@@ -746,12 +745,12 @@ class BambuStudio3MFWriter:
             self._write_triangles_bytes(buf, mesh.faces)
             _t_fmt += _time.perf_counter() - _ts
             buf.write(b'    </triangles>\n   </mesh>\n  </object>\n')
-
         buf.write(b' </resources>\n <build/>\n</model>\n')
         _t_compress_start = _time.perf_counter()
         zi = zipfile.ZipInfo('3D/Objects/object_1.model')
         zi.compress_type = zipfile.ZIP_DEFLATED
-        zf.writestr(zi, buf.getvalue(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=1)
+        zf.writestr(zi, buf.getvalue(),
+                    compress_type=zipfile.ZIP_DEFLATED, compresslevel=1)
         _t_compress = _time.perf_counter() - _t_compress_start
         print(f'[BAMBU_3MF]     format+write: {_t_fmt:.3f}s (compress: {_t_compress:.3f}s, total: {_t_fmt+_t_compress:.3f}s)')
 
