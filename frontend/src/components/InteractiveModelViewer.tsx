@@ -297,6 +297,7 @@ function InteractiveModelViewer({
   const regionData = useConverterStore((s) => s.regionData);
   const previewPixelWidth = useConverterStore((s) => s.previewPixelWidth);
   const previewPixelHeight = useConverterStore((s) => s.previewPixelHeight);
+  const previewWidthMm = useConverterStore((s) => s.preview_width_mm);
 
   const handlePointerDown = useCallback(
     (event: PointerEvent) => {
@@ -317,24 +318,19 @@ function InteractiveModelViewer({
           colorHitRef.current = true;
 
           if (selectionMode === "current" || selectionMode === "region" || selectionMode === "multi-select") {
-            // 当前/局部区域/多选模式: 3D 点击 → region-detect
-            if (groupRef.current && modelBounds && previewPixelWidth && previewPixelHeight) {
-              // Use worldToLocal to correctly undo ALL group transforms
+            if (groupRef.current && previewPixelWidth && previewPixelHeight && previewWidthMm && previewWidthMm > 0) {
               const localPoint = groupRef.current.worldToLocal(intersects[0].point.clone());
-              const modelW = modelBounds.maxX - modelBounds.minX;
-              const modelH = modelBounds.maxY - modelBounds.minY;
-              if (modelW > 0 && modelH > 0) {
-                const normX = (localPoint.x - modelBounds.minX) / modelW;
-                const normY = 1 - (localPoint.y - modelBounds.minY) / modelH;
-                const pixelX = Math.round(normX * (previewPixelWidth - 1));
-                const pixelY = Math.round(normY * (previewPixelHeight - 1));
-                const clampedX = Math.max(0, Math.min(previewPixelWidth - 1, pixelX));
-                const clampedY = Math.max(0, Math.min(previewPixelHeight - 1, pixelY));
-                if (selectionMode === "multi-select") {
-                  detectAndAccumulateRegion(clampedX, clampedY);
-                } else {
-                  detectRegion(clampedX, clampedY);
-                }
+              const pixelScale = previewWidthMm / previewPixelWidth;
+              const originalX = localPoint.x + sceneCenter.x;
+              const originalY = localPoint.y + sceneCenter.y;
+              const pixelX = Math.floor(originalX / pixelScale);
+              const pixelY = Math.floor(previewPixelHeight - originalY / pixelScale);
+              const clampedX = Math.max(0, Math.min(previewPixelWidth - 1, pixelX));
+              const clampedY = Math.max(0, Math.min(previewPixelHeight - 1, pixelY));
+              if (selectionMode === "multi-select") {
+                detectAndAccumulateRegion(clampedX, clampedY);
+              } else {
+                detectRegion(clampedX, clampedY);
               }
             }
           } else {
@@ -346,7 +342,7 @@ function InteractiveModelViewer({
         }
       }
     },
-    [threeCtx.gl, threeCtx.camera, colorMeshes, selectedColor, onColorClick, selectionMode, detectRegion, detectAndAccumulateRegion, modelBounds, previewPixelWidth, previewPixelHeight, scaleX, scaleY],
+    [threeCtx.gl, threeCtx.camera, colorMeshes, selectedColor, onColorClick, selectionMode, detectRegion, detectAndAccumulateRegion, previewPixelWidth, previewPixelHeight, previewWidthMm, sceneCenter, scaleX, scaleY],
   );
 
   // Expose colorHitRef check so Scene3D's onPointerMissed can query it
@@ -528,7 +524,7 @@ function InteractiveModelViewer({
         );
         const lineMat = new THREE.LineBasicMaterial({
           vertexColors: true,
-          linewidth: 2,
+          linewidth: 3,
           depthTest: false,
         });
         const line = new THREE.LineSegments(lineGeo, lineMat);
@@ -540,16 +536,31 @@ function InteractiveModelViewer({
     }
   }, [colorMeshes, mirrorMeshes, colorRemapMap, colorHeightMap, selectedColor, selectedRegions, enableRelief, baseHeight, colorContours, modelBounds, sceneCenter, spacerThick, isDoubleSided, backingMesh, backingPlateMesh, regionData, selectionMode]);
 
-  // Flowing RGB animation: shift hue offset each frame for a "light strip" effect.
+  // Flowing RGB animation with flash-on-select and brightness pulse.
   const tmpColorAnim = useRef(new THREE.Color());
+  const outlineBirthTime = useRef(0);
   useFrame(() => {
     const lines = outlineObjsRef.current;
     const arcs = outlineArcRef.current;
-    if (lines.length === 0) return;
+    if (lines.length === 0) {
+      outlineBirthTime.current = 0;
+      return;
+    }
 
-    // Advance hue offset over time (~0.3 full cycles per second)
-    const time = performance.now() * 0.0003;
+    const now = performance.now();
+    if (outlineBirthTime.current === 0) outlineBirthTime.current = now;
+    const age = now - outlineBirthTime.current;
 
+    // Flash twice on first appearance (0-700ms), then gentle pulse
+    let lightness: number;
+    if (age < 700) {
+      const phase = (age / 175) * Math.PI;
+      lightness = 0.35 + 0.4 * Math.abs(Math.sin(phase));
+    } else {
+      lightness = 0.45 + 0.1 * Math.sin(now * 0.005);
+    }
+
+    const time = now * 0.001;
     const c = tmpColorAnim.current;
     for (let li = 0; li < lines.length; li++) {
       const colorAttr = lines[li].geometry.getAttribute("color") as THREE.BufferAttribute;
@@ -560,11 +571,9 @@ function InteractiveModelViewer({
       for (let si = 0; si < pairs.length; si++) {
         const [t0, t1] = pairs[si];
         const idx = si * 6;
-        // Start vertex
-        c.setHSL((t0 + time) % 1.0, 1.0, 0.55);
+        c.setHSL((t0 + time) % 1.0, 1.0, lightness);
         arr[idx] = c.r; arr[idx + 1] = c.g; arr[idx + 2] = c.b;
-        // End vertex
-        c.setHSL((t1 + time) % 1.0, 1.0, 0.55);
+        c.setHSL((t1 + time) % 1.0, 1.0, lightness);
         arr[idx + 3] = c.r; arr[idx + 4] = c.g; arr[idx + 5] = c.b;
       }
       colorAttr.needsUpdate = true;

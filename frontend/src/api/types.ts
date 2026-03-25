@@ -403,6 +403,7 @@ export interface ColorReplaceResponse {
   status: string;
   message: string;
   preview_url: string;
+  preview_3d_url?: string | null;
   replacement_count: number;
 }
 

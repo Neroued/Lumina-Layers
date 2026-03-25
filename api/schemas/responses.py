@@ -38,6 +38,7 @@ class ColorReplaceResponse(BaseModel):
     status: str
     message: str
     preview_url: str
+    preview_3d_url: str | None = None
     replacement_count: int
 
 

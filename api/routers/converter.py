@@ -1156,9 +1156,23 @@ def replace_color(
         matched_rgb: np.ndarray = cache["matched_rgb"]
         replaced_rgb = manager.apply_to_image(matched_rgb)
 
+        # Update cache so 3D preview reflects replacements
+        cache["matched_rgb"] = replaced_rgb
+        store.put(request.session_id, "preview_cache", cache)
+
         # Generate preview PNG from replaced image
         preview_bytes = _image_to_png_bytes(replaced_rgb)
         preview_id = registry.register_bytes(request.session_id, preview_bytes, "preview_replaced.png")
+
+        # Regenerate segmented GLB from updated matched_rgb
+        glb_url: str | None = None
+        try:
+            glb_path = generate_segmented_glb(cache)
+            if glb_path and os.path.exists(glb_path):
+                glb_id = registry.register_path(request.session_id, glb_path)
+                glb_url = f"/api/files/{glb_id}"
+        except Exception as glb_err:
+            print(f"[API] Color-replace GLB regeneration failed (non-fatal): {glb_err}")
 
         # Save history snapshot (deep copy of regions before this change) for undo
         current_regions = session_data.get("replacement_regions", [])
@@ -1185,6 +1199,7 @@ def replace_color(
         status="ok",
         message="Color replaced successfully",
         preview_url=f"/api/files/{preview_id}",
+        preview_3d_url=glb_url,
         replacement_count=len(current_regions),
     )
 
