@@ -417,6 +417,8 @@ def _run_vector_branch(ctx: dict) -> dict:
         _log_vector_timings(vector_timing)
 
         msg = "Vector conversion complete! Objects merged by material."
+        if getattr(vec_processor, "parse_warnings", None):
+            msg += " ⚠ " + "; ".join(vec_processor.parse_warnings)
         ctx["result_tuple"] = (out_path, glb_path, preview_img, msg, None)
         return ctx
 

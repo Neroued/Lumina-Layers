@@ -66,6 +66,7 @@ class VectorProcessor:
         self.img_processor = ImageProcessor(lut_path, color_mode)
         self.sampling_precision = 0.05  # mm
         self.last_stage_timings = {}
+        self.parse_warnings: list[str] = []
 
         print(f"[VECTOR] Initialized with {len(self.img_processor.ref_stacks)} LUT colors")
 
@@ -764,6 +765,9 @@ class VectorProcessor:
                 except (AttributeError, TypeError, ValueError):
                     rgb = None
             if rgb is None:
+                fill_val = getattr(element.fill, 'value', None) if element.fill else None
+                eid = getattr(element, 'id', None) or f"element#{skipped_gradient_count}"
+                print(f"[VECTOR] WARNING: Skipping '{eid}' — unresolvable fill: {fill_val}")
                 skipped_gradient_count += 1
                 continue
 
@@ -831,6 +835,18 @@ class VectorProcessor:
         if skipped_polygon_count > 0:
             print(f"[VECTOR] Skipped {skipped_polygon_count} elements (invalid polygon after sampling)")
         print(f"[VECTOR] Successfully parsed {len(raw_shapes)} shapes from SVG")
+
+        parse_warnings = []
+        if skipped_gradient_count > 0:
+            parse_warnings.append(
+                f"{skipped_gradient_count} elements with gradient/pattern fills were skipped "
+                f"(FDM printing requires solid colors)"
+            )
+        if skipped_polygon_count > 0:
+            parse_warnings.append(
+                f"{skipped_polygon_count} elements produced invalid geometry and were skipped"
+            )
+        self.parse_warnings = parse_warnings
         if not raw_shapes:
             raise ValueError("No valid shapes found in SVG")
 
