@@ -512,7 +512,7 @@ def generate_segmented_glb(cache: dict, max_meshes: int = 64, output_path: Optio
         _t_backing = time.perf_counter() - _t
 
         cache['color_contours'] = contours_data
-        print(f"[SEGMENTED_GLB] Extracted contours for {len(contours_data)} colors ({time.perf_counter() - _t_contours:.3f}s)")
+        print(f"[SEGMENTED_GLB] Extracted contours for {len(contours_data)} colors")
 
         # 6. Export GLB
         _t = time.perf_counter()
