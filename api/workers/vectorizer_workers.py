@@ -52,7 +52,9 @@ def worker_vectorize(image_path: str, params: dict) -> dict:
 
         result = nv.vectorize(image_path, config)
 
-        fd, svg_path = tempfile.mkstemp(suffix=".svg")
+        from config import TEMP_DIR
+
+        fd, svg_path = tempfile.mkstemp(suffix=".svg", dir=TEMP_DIR)
         os.close(fd)
         with open(svg_path, "w", encoding="utf-8") as f:
             f.write(result.svg_content)

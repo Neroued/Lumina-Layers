@@ -33,14 +33,39 @@ from api.session_store import SessionStore
 
 router = APIRouter(prefix="/api/system", tags=["System"])
 
-CLEANABLE_EXTENSIONS: set[str] = {".3mf", ".glb", ".png", ".jpg"}
+CLEANABLE_EXTENSIONS: set[str] = {".3mf", ".glb", ".png", ".jpg", ".txt"}
+PROTECTED_FILES: set[str] = {"lumina_stats.txt", "lumina_lut.json"}
+
+
+def _purge_subdir(subdir: str) -> tuple[int, int]:
+    """Delete all files in *subdir*, return ``(count, bytes)``."""
+    count = 0
+    freed = 0
+    if not os.path.isdir(subdir):
+        return count, freed
+    for entry in os.scandir(subdir):
+        if not entry.is_file():
+            continue
+        try:
+            size = entry.stat().st_size
+            os.remove(entry.path)
+            count += 1
+            freed += size
+        except OSError:
+            pass
+    return count, freed
 
 
 def cleanup_output_dir(output_dir: str) -> tuple[int, int]:
-    """Scan *output_dir* and delete files whose extension is in
-    :data:`CLEANABLE_EXTENSIONS`.
+    """Scan *output_dir* and its ``temp/`` / ``models/`` subdirectories,
+    deleting transient files.
 
-    扫描 *output_dir*，删除扩展名匹配的临时文件。
+    扫描 *output_dir* 及其 ``temp/``、``models/`` 子目录，删除临时文件。
+
+    - ``temp/`` and ``models/`` sub-directories: **all** files are deleted.
+    - Main *output_dir*: only files whose extension is in
+      :data:`CLEANABLE_EXTENSIONS` are deleted, **except** files listed in
+      :data:`PROTECTED_FILES`.
 
     Returns:
         ``(deleted_count, freed_bytes)``。
@@ -52,8 +77,15 @@ def cleanup_output_dir(output_dir: str) -> tuple[int, int]:
     deleted_count = 0
     freed_bytes = 0
 
+    for sub in ("temp", "models"):
+        c, b = _purge_subdir(os.path.join(output_dir, sub))
+        deleted_count += c
+        freed_bytes += b
+
     for entry in os.scandir(output_dir):
         if not entry.is_file():
+            continue
+        if entry.name in PROTECTED_FILES:
             continue
         _, ext = os.path.splitext(entry.name)
         if ext.lower() not in CLEANABLE_EXTENSIONS:
@@ -105,14 +137,8 @@ def clear_cache(
 
     清除所有子系统中的缓存和临时文件，返回清理统计信息。
     """
-    result: ClearCacheResult = perform_cache_cleanup(
-        file_registry, session_store, config.OUTPUT_DIR
-    )
-    total_deleted: int = (
-        result.registry_cleaned
-        + result.sessions_cleaned
-        + result.output_files_cleaned
-    )
+    result: ClearCacheResult = perform_cache_cleanup(file_registry, session_store, config.OUTPUT_DIR)
+    total_deleted: int = result.registry_cleaned + result.sessions_cleaned + result.output_files_cleaned
     return ClearCacheResponse(
         status="success",
         message=f"Cache cleared: {total_deleted} files deleted",
@@ -184,10 +210,7 @@ def get_slicers() -> SlicerListResponse:
     Returns:
         SlicerListResponse: List of slicer metadata. (切片器元数据列表)
     """
-    slicers = [
-        SlicerInfo(id=s["id"], display_name=s["display_name"])
-        for s in config.SUPPORTED_SLICERS
-    ]
+    slicers = [SlicerInfo(id=s["id"], display_name=s["display_name"]) for s in config.SUPPORTED_SLICERS]
     return SlicerListResponse(status="success", slicers=slicers)
 
 
@@ -220,9 +243,7 @@ def save_settings(settings: UserSettings) -> SaveSettingsResponse:
         )
         return SaveSettingsResponse(status="success", message="Settings saved")
     except OSError as e:
-        raise HTTPException(
-            status_code=500, detail=f"Failed to save settings: {e}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to save settings: {e}")
 
 
 @router.get("/stats")

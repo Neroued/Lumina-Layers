@@ -14,7 +14,6 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from pydantic import BaseModel, Field
 
-
 # ========== Enums ==========
 
 
@@ -152,17 +151,11 @@ class ConvertPreviewRequest(BaseModel):
     """
 
     lut_name: str = Field(..., description="LUT 名称")
-    target_width_mm: float = Field(
-        60.0, ge=10, le=9999, description="目标宽度 (mm)"
-    )
+    target_width_mm: float = Field(60.0, ge=10, le=9999, description="目标宽度 (mm)")
     auto_bg: bool = Field(False, description="自动去背景")
     bg_tol: int = Field(40, ge=0, le=150, description="背景容差")
-    color_mode: ColorMode = Field(
-        ColorMode.FOUR_COLOR_RYBW, description="颜色模式"
-    )
-    modeling_mode: ModelingMode = Field(
-        ModelingMode.HIGH_FIDELITY, description="建模模式"
-    )
+    color_mode: ColorMode = Field(ColorMode.FOUR_COLOR_RYBW, description="颜色模式")
+    modeling_mode: ModelingMode = Field(ModelingMode.HIGH_FIDELITY, description="建模模式")
     quantize_colors: int = Field(48, ge=8, le=256, description="K-Means 色彩细节")
     enable_cleanup: bool = Field(True, description="孤立像素清理")
     hue_weight: float = Field(0.0, ge=0.0, le=1.0, description="色相保护权重 (0=纯色差, 0.5=推荐, 1.0=最强)")
@@ -247,50 +240,26 @@ class ConvertGenerateRequest(BaseModel):
     """
 
     lut_name: str = Field(..., description="LUT 名称")
-    target_width_mm: float = Field(
-        60.0, ge=10, le=9999, description="目标宽度 (mm)"
-    )
-    spacer_thick: float = Field(
-        1.2, ge=0.2, le=3.5, description="底板厚度 (mm)"
-    )
-    structure_mode: StructureMode = Field(
-        StructureMode.DOUBLE_SIDED, description="打印结构模式"
-    )
+    target_width_mm: float = Field(60.0, ge=10, le=9999, description="目标宽度 (mm)")
+    spacer_thick: float = Field(1.2, ge=0.2, le=3.5, description="底板厚度 (mm)")
+    structure_mode: StructureMode = Field(StructureMode.DOUBLE_SIDED, description="打印结构模式")
     auto_bg: bool = Field(False, description="自动去背景")
     bg_tol: int = Field(40, ge=0, le=150, description="背景容差")
-    color_mode: ColorMode = Field(
-        ColorMode.FOUR_COLOR_RYBW, description="颜色模式"
-    )
-    modeling_mode: ModelingMode = Field(
-        ModelingMode.HIGH_FIDELITY, description="建模模式"
-    )
+    color_mode: ColorMode = Field(ColorMode.FOUR_COLOR_RYBW, description="颜色模式")
+    modeling_mode: ModelingMode = Field(ModelingMode.HIGH_FIDELITY, description="建模模式")
     quantize_colors: int = Field(48, ge=8, le=256, description="K-Means 色彩细节")
     enable_cleanup: bool = Field(True, description="孤立像素清理")
     hue_weight: float = Field(0.0, ge=0.0, le=1.0, description="色相保护权重 (0=纯色差, 0.5=推荐, 1.0=最强)")
     chroma_gate: float = Field(15.0, ge=0.0, le=50.0, description="暗色彩度门槛 (0=禁用, 15=默认)")
     separate_backing: bool = Field(False, description="底板作为独立对象")
     add_loop: bool = Field(False, description="启用挂件环")
-    loop_width: float = Field(
-        4.0, ge=2, le=10, description="环宽度 (mm)"
-    )
-    loop_length: float = Field(
-        8.0, ge=4, le=15, description="环长度 (mm)"
-    )
-    loop_hole: float = Field(
-        2.5, ge=1, le=5, description="环孔直径 (mm)"
-    )
-    loop_pos: Optional[Tuple[float, float]] = Field(
-        None, description="环位置 (x, y)"
-    )
-    loop_angle: float = Field(
-        0.0, ge=-180, le=180, description="环旋转角度 (度)"
-    )
-    loop_offset_x: float = Field(
-        0.0, ge=-200, le=200, description="环 X 偏移 (mm)"
-    )
-    loop_offset_y: float = Field(
-        0.0, ge=-200, le=200, description="环 Y 偏移 (mm)"
-    )
+    loop_width: float = Field(4.0, ge=2, le=10, description="环宽度 (mm)")
+    loop_length: float = Field(8.0, ge=4, le=15, description="环长度 (mm)")
+    loop_hole: float = Field(2.5, ge=1, le=5, description="环孔直径 (mm)")
+    loop_pos: Optional[Tuple[float, float]] = Field(None, description="环位置 (x, y)")
+    loop_angle: float = Field(0.0, ge=-180, le=180, description="环旋转角度 (度)")
+    loop_offset_x: float = Field(0.0, ge=-200, le=200, description="环 X 偏移 (mm)")
+    loop_offset_y: float = Field(0.0, ge=-200, le=200, description="环 Y 偏移 (mm)")
     loop_position_preset: Optional[str] = Field(
         "top-center",
         description="环位置预设: top-center, top-left, top-right, left-center, right-center, bottom-center",
@@ -300,39 +269,19 @@ class ConvertGenerateRequest(BaseModel):
         "color",
         description="浮雕高度模式: 'color' (按颜色) 或 'heightmap' (按高度图)",
     )
-    color_height_map: Optional[Dict[str, float]] = Field(
-        None, description="颜色高度映射 {hex: mm}"
-    )
-    heightmap_max_height: float = Field(
-        5.0, ge=0.08, le=15.0, description="最大浮雕高度 (mm)"
-    )
+    color_height_map: Optional[Dict[str, float]] = Field(None, description="颜色高度映射 {hex: mm}")
+    heightmap_max_height: float = Field(5.0, ge=0.08, le=15.0, description="最大浮雕高度 (mm)")
     enable_outline: bool = Field(False, description="启用描边")
-    outline_width: float = Field(
-        2.0, ge=0.5, le=10.0, description="描边宽度 (mm)"
-    )
+    outline_width: float = Field(2.0, ge=0.5, le=10.0, description="描边宽度 (mm)")
     enable_cloisonne: bool = Field(False, description="启用掐丝珐琅")
-    wire_width_mm: float = Field(
-        0.4, ge=0.2, le=1.2, description="金属丝宽度 (mm)"
-    )
-    wire_height_mm: float = Field(
-        0.4, ge=0.04, le=1.0, description="金属丝高度 (mm)"
-    )
+    wire_width_mm: float = Field(0.4, ge=0.2, le=1.2, description="金属丝宽度 (mm)")
+    wire_height_mm: float = Field(0.4, ge=0.04, le=1.0, description="金属丝高度 (mm)")
     enable_coating: bool = Field(False, description="启用涂层")
-    coating_height_mm: float = Field(
-        0.08, ge=0.04, le=0.12, description="涂层高度 (mm)"
-    )
-    replacement_regions: Optional[List[ColorReplacementItem]] = Field(
-        None, description="颜色替换列表"
-    )
-    free_color_set: Optional[Set[str]] = Field(
-        None, description="自由色集合 (hex)"
-    )
-    printer_id: str = Field(
-        "bambu-h2d", description="????? ID"
-    )
-    slicer: str = Field(
-        "BambuStudio", description="??????"
-    )
+    coating_height_mm: float = Field(0.08, ge=0.04, le=0.12, description="涂层高度 (mm)")
+    replacement_regions: Optional[List[ColorReplacementItem]] = Field(None, description="颜色替换列表")
+    free_color_set: Optional[Set[str]] = Field(None, description="自由色集合 (hex)")
+    printer_id: str = Field("bambu-h2d", description="????? ID")
+    slicer: str = Field("BambuStudio", description="??????")
     use_cached_matched_rgb: bool = Field(
         False,
         description="使用 Session 缓存的 matched_rgb 而非从原始图像重新处理",
@@ -442,12 +391,8 @@ class ColorMergePreviewRequest(BaseModel):
 
     session_id: str = Field(..., description="Session ID")
     merge_enable: bool = Field(True, description="启用颜色合并")
-    merge_threshold: float = Field(
-        0.5, ge=0.1, le=5.0, description="CIELAB 色差阈值"
-    )
-    merge_max_distance: int = Field(
-        20, ge=5, le=50, description="最大合并距离 (px)"
-    )
+    merge_threshold: float = Field(0.5, ge=0.1, le=5.0, description="CIELAB 色差阈值")
+    merge_max_distance: int = Field(20, ge=5, le=50, description="最大合并距离 (px)")
 
 
 class RegionDetectRequest(BaseModel):
@@ -489,9 +434,7 @@ class RegionDetectResponse(BaseModel):
     color_hex: str = Field(..., description="区域颜色 hex")
     pixel_count: int = Field(..., description="区域像素数量")
     preview_url: str = Field(..., description="高亮预览图 URL")
-    contours: list[list[list[float]]] | None = Field(
-        None, description="区域轮廓坐标（世界坐标 mm），用于 3D 高亮"
-    )
+    contours: list[list[list[float]]] | None = Field(None, description="区域轮廓坐标（世界坐标 mm），用于 3D 高亮")
 
 
 class RegionReplaceRequest(BaseModel):
@@ -530,6 +473,33 @@ class RegionReplaceResponse(BaseModel):
     preview_glb_url: Optional[str] = Field(None, description="重新生成的分段 GLB URL")
     color_contours: Optional[dict] = Field(None, description="更新后的颜色轮廓数据")
     message: str = Field("Region replaced", description="操作结果消息")
+
+
+class CleanupSessionFilesRequest(BaseModel):
+    """Request model for cleaning up intermediate files after download.
+    下载后清理中间文件的请求模型。
+
+    Attributes:
+        session_id: Active session identifier. (Session ID)
+        keep_file_ids: File IDs to preserve (e.g. the downloaded 3MF).
+            要保留的文件 ID 列表（如已下载的 3MF）。
+    """
+
+    session_id: str = Field(..., description="Session ID")
+    keep_file_ids: List[str] = Field(default_factory=list, description="保留的文件 ID")
+
+
+class CleanupSessionFilesResponse(BaseModel):
+    """Response model for session file cleanup.
+    Session 文件清理的响应模型。
+
+    Attributes:
+        status: Operation status. (操作状态)
+        cleaned: Number of files deleted. (删除的文件数)
+    """
+
+    status: str = Field("success")
+    cleaned: int = Field(0, description="删除的文件数")
 
 
 class BedSizeItem(BaseModel):
