@@ -271,6 +271,40 @@ export async function resetReplacements(
   return response.data;
 }
 
+/** 清理 session 中间文件（预览、GLB 等），保留指定文件 */
+export async function cleanupSessionFiles(
+  sessionId: string,
+  keepFileIds: string[] = [],
+): Promise<void> {
+  await apiClient
+    .post("/convert/cleanup-session-files", {
+      session_id: sessionId,
+      keep_file_ids: keepFileIds,
+    })
+    .catch(() => {
+      /* fire-and-forget: ignore cleanup failures */
+    });
+}
+
+/**
+ * Use navigator.sendBeacon to reliably clean up session files when the page
+ * is closing (tab close, browser quit, navigation away). sendBeacon survives
+ * page unload unlike fetch/XHR.
+ */
+export function beaconCleanupSessionFiles(
+  sessionId: string,
+  keepFileIds: string[] = [],
+): void {
+  const base =
+    (import.meta.env.VITE_API_BASE_URL as string | undefined) || "/api";
+  const url = `${base}/convert/cleanup-session-files`;
+  const body = JSON.stringify({
+    session_id: sessionId,
+    keep_file_ids: keepFileIds,
+  });
+  navigator.sendBeacon(url, new Blob([body], { type: "application/json" }));
+}
+
 /** 自动检测推荐量化颜色数 */
 export async function autoDetectColors(
   image: File,

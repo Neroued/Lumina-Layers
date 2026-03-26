@@ -12,6 +12,8 @@ import time
 import uuid
 import zipfile
 
+from config import TEMP_DIR
+
 import cv2
 import numpy as np
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -24,6 +26,8 @@ from api.file_registry import FileRegistry
 from api.schemas.converter import (
     BedSizeItem,
     BedSizeListResponse,
+    CleanupSessionFilesRequest,
+    CleanupSessionFilesResponse,
     ColorMergePreviewRequest,
     ColorReplaceRequest,
     ConvertGenerateRequest,
@@ -366,12 +370,16 @@ async def convert_preview(
 
             # Vectorized: encode RGB triplets as uint32 scalars, find dominant
             # quantized color per matched color in a single np.unique pass.
-            m_enc = (m_pixels[:, 0].astype(np.uint32) << 16) | \
-                    (m_pixels[:, 1].astype(np.uint32) << 8) | \
-                    m_pixels[:, 2].astype(np.uint32)
-            q_enc = (q_pixels[:, 0].astype(np.uint32) << 16) | \
-                    (q_pixels[:, 1].astype(np.uint32) << 8) | \
-                    q_pixels[:, 2].astype(np.uint32)
+            m_enc = (
+                (m_pixels[:, 0].astype(np.uint32) << 16)
+                | (m_pixels[:, 1].astype(np.uint32) << 8)
+                | m_pixels[:, 2].astype(np.uint32)
+            )
+            q_enc = (
+                (q_pixels[:, 0].astype(np.uint32) << 16)
+                | (q_pixels[:, 1].astype(np.uint32) << 8)
+                | q_pixels[:, 2].astype(np.uint32)
+            )
 
             pair_key = m_enc.astype(np.uint64) * (1 << 24) + q_enc.astype(np.uint64)
             unique_keys, counts = np.unique(pair_key, return_counts=True)
@@ -418,8 +426,7 @@ async def convert_preview(
     _t_api_total = time.perf_counter() - _api_t0
     print(f"\n{'=' * 60}")
     print(f"[API PREVIEW] Total endpoint time: {_t_api_total:.2f}s")
-    print(f"  upload={_t_upload:.2f}s, worker={_t_worker:.2f}s, "
-          f"pickle_load={_t_pickle_load:.2f}s")
+    print(f"  upload={_t_upload:.2f}s, worker={_t_worker:.2f}s, " f"pickle_load={_t_pickle_load:.2f}s")
     print(f"  segmented_glb={_t_glb:.2f}s, palette={_t_palette:.2f}s")
     print(f"{'=' * 60}")
 
@@ -458,12 +465,12 @@ def get_layer_images(
 
     h, w = material_matrix.shape[:2]
     n_layers = material_matrix.shape[2]
-    
+
     # For Merged LUTs, use the corrected preview_colors and slot_names from cache
     # (constructed in P01 from LUT palette), otherwise fall back to color_conf
     preview_colors = cache.get("preview_colors")
     slots = cache.get("slot_names")
-    
+
     if preview_colors is None or slots is None:
         # Fallback to color_conf for standard color modes
         preview_colors = color_conf.get("preview", {})
@@ -686,7 +693,7 @@ async def convert_generate(
     if request.enable_relief and height_mode == "heightmap":
         heightmap_grayscale = session_data.get("heightmap_grayscale")
         if heightmap_grayscale is not None:
-            fd, hm_temp_path = tempfile.mkstemp(suffix=".png")
+            fd, hm_temp_path = tempfile.mkstemp(suffix=".png", dir=TEMP_DIR)
             os.close(fd)
             Image.fromarray(heightmap_grayscale).save(hm_temp_path)
             heightmap_path = hm_temp_path
@@ -698,7 +705,7 @@ async def convert_generate(
     if request.use_cached_matched_rgb:
         cached_matched_rgb = cache.get("matched_rgb")
         if cached_matched_rgb is not None:
-            fd, mr_temp_path = tempfile.mkstemp(suffix=".npy")
+            fd, mr_temp_path = tempfile.mkstemp(suffix=".npy", dir=TEMP_DIR)
             os.close(fd)
             np.save(mr_temp_path, cached_matched_rgb)
             matched_rgb_path = mr_temp_path
@@ -941,7 +948,7 @@ async def convert_generate_large_format(
             px_y1 = min(px_y1, px_h)
 
             tile_img = full_img.crop((px_x0, px_y0, px_x1, px_y1))
-            fd, tile_path = tempfile.mkstemp(suffix=".png")
+            fd, tile_path = tempfile.mkstemp(suffix=".png", dir=TEMP_DIR)
             os.close(fd)
             tile_img.save(tile_path)
             store.register_temp_file(sid, tile_path)
@@ -951,7 +958,7 @@ async def convert_generate_large_format(
             # Tile-specific heightmap
             if hm_gray is not None:
                 hm_tile = hm_gray[px_y0:px_y1, px_x0:px_x1]
-                fd2, hm_tile_path = tempfile.mkstemp(suffix=".png")
+                fd2, hm_tile_path = tempfile.mkstemp(suffix=".png", dir=TEMP_DIR)
                 os.close(fd2)
                 Image.fromarray(hm_tile).save(hm_tile_path)
                 store.register_temp_file(sid, hm_tile_path)
@@ -984,7 +991,7 @@ async def convert_generate_large_format(
         raise HTTPException(status_code=500, detail=detail)
 
     # 7. Package into ZIP
-    fd, zip_path = tempfile.mkstemp(suffix=".zip")
+    fd, zip_path = tempfile.mkstemp(suffix=".zip", dir=TEMP_DIR)
     os.close(fd)
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for label, tp in successful_paths:
@@ -1115,7 +1122,7 @@ async def convert_batch(
             )
 
     # Package successful 3MF files into a ZIP (main thread)
-    fd, zip_path = tempfile.mkstemp(suffix=".zip")
+    fd, zip_path = tempfile.mkstemp(suffix=".zip", dir=TEMP_DIR)
     os.close(fd)
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for path_3mf in successful_paths:
@@ -1642,3 +1649,23 @@ def merge_colors(
         colors_before=colors_before,
         colors_after=colors_after,
     )
+
+
+# ---------------------------------------------------------------------------
+# Cleanup intermediate files after download
+# ---------------------------------------------------------------------------
+
+
+@router.post("/cleanup-session-files")
+def cleanup_session_files(
+    body: CleanupSessionFilesRequest,
+    registry: FileRegistry = Depends(get_file_registry),
+) -> CleanupSessionFilesResponse:
+    """Delete intermediate files for a session, preserving specified file IDs.
+    删除 session 的中间文件（预览 PNG、GLB 等），保留指定的文件 ID（如已下载的 3MF）。
+    """
+    cleaned = registry.cleanup_session_except(
+        body.session_id,
+        keep_file_ids=set(body.keep_file_ids) if body.keep_file_ids else None,
+    )
+    return CleanupSessionFilesResponse(status="success", cleaned=cleaned)

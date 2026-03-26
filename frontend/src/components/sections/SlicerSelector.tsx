@@ -169,6 +169,7 @@ export default function SlicerSelector({
     link.href = url;
     link.download = "";
     link.click();
+    useConverterStore.getState().cleanupAfterDownload();
   };
 
   const handleDownloadOrGenerate = async () => {
@@ -199,6 +200,7 @@ export default function SlicerSelector({
     // Has slicers (normal mode)
     if (threemfDiskPath) {
       void launchSlicer(threemfDiskPath);
+      useConverterStore.getState().cleanupAfterDownload();
     } else {
       setIsAutoGenerating(true);
       try {
@@ -206,6 +208,7 @@ export default function SlicerSelector({
         const latestPath = useConverterStore.getState().threemfDiskPath;
         if (latestPath) {
           void launchSlicer(latestPath);
+          useConverterStore.getState().cleanupAfterDownload();
         }
       } catch {
         // Error state is set by submitGenerate in ConverterStore
@@ -222,10 +225,7 @@ export default function SlicerSelector({
 
   const handleDownloadFromMenu = () => {
     if (downloadUrl) {
-      const link = document.createElement("a");
-      link.href = downloadUrl;
-      link.download = "";
-      link.click();
+      triggerDownload(downloadUrl);
     }
     setIsDropdownOpen(false);
   };
