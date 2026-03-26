@@ -242,17 +242,20 @@ def get_processes_using_port(port: int) -> List[int]:
     pids = []
     try:
         if os.name == "nt":
-            # Windows: 使用 netstat 和 findstr
+            # Windows: 使用 netstat，只匹配本地地址含端口且状态为 LISTENING 的行
             result = subprocess.run(
-                ["netstat", "-ano", "|", "findstr", f":{port}"],
+                "netstat -ano",
                 capture_output=True,
                 text=True,
                 shell=True,
                 encoding="gbk",
                 errors="ignore"
             )
+            port_pattern = re.compile(
+                rf"\s+TCP\s+[\d\.]+:{port}\s+\S+\s+LISTENING\s+(\d+)"
+            )
             for line in result.stdout.splitlines():
-                match = re.search(r"\s+(\d+)\s*$", line)
+                match = port_pattern.search(line)
                 if match:
                     pid = int(match.group(1))
                     if pid not in pids:
