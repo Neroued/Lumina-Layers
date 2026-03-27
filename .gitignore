@@ -285,3 +285,4 @@ assets/temp_*.npy
 .idea/
 *.3mf
 .cursor/
+.windsurf/
