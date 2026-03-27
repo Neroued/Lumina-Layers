@@ -914,7 +914,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
             clickY: y,
           },
           selectedColor: response.color_hex.replace(/^#/, ""),
-          previewImageUrl: `http://localhost:8000${response.preview_url}`,
+          previewImageUrl: `${response.preview_url}`,
         });
       } catch (err) {
         set({
@@ -990,7 +990,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       try {
         const response = await apiRegionReplace(state.sessionId, `#${newHex}`);
         const updates: Partial<ConverterState> = {
-          previewImageUrl: `http://localhost:8000${response.preview_url}`,
+          previewImageUrl: `${response.preview_url}`,
           regionData: null,
           replacePreviewLoading: false,
           threemfDiskPath: null,
@@ -999,7 +999,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
 
         // 更新 3D 预览 GLB URL（仅当后端返回非空 URL 时）
         if (response.preview_glb_url) {
-          updates.previewGlbUrl = `http://localhost:8000${response.preview_glb_url}`;
+          updates.previewGlbUrl = `${response.preview_glb_url}`;
         }
         // preview_glb_url 为 null 时不清除现有 previewGlbUrl
 
@@ -1056,10 +1056,10 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
               }
               const response = await apiRegionReplace(sid, `#${pending.targetHex}`);
               const updates: Partial<ConverterState> = {
-                previewImageUrl: `http://localhost:8000${response.preview_url}`,
+                previewImageUrl: `${response.preview_url}`,
               };
               if (response.preview_glb_url) {
-                updates.previewGlbUrl = `http://localhost:8000${response.preview_glb_url}`;
+                updates.previewGlbUrl = `${response.preview_glb_url}`;
               }
               if (response.color_contours) {
                 updates.colorContours = response.color_contours;
@@ -1155,14 +1155,14 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       if (state.sessionId) {
         apiResetReplacements(state.sessionId)
           .then((res) => {
-            const url = `http://localhost:8000${res.preview_url}`;
+            const url = `${res.preview_url}`;
             const updates: Partial<ConverterState> = {
               previewImageUrl: url,
               originalPreviewUrl: url,
             };
             // 后端 reset-replacements 现在也会重新生成 GLB
             if (res.preview_glb_url) {
-              updates.previewGlbUrl = `http://localhost:8000${res.preview_glb_url}`;
+              updates.previewGlbUrl = `${res.preview_glb_url}`;
             }
             set(updates);
           })
@@ -1216,7 +1216,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           state.heightmapFile,
           state.sessionId,
         );
-        const thumbnailUrl = `http://localhost:8000${response.thumbnail_url}`;
+        const thumbnailUrl = `${response.thumbnail_url}`;
         set({
           isLoading: false,
           heightmapThumbnailUrl: thumbnailUrl,
@@ -1377,9 +1377,9 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           signal,
         );
         // 后端返回 JSON，preview_url 是相对路径如 /api/files/xxx
-        const previewUrl = `http://localhost:8000${response.preview_url}`;
+        const previewUrl = `${response.preview_url}`;
         const glbUrl = response.preview_glb_url
-          ? `http://localhost:8000${response.preview_glb_url}`
+          ? `${response.preview_glb_url}`
           : null;
         // Normalize palette hex values: strip leading '#' for frontend consistency
         const normalizedPalette = (response.palette ?? []).map((e) => ({
@@ -1524,7 +1524,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
             modelUrl: null,
             threemfDiskPath: null,
             downloadUrl: lfResponse.download_url
-              ? `http://localhost:8000${lfResponse.download_url}`
+              ? `${lfResponse.download_url}`
               : null,
           });
           return null;
@@ -1536,14 +1536,14 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         console.timeLog('[LUMINA] generate', 'response received');
         _clientLog('generate: response received');
         const modelUrl = response.preview_3d_url
-          ? `http://localhost:8000${response.preview_3d_url}`
+          ? `${response.preview_3d_url}`
           : null;
         set({
           isGenerating: false,
           modelUrl,
           threemfDiskPath: response.threemf_disk_path ?? null,
           downloadUrl: response.download_url
-            ? `http://localhost:8000${response.download_url}`
+            ? `${response.download_url}`
             : null,
         });
         console.timeLog('[LUMINA] generate', 'UI unlocked (isGenerating=false, modelUrl set)');
@@ -1585,7 +1585,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           width,
           height,
         );
-        const croppedFullUrl = `http://localhost:8000${response.cropped_url}`;
+        const croppedFullUrl = `${response.cropped_url}`;
 
         // Fetch cropped image as Blob to create a new File
         const blob = await fetch(croppedFullUrl).then((r) => r.blob());
@@ -1833,10 +1833,10 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         );
         const updates: Record<string, unknown> = {
           replacePreviewLoading: false,
-          previewImageUrl: `http://localhost:8000${response.preview_url}`,
+          previewImageUrl: `${response.preview_url}`,
         };
         if (response.preview_3d_url) {
-          updates.previewGlbUrl = `http://localhost:8000${response.preview_3d_url}`;
+          updates.previewGlbUrl = `${response.preview_3d_url}`;
         }
         set(updates as any);
       } catch (err) {
@@ -1882,9 +1882,9 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
             selectedColor,
             replacementColor,
           );
-          lastPreviewUrl = `http://localhost:8000${response.preview_url}`;
+          lastPreviewUrl = `${response.preview_url}`;
           if (response.preview_3d_url) {
-            lastGlbUrl = `http://localhost:8000${response.preview_3d_url}`;
+            lastGlbUrl = `${response.preview_3d_url}`;
           }
         }
         const updates: Record<string, unknown> = {

@@ -249,7 +249,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
           distortion: state.distortion,
           vignette_correction: state.vignette_correction,
         });
-        const BASE = "http://localhost:8000";
+        const BASE = "";
 
         // Track 8-color page extraction status
         const pageUpdate: Partial<ExtractorState> = {};
@@ -308,7 +308,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
         );
         set({
           lut_preview_url: response.lut_preview_url
-            ? `http://localhost:8000${response.lut_preview_url}`
+            ? `${response.lut_preview_url}`
             : null,
           manualFixLoading: false,
         });
@@ -336,7 +336,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
         const response = is5c
           ? await mergeFiveColorExtended()
           : await mergeEightColor();
-        const BASE = "http://localhost:8000";
+        const BASE = "";
         set({
           session_id: response.session_id,
           lut_download_url: response.lut_download_url
