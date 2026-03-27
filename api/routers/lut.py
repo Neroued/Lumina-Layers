@@ -64,9 +64,11 @@ async def upload_lut(file: UploadFile = File(..., description="LUT 文件 (.npy/
         )
 
     # Save to temp file first (chunked read with size limit)
+    from config import TEMP_DIR
+
     MAX_LUT_SIZE = 50 * 1024 * 1024  # 50 MB
     total_read = 0
-    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=ext, dir=TEMP_DIR) as tmp:
         while True:
             chunk = await file.read(1024 * 1024)  # 1 MB chunks
             if not chunk:
@@ -157,9 +159,7 @@ def merge_luts_endpoint(request: MergeRequest) -> MergeResponse:
             )
 
         # 4. Load primary data / 加载主 LUT 数据
-        primary_rgb, primary_stacks = LUTMerger.load_lut_with_stacks(
-            primary_path, primary_mode
-        )
+        primary_rgb, primary_stacks = LUTMerger.load_lut_with_stacks(primary_path, primary_mode)
         entries = [(primary_rgb, primary_stacks, primary_mode)]
         all_modes: list[str] = [primary_mode]
         all_paths: list[str] = [primary_path]  # 记录所有输入路径，用于判断输出格式
@@ -173,9 +173,7 @@ def merge_luts_endpoint(request: MergeRequest) -> MergeResponse:
             sec_mode, _ = LUTMerger.detect_color_mode(sec_path)
             if sec_mode == "Merged":
                 continue
-            sec_rgb, sec_stacks = LUTMerger.load_lut_with_stacks(
-                sec_path, sec_mode
-            )
+            sec_rgb, sec_stacks = LUTMerger.load_lut_with_stacks(sec_path, sec_mode)
             entries.append((sec_rgb, sec_stacks, sec_mode))
             all_modes.append(sec_mode)
             all_paths.append(sec_path)
@@ -206,7 +204,8 @@ def merge_luts_endpoint(request: MergeRequest) -> MergeResponse:
                 metadata_list.append(meta)
 
         merged_rgb, merged_stacks, stats = LUTMerger.merge_luts(
-            entries, dedup_threshold=request.dedup_threshold,
+            entries,
+            dedup_threshold=request.dedup_threshold,
             metadata_list=metadata_list,
             source_names=all_names,
         )
@@ -228,7 +227,10 @@ def merge_luts_endpoint(request: MergeRequest) -> MergeResponse:
                 _, _, merged_metadata = LUTManager.load_lut_with_metadata(primary_path)
             entry_sources = stats.get("entry_sources")
             LUTManager.save_keyed_json(
-                output_path, merged_rgb, merged_stacks, merged_metadata,
+                output_path,
+                merged_rgb,
+                merged_stacks,
+                merged_metadata,
                 sources=entry_sources,
             )
         else:
@@ -271,9 +273,7 @@ def get_lut_colors(lut_name: str) -> LutColorsResponse:
     from core.converter import extract_lut_available_colors
 
     raw_colors: list[dict] = extract_lut_available_colors(path)
-    entries: list[LutColorEntry] = [
-        LutColorEntry(hex=c["hex"], rgb=c["color"]) for c in raw_colors
-    ]
+    entries: list[LutColorEntry] = [LutColorEntry(hex=c["hex"], rgb=c["color"]) for c in raw_colors]
     return LutColorsResponse(lut_name=lut_name, total=len(entries), colors=entries)
 
 
@@ -297,10 +297,7 @@ def get_lut_info(lut_name: str) -> LutInfoResponse:
         pass
 
     palette_schema = [
-        PaletteEntrySchema(
-            color=e.color, material=e.material, hex_color=e.hex_color
-        )
-        for e in metadata.palette
+        PaletteEntrySchema(color=e.color, material=e.material, hex_color=e.hex_color) for e in metadata.palette
     ]
 
     return LutInfoResponse(

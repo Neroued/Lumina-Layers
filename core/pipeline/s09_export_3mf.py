@@ -12,7 +12,7 @@ import time
 
 import numpy as np
 
-from config import OUTPUT_DIR, PrinterConfig
+from config import MODELS_DIR, PrinterConfig
 from core.naming import generate_model_filename
 from utils.bambu_3mf_writer import export_scene_with_bambu_metadata
 
@@ -36,34 +36,29 @@ def run(ctx: dict) -> dict:
     PipelineContext 输出键 / Output keys:
         - out_path (str): 导出的 3MF 文件路径
     """
-    scene = ctx['scene']
-    valid_slot_names = ctx['valid_slot_names']
-    preview_colors = ctx['preview_colors']
-    color_mode = ctx['color_mode']
-    image_path = ctx['image_path']
-    modeling_mode = ctx['modeling_mode']
-    target_w = ctx['target_w']
-    pixel_scale = ctx['pixel_scale']
-    structure_mode = ctx.get('structure_mode', '单面')
+    scene = ctx["scene"]
+    valid_slot_names = ctx["valid_slot_names"]
+    preview_colors = ctx["preview_colors"]
+    color_mode = ctx["color_mode"]
+    image_path = ctx["image_path"]
+    modeling_mode = ctx["modeling_mode"]
+    target_w = ctx["target_w"]
+    pixel_scale = ctx["pixel_scale"]
+    structure_mode = ctx.get("structure_mode", "单面")
 
-    _bench_enabled = ctx.get('_bench_enabled', True)
-    _hifi_timings = ctx.get('_hifi_timings', {})
+    _bench_enabled = ctx.get("_bench_enabled", True)
+    _hifi_timings = ctx.get("_hifi_timings", {})
 
     is_single_sided = "单面" in structure_mode or "Single" in structure_mode
 
     # Single-sided: X mirror correction (needed by BambuStudio writer)
     if is_single_sided:
         model_width_mm = target_w * pixel_scale
-        mirror_transform = np.array([
-            [-1, 0, 0, model_width_mm],
-            [0, 1, 0, 0],
-            [0, 0, 1, 0],
-            [0, 0, 0, 1]
-        ])
+        mirror_transform = np.array([[-1, 0, 0, model_width_mm], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
         for geom_name in list(scene.geometry.keys()):
             scene.geometry[geom_name].apply_transform(mirror_transform)
 
-    _prog = ctx.get('progress')
+    _prog = ctx.get("progress")
     if _prog is not None:
         _prog(0.50, "导出 3MF 中... | Exporting 3MF...")
 
@@ -71,31 +66,31 @@ def run(ctx: dict) -> dict:
     _export_t0 = time.perf_counter() if _bench_enabled else None
 
     base_name = os.path.splitext(os.path.basename(image_path))[0]
-    out_path = os.path.join(OUTPUT_DIR, generate_model_filename(base_name, modeling_mode, color_mode))
+    out_path = os.path.join(MODELS_DIR, generate_model_filename(base_name, modeling_mode, color_mode))
 
     # Check if scene has any geometry before exporting
     if len(scene.geometry) == 0:
         print(f"[S09] Error: No meshes generated, cannot export 3MF")
-        ctx['error'] = "[ERROR] Mesh generation failed: No valid meshes generated"
+        ctx["error"] = "[ERROR] Mesh generation failed: No valid meshes generated"
         return ctx
 
     # BambuStudio print settings
     print_settings = {
-        'layer_height': '0.08',
-        'initial_layer_height': '0.08',
-        'wall_loops': '1',
-        'top_shell_layers': '0',
-        'bottom_shell_layers': '0',
-        'sparse_infill_density': '100%',
-        'sparse_infill_pattern': 'zig-zag',
-        'nozzle_temperature': ['220'] * 8,
-        'bed_temperature': ['60'] * 8,
-        'filament_type': ['PLA'] * 8,
-        'print_speed': '100',
-        'travel_speed': '150',
-        'enable_support': '0',
-        'brim_width': '5',
-        'brim_type': 'auto_brim',
+        "layer_height": "0.08",
+        "initial_layer_height": "0.08",
+        "wall_loops": "1",
+        "top_shell_layers": "0",
+        "bottom_shell_layers": "0",
+        "sparse_infill_density": "100%",
+        "sparse_infill_pattern": "zig-zag",
+        "nozzle_temperature": ["220"] * 8,
+        "bed_temperature": ["60"] * 8,
+        "filament_type": ["PLA"] * 8,
+        "print_speed": "100",
+        "travel_speed": "150",
+        "enable_support": "0",
+        "brim_width": "5",
+        "brim_type": "auto_brim",
     }
 
     try:
@@ -107,20 +102,20 @@ def run(ctx: dict) -> dict:
             preview_colors=preview_colors,
             settings=print_settings,
             color_mode=color_mode,
-            printer_id=ctx.get('printer_id', 'bambu-h2d'),
-            slicer=ctx.get('slicer', 'BambuStudio'),
+            printer_id=ctx.get("printer_id", "bambu-h2d"),
+            slicer=ctx.get("slicer", "BambuStudio"),
         )
         if _bench_enabled and _export_t0 is not None:
             _export_elapsed = time.perf_counter() - _export_t0
-            _hifi_timings['export_3mf_s'] = _export_elapsed
-            ctx['_hifi_timings'] = _hifi_timings
+            _hifi_timings["export_3mf_s"] = _export_elapsed
+            ctx["_hifi_timings"] = _hifi_timings
             print(f"[S09] export_3mf done: {_export_elapsed:.3f}s")
         print(f"[S09] 3MF exported with embedded settings: {out_path}")
     except Exception as e:
         print(f"[S09] Error exporting 3MF: {e}")
-        ctx['error'] = f"[ERROR] 3MF export failed: {e}"
+        ctx["error"] = f"[ERROR] 3MF export failed: {e}"
         return ctx
 
-    ctx['out_path'] = out_path
+    ctx["out_path"] = out_path
 
     return ctx

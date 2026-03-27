@@ -11,6 +11,7 @@ from PIL import Image
 # HEIC/HEIF support (optional dependency)
 try:
     from pillow_heif import register_heif_opener
+
     register_heif_opener()
     HAS_HEIF: bool = True
 except ImportError:
@@ -41,15 +42,11 @@ async def upload_to_ndarray(file: UploadFile) -> np.ndarray:
     except Exception as e:
         ext = os.path.splitext(file.filename or "")[1].lower()
         if ext in HEIC_EXTENSIONS and not HAS_HEIF:
-            raise ValueError(
-                "HEIC/HEIF 格式需要 pillow-heif 库。请执行: pip install pillow-heif"
-            )
+            raise ValueError("HEIC/HEIF 格式需要 pillow-heif 库。请执行: pip install pillow-heif")
         raise ValueError(f"无法解码图像文件: {e}")
 
 
-async def upload_to_tempfile(
-    file: UploadFile, suffix: Optional[str] = None
-) -> str:
+async def upload_to_tempfile(file: UploadFile, suffix: Optional[str] = None) -> str:
     """将 UploadFile 保存为临时文件，返回路径。
 
     Args:
@@ -62,7 +59,9 @@ async def upload_to_tempfile(
     if suffix is None:
         suffix = os.path.splitext(file.filename or "")[1] or ".tmp"
     contents = await file.read()
-    fd, path = tempfile.mkstemp(suffix=suffix)
+    from config import TEMP_DIR
+
+    fd, path = tempfile.mkstemp(suffix=suffix, dir=TEMP_DIR)
     try:
         os.write(fd, contents)
     finally:
@@ -100,7 +99,9 @@ async def ensure_png_tempfile(file: UploadFile) -> str:
         with Image.open(raw_path) as img:
             if img.mode != "RGB":
                 img = img.convert("RGB")
-            fd, png_path = tempfile.mkstemp(suffix=".png")
+            from config import TEMP_DIR
+
+            fd, png_path = tempfile.mkstemp(suffix=".png", dir=TEMP_DIR)
             os.close(fd)
             img.save(png_path, "PNG")
         os.unlink(raw_path)

@@ -54,8 +54,10 @@ class SessionStore:
             if session_id in self._temp_files:
                 self._temp_files[session_id].append(path)
 
-    def cleanup_expired(self) -> int:
-        """清理过期 session，返回清理数量。"""
+    def cleanup_expired(self) -> list[str]:
+        """Clean up expired sessions and return their IDs.
+        清理过期 session，返回已清理的 session ID 列表。
+        """
         now = time.time()
         expired: list[str] = []
         with self._lock:
@@ -64,7 +66,7 @@ class SessionStore:
                     expired.append(sid)
             for sid in expired:
                 self._remove_session(sid)
-        return len(expired)
+        return expired
 
     def _remove_session(self, session_id: str) -> None:
         """内部方法：删除 session 及其临时文件（需在锁内调用）。"""

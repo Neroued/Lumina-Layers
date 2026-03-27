@@ -246,7 +246,7 @@ def _run_vector_branch(ctx: dict) -> dict:
     Returns:
         更新后的 PipelineContext 字典（包含 result_tuple）
     """
-    from config import ColorSystem, OUTPUT_DIR
+    from config import ColorSystem, MODELS_DIR, OUTPUT_DIR
     from core.naming import generate_model_filename, generate_preview_filename
     from utils.bambu_3mf_writer import export_scene_with_bambu_metadata
     from utils import Stats
@@ -335,7 +335,7 @@ def _run_vector_branch(ctx: dict) -> dict:
         # 2. Export 3MF
         _report_progress(ctx, 0.72, "导出 3MF 中... | Exporting 3MF...")
         base_name = os.path.splitext(os.path.basename(image_path))[0]
-        out_path = os.path.join(OUTPUT_DIR, generate_model_filename(base_name, modeling_mode, color_mode))
+        out_path = os.path.join(MODELS_DIR, generate_model_filename(base_name, modeling_mode, color_mode))
 
         vec_slot_names = []
         for geom_name, geom in scene.geometry.items():

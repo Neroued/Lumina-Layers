@@ -93,8 +93,8 @@ def test_ttl_zero_cleanup_removes_session(
     time.sleep(0.01)
 
     # Cleanup
-    count = store.cleanup_expired()
-    assert count >= 1, "At least one session should be cleaned up"
+    expired_sids = store.cleanup_expired()
+    assert len(expired_sids) >= 1, "At least one session should be cleaned up"
 
     # Post-conditions: session is gone
     assert store.get(sid) is None, "get() should return None after cleanup"

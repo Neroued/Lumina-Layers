@@ -233,6 +233,8 @@ output/*.glb
 output/*.npy
 output/lumina_stats.txt
 output/*
+output/temp/
+output/models/
 
 # Gradio cache directory
 output/.gradio_cache/
@@ -283,3 +285,4 @@ assets/temp_*.npy
 .idea/
 *.3mf
 .cursor/
+.windsurf/

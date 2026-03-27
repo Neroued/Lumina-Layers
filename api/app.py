@@ -66,14 +66,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     print(f"[POOL] Started with {worker_pool.max_workers} workers")
 
     async def _cleanup_loop() -> None:
-        """Periodically clean up expired sessions.
-        定期清理过期会话。
+        """Periodically clean up expired sessions and their registered files.
+        定期清理过期会话及其注册文件。
         """
         while True:
             await asyncio.sleep(60)
-            count = session_store.cleanup_expired()
-            if count > 0:
-                print(f"[SESSION] Cleaned up {count} expired sessions")
+            expired_sids = session_store.cleanup_expired()
+            for sid in expired_sids:
+                file_registry.cleanup_session(sid)
+            if expired_sids:
+                print(f"[SESSION] Cleaned up {len(expired_sids)} expired sessions")
 
     cleanup_task = asyncio.create_task(_cleanup_loop())
 

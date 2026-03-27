@@ -6,7 +6,7 @@ import platform
 from enum import Enum
 
 # Handle PyInstaller bundled resources
-if getattr(sys, 'frozen', False):
+if getattr(sys, "frozen", False):
     # Running as compiled executable - use current working directory
     _BASE_DIR = os.getcwd()
 else:
@@ -15,6 +15,12 @@ else:
 
 OUTPUT_DIR = os.path.join(_BASE_DIR, "output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+TEMP_DIR = os.path.join(OUTPUT_DIR, "temp")
+os.makedirs(TEMP_DIR, exist_ok=True)
+
+MODELS_DIR = os.path.join(OUTPUT_DIR, "models")
+os.makedirs(MODELS_DIR, exist_ok=True)
 
 
 def get_asset_path(relative_path: str) -> str:
@@ -34,7 +40,7 @@ def get_asset_path(relative_path: str) -> str:
     candidates = []
     asset_rel = os.path.join("assets", relative_path)
 
-    if getattr(sys, 'frozen', False):
+    if getattr(sys, "frozen", False):
         # PyInstaller bundled: check _MEIPASS first, then CWD
         candidates.append(os.path.join(sys._MEIPASS, asset_rel))
         candidates.append(os.path.join(os.getcwd(), asset_rel))
@@ -48,14 +54,12 @@ def get_asset_path(relative_path: str) -> str:
         if os.path.exists(path):
             return path
 
-    raise FileNotFoundError(
-        f"Asset not found: {relative_path}\n"
-        f"Searched: {candidates}"
-    )
+    raise FileNotFoundError(f"Asset not found: {relative_path}\n" f"Searched: {candidates}")
 
 
 class PrinterConfig:
     """Physical printer parameters (layer height, nozzle, backing)."""
+
     LAYER_HEIGHT: float = 0.08
     NOZZLE_WIDTH: float = 0.42
     COLOR_LAYERS: int = 5
@@ -71,6 +75,7 @@ class WorkerPoolConfig:
         MAX_WORKERS (int): Max number of worker processes. (最大工作进程数)
         TASK_TIMEOUT (float): Task timeout in seconds. (任务超时秒数)
     """
+
     MAX_WORKERS: int = min(os.cpu_count() or 2, 4)
     TASK_TIMEOUT: float = 0  # No timeout
 
@@ -97,19 +102,20 @@ class WorkerPoolConfig:
 
 class SmartConfig:
     """Configuration for the Smart 1296 (36x36) System."""
+
     GRID_DIM: int = 36
     TOTAL_BLOCKS: int = 1296
-    
+
     DEFAULT_BLOCK_SIZE: float = 5.0  # mm (Face Down mode)
     DEFAULT_GAP: float = 0.8  # mm
 
     FILAMENTS = {
-        0: {"name": "White",   "hex": "#FFFFFF", "rgb": [255, 255, 255], "td": 5.0},
-        1: {"name": "Cyan",    "hex": "#0086D6", "rgb": [0, 134, 214],   "td": 3.5},
-        2: {"name": "Magenta", "hex": "#EC008C", "rgb": [236, 0, 140],   "td": 3.0},
-        3: {"name": "Green",   "hex": "#00AE42", "rgb": [0, 174, 66],    "td": 2.0},
-        4: {"name": "Yellow",  "hex": "#F4EE2A", "rgb": [244, 238, 42],  "td": 6.0},
-        5: {"name": "Black",   "hex": "#000000", "rgb": [0, 0, 0],       "td": 0.6},
+        0: {"name": "White", "hex": "#FFFFFF", "rgb": [255, 255, 255], "td": 5.0},
+        1: {"name": "Cyan", "hex": "#0086D6", "rgb": [0, 134, 214], "td": 3.5},
+        2: {"name": "Magenta", "hex": "#EC008C", "rgb": [236, 0, 140], "td": 3.0},
+        3: {"name": "Green", "hex": "#00AE42", "rgb": [0, 174, 66], "td": 2.0},
+        4: {"name": "Yellow", "hex": "#F4EE2A", "rgb": [244, 238, 42], "td": 6.0},
+        5: {"name": "Black", "hex": "#000000", "rgb": [0, 0, 0], "td": 0.6},
     }
 
 
@@ -117,6 +123,7 @@ class SmartConfigRYBW:
     """Configuration for the Smart 1296 RYBW (36x36) System.
     RYBW 6 色系统配置：White, Red, Yellow, Blue, Green, Black。
     """
+
     GRID_DIM: int = 36
     TOTAL_BLOCKS: int = 1296
 
@@ -124,26 +131,28 @@ class SmartConfigRYBW:
     DEFAULT_GAP: float = 0.8  # mm
 
     FILAMENTS = {
-        0: {"name": "White",  "hex": "#FFFFFF", "rgb": [255, 255, 255], "td": 5.0},
-        1: {"name": "Red",    "hex": "#DC143C", "rgb": [220, 20, 60],   "td": 3.0},
-        2: {"name": "Yellow", "hex": "#FFE600", "rgb": [255, 230, 0],   "td": 6.0},
-        3: {"name": "Blue",   "hex": "#0064F0", "rgb": [0, 100, 240],   "td": 3.5},
-        4: {"name": "Green",  "hex": "#00AE42", "rgb": [0, 174, 66],    "td": 2.0},
-        5: {"name": "Black",  "hex": "#000000", "rgb": [0, 0, 0],       "td": 0.6},
+        0: {"name": "White", "hex": "#FFFFFF", "rgb": [255, 255, 255], "td": 5.0},
+        1: {"name": "Red", "hex": "#DC143C", "rgb": [220, 20, 60], "td": 3.0},
+        2: {"name": "Yellow", "hex": "#FFE600", "rgb": [255, 230, 0], "td": 6.0},
+        3: {"name": "Blue", "hex": "#0064F0", "rgb": [0, 100, 240], "td": 3.5},
+        4: {"name": "Green", "hex": "#00AE42", "rgb": [0, 174, 66], "td": 2.0},
+        5: {"name": "Black", "hex": "#000000", "rgb": [0, 0, 0], "td": 0.6},
     }
+
 
 class ModelingMode(str, Enum):
     """建模模式枚举"""
+
     HIGH_FIDELITY = "high-fidelity"  # 高保真模式
     PIXEL = "pixel"  # 像素模式
     VECTOR = "vector"
-    
+
     def get_display_name(self) -> str:
         """获取模式的显示名称"""
         display_names = {
             ModelingMode.HIGH_FIDELITY: "High-Fidelity",
             ModelingMode.PIXEL: "Pixel Art",
-            ModelingMode.VECTOR: "Vector"
+            ModelingMode.VECTOR: "Vector",
         }
         return display_names.get(self, self.value)
 
@@ -152,137 +161,139 @@ class ColorSystem:
     """Color model definitions for CMYW, RYBW, and 6-Color systems."""
 
     CMYW = {
-        'name': 'CMYW',
-        'slots': ["White", "Cyan", "Magenta", "Yellow"],
-        'preview': {
-            0: [255, 255, 255, 255],
-            1: [0, 134, 214, 255],
-            2: [236, 0, 140, 255],
-            3: [244, 238, 42, 255]
-        },
-        'map': {"White": 0, "Cyan": 1, "Magenta": 2, "Yellow": 3},
-        'corner_labels': ["白色 (左上)", "青色 (右上)", "品红 (右下)", "黄色 (左下)"],
-        'corner_labels_en': ["White (TL)", "Cyan (TR)", "Magenta (BR)", "Yellow (BL)"]
+        "name": "CMYW",
+        "slots": ["White", "Cyan", "Magenta", "Yellow"],
+        "preview": {0: [255, 255, 255, 255], 1: [0, 134, 214, 255], 2: [236, 0, 140, 255], 3: [244, 238, 42, 255]},
+        "map": {"White": 0, "Cyan": 1, "Magenta": 2, "Yellow": 3},
+        "corner_labels": ["白色 (左上)", "青色 (右上)", "品红 (右下)", "黄色 (左下)"],
+        "corner_labels_en": ["White (TL)", "Cyan (TR)", "Magenta (BR)", "Yellow (BL)"],
     }
 
     RYBW = {
-        'name': 'RYBW',
-        'slots': ["White", "Red", "Yellow", "Blue"],
-        'preview': {
-            0: [255, 255, 255, 255],
-            1: [220, 20, 60, 255],
-            2: [255, 230, 0, 255],
-            3: [0, 100, 240, 255]
-        },
-        'map': {"White": 0, "Red": 1, "Yellow": 2, "Blue": 3},
-        'corner_labels': ["左上", "右上", "右下", "左下"],
-        'corner_labels_en': ["Top-Left", "Top-Right", "Bottom-Right", "Bottom-Left"]
+        "name": "RYBW",
+        "slots": ["White", "Red", "Yellow", "Blue"],
+        "preview": {0: [255, 255, 255, 255], 1: [220, 20, 60, 255], 2: [255, 230, 0, 255], 3: [0, 100, 240, 255]},
+        "map": {"White": 0, "Red": 1, "Yellow": 2, "Blue": 3},
+        "corner_labels": ["左上", "右上", "右下", "左下"],
+        "corner_labels_en": ["Top-Left", "Top-Right", "Bottom-Right", "Bottom-Left"],
     }
 
     SIX_COLOR = {
-        'name': '6-Color',
-        'base': 6,
-        'layer_count': 5,
-        'slots': ["White", "Cyan", "Magenta", "Green", "Yellow", "Black"],
-        'preview': {
+        "name": "6-Color",
+        "base": 6,
+        "layer_count": 5,
+        "slots": ["White", "Cyan", "Magenta", "Green", "Yellow", "Black"],
+        "preview": {
             0: [255, 255, 255, 255],  # White
-            1: [0, 134, 214, 255],    # Cyan
-            2: [236, 0, 140, 255],    # Magenta
-            3: [0, 174, 66, 255],     # Green
-            4: [244, 238, 42, 255],   # Yellow
-            5: [0, 0, 0, 255]         # Black (纯黑 #000000)
+            1: [0, 134, 214, 255],  # Cyan
+            2: [236, 0, 140, 255],  # Magenta
+            3: [0, 174, 66, 255],  # Green
+            4: [244, 238, 42, 255],  # Yellow
+            5: [0, 0, 0, 255],  # Black (纯黑 #000000)
         },
-        'map': {"White": 0, "Cyan": 1, "Magenta": 2, "Green": 3, "Yellow": 4, "Black": 5},
-        'corner_labels': ["白色 (左上)", "青色 (右上)", "品红 (右下)", "黄色 (左下)"],
-        'corner_labels_en': ["White (TL)", "Cyan (TR)", "Magenta (BR)", "Yellow (BL)"]
+        "map": {"White": 0, "Cyan": 1, "Magenta": 2, "Green": 3, "Yellow": 4, "Black": 5},
+        "corner_labels": ["白色 (左上)", "青色 (右上)", "品红 (右下)", "黄色 (左下)"],
+        "corner_labels_en": ["White (TL)", "Cyan (TR)", "Magenta (BR)", "Yellow (BL)"],
     }
 
     SIX_COLOR_RYBW = {
-        'name': '6-Color (RYBW)',
-        'base': 6,
-        'layer_count': 5,
-        'slots': ["White", "Red", "Yellow", "Blue", "Green", "Black"],
-        'preview': {
+        "name": "6-Color (RYBW)",
+        "base": 6,
+        "layer_count": 5,
+        "slots": ["White", "Red", "Yellow", "Blue", "Green", "Black"],
+        "preview": {
             0: [255, 255, 255, 255],  # White
-            1: [220, 20, 60, 255],    # Red
-            2: [255, 230, 0, 255],    # Yellow
-            3: [0, 100, 240, 255],    # Blue
-            4: [0, 174, 66, 255],     # Green
-            5: [0, 0, 0, 255]         # Black
+            1: [220, 20, 60, 255],  # Red
+            2: [255, 230, 0, 255],  # Yellow
+            3: [0, 100, 240, 255],  # Blue
+            4: [0, 174, 66, 255],  # Green
+            5: [0, 0, 0, 255],  # Black
         },
-        'map': {"White": 0, "Red": 1, "Yellow": 2, "Blue": 3, "Green": 4, "Black": 5},
-        'corner_labels': ["白色 (左上)", "红色 (右上)", "蓝色 (右下)", "黄色 (左下)"],
-        'corner_labels_en': ["White (TL)", "Red (TR)", "Blue (BR)", "Yellow (BL)"]
+        "map": {"White": 0, "Red": 1, "Yellow": 2, "Blue": 3, "Green": 4, "Black": 5},
+        "corner_labels": ["白色 (左上)", "红色 (右上)", "蓝色 (右下)", "黄色 (左下)"],
+        "corner_labels_en": ["White (TL)", "Red (TR)", "Blue (BR)", "Yellow (BL)"],
     }
 
     EIGHT_COLOR = {
-        'name': '8-Color Max',
-        'slots': ['Slot 1 (White)', 'Slot 2 (Cyan)', 'Slot 3 (Magenta)', 'Slot 4 (Yellow)', 'Slot 5 (Black)', 'Slot 6 (Red)', 'Slot 7 (Deep Blue)', 'Slot 8 (Green)'],
-        'preview': {
-            0: [255, 255, 255, 255], 1: [0, 134, 214, 255], 2: [236, 0, 140, 255], 3: [244, 238, 42, 255],
-            4: [0, 0, 0, 255], 5: [193, 46, 31, 255], 6: [10, 41, 137, 255], 7: [0, 174, 66, 255]
+        "name": "8-Color Max",
+        "slots": [
+            "Slot 1 (White)",
+            "Slot 2 (Cyan)",
+            "Slot 3 (Magenta)",
+            "Slot 4 (Yellow)",
+            "Slot 5 (Black)",
+            "Slot 6 (Red)",
+            "Slot 7 (Deep Blue)",
+            "Slot 8 (Green)",
+        ],
+        "preview": {
+            0: [255, 255, 255, 255],
+            1: [0, 134, 214, 255],
+            2: [236, 0, 140, 255],
+            3: [244, 238, 42, 255],
+            4: [0, 0, 0, 255],
+            5: [193, 46, 31, 255],
+            6: [10, 41, 137, 255],
+            7: [0, 174, 66, 255],
         },
-        'map': {'White': 0, 'Cyan': 1, 'Magenta': 2, 'Yellow': 3, 'Black': 4, 'Red': 5, 'Deep Blue': 6, 'Green': 7},
-        'corner_labels': ['TL', 'TR', 'BR', 'BL']
+        "map": {"White": 0, "Cyan": 1, "Magenta": 2, "Yellow": 3, "Black": 4, "Red": 5, "Deep Blue": 6, "Green": 7},
+        "corner_labels": ["TL", "TR", "BR", "BL"],
     }
 
     BW = {
-        'name': 'BW',
-        'base': 2,
-        'layer_count': 5,
-        'slots': ["White", "Black"],
-        'preview': {
-            0: [255, 255, 255, 255],  # White
-            1: [0, 0, 0, 255]         # Black (纯黑 #000000)
-        },
-        'map': {"White": 0, "Black": 1},
-        'corner_labels': ["白色 (左上)", "黑色 (右上)", "黑色 (右下)", "黑色 (左下)"],
-        'corner_labels_en': ["White (TL)", "Black (TR)", "Black (BR)", "Black (BL)"]
+        "name": "BW",
+        "base": 2,
+        "layer_count": 5,
+        "slots": ["White", "Black"],
+        "preview": {0: [255, 255, 255, 255], 1: [0, 0, 0, 255]},  # White  # Black (纯黑 #000000)
+        "map": {"White": 0, "Black": 1},
+        "corner_labels": ["白色 (左上)", "黑色 (右上)", "黑色 (右下)", "黑色 (左下)"],
+        "corner_labels_en": ["White (TL)", "Black (TR)", "Black (BR)", "Black (BL)"],
     }
 
     FIVE_COLOR_EXTENDED = {
-        'name': '5-Color Extended',
-        'base': 5,
-        'layer_count': 6,
-        'slots': ["White", "Red", "Yellow", "Blue", "Black"],
-        'preview': {
+        "name": "5-Color Extended",
+        "base": 5,
+        "layer_count": 6,
+        "slots": ["White", "Red", "Yellow", "Blue", "Black"],
+        "preview": {
             0: [255, 255, 255, 255],  # White
-            1: [220, 20, 60, 255],    # Red
-            2: [255, 230, 0, 255],    # Yellow
-            3: [0, 100, 240, 255],    # Blue
-            4: [20, 20, 20, 255]      # Black
+            1: [220, 20, 60, 255],  # Red
+            2: [255, 230, 0, 255],  # Yellow
+            3: [0, 100, 240, 255],  # Blue
+            4: [20, 20, 20, 255],  # Black
         },
-        'map': {"White": 0, "Red": 1, "Yellow": 2, "Blue": 3, "Black": 4},
-        'corner_labels': ["白色 (左上)", "红色 (右上)", "蓝色 (右下)", "黄色 (左下)", "黑色 (外层)"],
-        'corner_labels_en': ["White (TL)", "Red (TR)", "Blue (BR)", "Yellow (BL)", "Black (Outer)"]
+        "map": {"White": 0, "Red": 1, "Yellow": 2, "Blue": 3, "Black": 4},
+        "corner_labels": ["白色 (左上)", "红色 (右上)", "蓝色 (右下)", "黄色 (左下)", "黑色 (外层)"],
+        "corner_labels_en": ["White (TL)", "Red (TR)", "Blue (BR)", "Yellow (BL)", "Black (Outer)"],
     }
 
     @staticmethod
     def get(mode: str):
         """
         Get color system configuration (Unified 4-Color Backend)
-        
+
         Args:
             mode: Color mode string (4-Color/6-Color/8-Color/BW)
-        
+
         Returns:
             Color system configuration dict
-        
+
         Note:
             4-Color mode defaults to RYBW palette.
             CMYW and RYBW share the same processing pipeline.
         """
         if mode is None:
             return ColorSystem.RYBW  # Default fallback
-        
+
         # 4-Color CMYW variant
         if mode in ("4-Color (CMYW)", "CMYW"):
             return ColorSystem.CMYW
-        
+
         # 4-Color RYBW variant (also handles legacy "4-Color" string)
         if mode in ("4-Color (RYBW)", "4-Color", "RYBW") or "4-Color" in mode:
             return ColorSystem.RYBW
-        
+
         # Check specific patterns
         if "8-Color" in mode:
             return ColorSystem.EIGHT_COLOR
@@ -290,26 +301,27 @@ class ColorSystem:
             return ColorSystem.SIX_COLOR_RYBW
         if "6-Color" in mode:
             return ColorSystem.SIX_COLOR
-        
+
         # Merged LUT: use 8-Color config (superset of all material IDs 0-7)
         if mode == "Merged":
             return ColorSystem.EIGHT_COLOR
-        
+
         # Legacy support for old mode strings
         if "RYBW" in mode:
             return ColorSystem.RYBW
         if "CMYW" in mode:
             return ColorSystem.CMYW
-        
+
         # Check BW last to avoid matching RYBW
         if mode == "BW" or mode == "BW (Black & White)":
             return ColorSystem.BW
-        
+
         # 5-Color Extended mode
         if "5-Color Extended" in mode or "5-Color (Extended)" in mode:
             return ColorSystem.FIVE_COLOR_EXTENDED
-        
+
         return ColorSystem.RYBW  # Default fallback
+
 
 # ========== Global Constants ==========
 
@@ -327,7 +339,7 @@ PREVIEW_MARGIN = 30
 
 class BedManager:
     """Print bed size manager for preview rendering.
-    
+
     Provides standard bed sizes and dynamic canvas scaling
     so that models on a 400mm bed are visually comparable to
     those on a 180mm bed.
@@ -356,10 +368,10 @@ class BedManager:
     def get_bed_size(cls, label: str):
         """Return (width_mm, height_mm) for a given label or printer display name.
         根据标签或打印机显示名称返回热床尺寸。
-        
+
         Args:
             label (str): Bed size label or printer display name. (热床尺寸标签或打印机显示名称)
-        
+
         Returns:
             tuple[int, int]: (width_mm, height_mm). (宽度和高度，毫米)
         """
@@ -367,39 +379,34 @@ class BedManager:
         for name, w, h in cls.BEDS:
             if name == label:
                 return (w, h)
-        
+
         # Try printer profiles by display name
         for profile in PRINTER_PROFILES.values():
             if profile.display_name == label:
                 return (profile.bed_width, profile.bed_depth)
-        
+
         return (256, 256)  # fallback
 
     @classmethod
     def get_all_bed_options(cls):
         """Return all bed size options including printer models and custom sizes.
         返回所有热床尺寸选项，包括打印机型号和自定义尺寸。
-        
+
         Returns:
             list[tuple]: List of (label, width_mm, height_mm, printer_id).
-                         printer_id is None for custom sizes. 
+                         printer_id is None for custom sizes.
                          (标签、宽度、高度、打印机ID的元组列表，自定义尺寸的 printer_id 为 None)
         """
         options = []
-        
+
         # Add printer models first
         for profile in PRINTER_PROFILES.values():
-            options.append((
-                profile.display_name,
-                profile.bed_width,
-                profile.bed_depth,
-                profile.id
-            ))
-        
+            options.append((profile.display_name, profile.bed_width, profile.bed_depth, profile.id))
+
         # Add custom sizes
         for label, w, h in cls.BEDS:
             options.append((label, w, h, None))
-        
+
         return options
 
     @classmethod
@@ -411,30 +418,32 @@ class BedManager:
 
 # ========== Vector Engine Configuration ==========
 
+
 class VectorConfig:
     """Configuration for native vector engine."""
-    
+
     # Curve approximation precision
     DEFAULT_SAMPLING_MM: float = 0.05  # High quality (default)
-    MIN_SAMPLING_MM: float = 0.01      # Ultra-high quality
-    MAX_SAMPLING_MM: float = 0.20      # Low quality (faster)
-    
+    MIN_SAMPLING_MM: float = 0.01  # Ultra-high quality
+    MAX_SAMPLING_MM: float = 0.20  # Low quality (faster)
+
     # Performance limits
-    MAX_POLYGONS: int = 10000          # Prevent memory issues
+    MAX_POLYGONS: int = 10000  # Prevent memory issues
     MAX_VERTICES_PER_POLY: int = 5000  # Prevent degenerate geometry
-    
+
     # Boolean operation tolerance
-    BUFFER_TOLERANCE: float = 0.0      # Shapely buffer precision
-    
+    BUFFER_TOLERANCE: float = 0.0  # Shapely buffer precision
+
     # Coordinate system
-    FLIP_Y_AXIS: bool = False          # SVG Y-down → 3D Y-up (disabled by default)
-    
+    FLIP_Y_AXIS: bool = False  # SVG Y-down → 3D Y-up (disabled by default)
+
     # Parallel processing
-    ENABLE_PARALLEL: bool = False      # Parallel layer processing (experimental)
-    MAX_WORKERS: int = 5               # Thread pool size
+    ENABLE_PARALLEL: bool = False  # Parallel layer processing (experimental)
+    MAX_WORKERS: int = 5  # Thread pool size
 
 
 # ========== Runtime Platform Policy ==========
+
 
 def _env_flag(name: str) -> bool:
     """Return True for common truthy env var values."""
@@ -546,6 +555,7 @@ class PrinterProfile:
         slicer_templates (dict[str, str]): Slicer-specific template filenames. (切片器专属模板)
         thumbnail (str): Thumbnail image filename, reserved for future use. (缩略图文件名，预留)
     """
+
     id: str
     display_name: str
     brand: str
@@ -585,93 +595,158 @@ DEFAULT_SLICER_ID: str = "BambuStudio"
 
 PRINTER_PROFILES: dict[str, PrinterProfile] = {
     "bambu-a1-mini": PrinterProfile(
-        id="bambu-a1-mini", display_name="Bambu Lab A1 mini", brand="Bambu Lab",
-        bed_width=180, bed_depth=180, bed_height=180,
-        nozzle_count=1, is_dual_head=False,
+        id="bambu-a1-mini",
+        display_name="Bambu Lab A1 mini",
+        brand="Bambu Lab",
+        bed_width=180,
+        bed_depth=180,
+        bed_height=180,
+        nozzle_count=1,
+        is_dual_head=False,
         template_file="bambu_a1_mini.json",
         slicer_templates={"OrcaSlicer": "orca_a1_mini.json"},
     ),
     "bambu-a1": PrinterProfile(
-        id="bambu-a1", display_name="Bambu Lab A1", brand="Bambu Lab",
-        bed_width=256, bed_depth=256, bed_height=256,
-        nozzle_count=1, is_dual_head=False,
+        id="bambu-a1",
+        display_name="Bambu Lab A1",
+        brand="Bambu Lab",
+        bed_width=256,
+        bed_depth=256,
+        bed_height=256,
+        nozzle_count=1,
+        is_dual_head=False,
         template_file="bambu_a1.json",
         slicer_templates={"OrcaSlicer": "orca_a1.json"},
     ),
     "bambu-p1p": PrinterProfile(
-        id="bambu-p1p", display_name="Bambu Lab P1P", brand="Bambu Lab",
-        bed_width=256, bed_depth=256, bed_height=256,
-        nozzle_count=1, is_dual_head=False,
+        id="bambu-p1p",
+        display_name="Bambu Lab P1P",
+        brand="Bambu Lab",
+        bed_width=256,
+        bed_depth=256,
+        bed_height=256,
+        nozzle_count=1,
+        is_dual_head=False,
         template_file="bambu_p1p.json",
         slicer_templates={"OrcaSlicer": "orca_p1p.json"},
     ),
     "bambu-p1s": PrinterProfile(
-        id="bambu-p1s", display_name="Bambu Lab P1S", brand="Bambu Lab",
-        bed_width=256, bed_depth=256, bed_height=250,
-        nozzle_count=1, is_dual_head=False,
+        id="bambu-p1s",
+        display_name="Bambu Lab P1S",
+        brand="Bambu Lab",
+        bed_width=256,
+        bed_depth=256,
+        bed_height=250,
+        nozzle_count=1,
+        is_dual_head=False,
         template_file="bambu_p1s.json",
         slicer_templates={"OrcaSlicer": "orca_p1s.json"},
     ),
     "bambu-x1c": PrinterProfile(
-        id="bambu-x1c", display_name="Bambu Lab X1 Carbon", brand="Bambu Lab",
-        bed_width=256, bed_depth=256, bed_height=256,
-        nozzle_count=1, is_dual_head=False,
+        id="bambu-x1c",
+        display_name="Bambu Lab X1 Carbon",
+        brand="Bambu Lab",
+        bed_width=256,
+        bed_depth=256,
+        bed_height=256,
+        nozzle_count=1,
+        is_dual_head=False,
         template_file="bambu_x1c.json",
         slicer_templates={"OrcaSlicer": "orca_x1c.json"},
     ),
     "bambu-x1e": PrinterProfile(
-        id="bambu-x1e", display_name="Bambu Lab X1E", brand="Bambu Lab",
-        bed_width=256, bed_depth=256, bed_height=256,
-        nozzle_count=1, is_dual_head=False,
+        id="bambu-x1e",
+        display_name="Bambu Lab X1E",
+        brand="Bambu Lab",
+        bed_width=256,
+        bed_depth=256,
+        bed_height=256,
+        nozzle_count=1,
+        is_dual_head=False,
         template_file="bambu_x1e.json",
         slicer_templates={"OrcaSlicer": "orca_x1e.json"},
     ),
     "bambu-h2d": PrinterProfile(
-        id="bambu-h2d", display_name="Bambu Lab H2D", brand="Bambu Lab",
-        bed_width=350, bed_depth=320, bed_height=325,
-        nozzle_count=2, is_dual_head=True,
+        id="bambu-h2d",
+        display_name="Bambu Lab H2D",
+        brand="Bambu Lab",
+        bed_width=350,
+        bed_depth=320,
+        bed_height=325,
+        nozzle_count=2,
+        is_dual_head=True,
         template_file="bambu_h2d.json",
         slicer_templates={"OrcaSlicer": "orca_h2d.json"},
     ),
     "bambu-h2d-pro": PrinterProfile(
-        id="bambu-h2d-pro", display_name="Bambu Lab H2D Pro", brand="Bambu Lab",
-        bed_width=350, bed_depth=320, bed_height=325,
-        nozzle_count=2, is_dual_head=True,
+        id="bambu-h2d-pro",
+        display_name="Bambu Lab H2D Pro",
+        brand="Bambu Lab",
+        bed_width=350,
+        bed_depth=320,
+        bed_height=325,
+        nozzle_count=2,
+        is_dual_head=True,
         template_file="bambu_h2d_pro.json",
         slicer_templates={"OrcaSlicer": "orca_h2d_pro.json"},
     ),
     "bambu-h2s": PrinterProfile(
-        id="bambu-h2s", display_name="Bambu Lab H2S", brand="Bambu Lab",
-        bed_width=350, bed_depth=320, bed_height=325,
-        nozzle_count=2, is_dual_head=True,
+        id="bambu-h2s",
+        display_name="Bambu Lab H2S",
+        brand="Bambu Lab",
+        bed_width=350,
+        bed_depth=320,
+        bed_height=325,
+        nozzle_count=2,
+        is_dual_head=True,
         template_file="bambu_h2s.json",
         slicer_templates={"OrcaSlicer": "orca_h2s.json"},
     ),
     "bambu-p2s": PrinterProfile(
-        id="bambu-p2s", display_name="Bambu Lab P2S", brand="Bambu Lab",
-        bed_width=256, bed_depth=256, bed_height=250,
-        nozzle_count=1, is_dual_head=False,
+        id="bambu-p2s",
+        display_name="Bambu Lab P2S",
+        brand="Bambu Lab",
+        bed_width=256,
+        bed_depth=256,
+        bed_height=250,
+        nozzle_count=1,
+        is_dual_head=False,
         template_file="bambu_p2s.json",
         slicer_templates={"OrcaSlicer": "orca_p2s.json"},
     ),
     "bambu-h2c": PrinterProfile(
-        id="bambu-h2c", display_name="Bambu Lab H2C", brand="Bambu Lab",
-        bed_width=350, bed_depth=320, bed_height=325,
-        nozzle_count=2, is_dual_head=True,
+        id="bambu-h2c",
+        display_name="Bambu Lab H2C",
+        brand="Bambu Lab",
+        bed_width=350,
+        bed_depth=320,
+        bed_height=325,
+        nozzle_count=2,
+        is_dual_head=True,
         template_file="bambu_h2c.json",
         slicer_templates={"OrcaSlicer": "orca_h2c.json"},
     ),
     "snapmaker-u1": PrinterProfile(
-        id="snapmaker-u1", display_name="Snapmaker U1", brand="Snapmaker",
-        bed_width=270, bed_depth=270, bed_height=270,
-        nozzle_count=4, is_dual_head=False,
+        id="snapmaker-u1",
+        display_name="Snapmaker U1",
+        brand="Snapmaker",
+        bed_width=270,
+        bed_depth=270,
+        bed_height=270,
+        nozzle_count=4,
+        is_dual_head=False,
         template_file="snapmaker_u1.json",
         slicer_templates={"SnapmakerOrca": "snapmaker_u1.json"},
     ),
     "elegoo-cc2": PrinterProfile(
-        id="elegoo-cc2", display_name="Elegoo Centauri Carbon 2", brand="Elegoo",
-        bed_width=256, bed_depth=256, bed_height=256,
-        nozzle_count=1, is_dual_head=False,
+        id="elegoo-cc2",
+        display_name="Elegoo Centauri Carbon 2",
+        brand="Elegoo",
+        bed_width=256,
+        bed_depth=256,
+        bed_height=256,
+        nozzle_count=1,
+        is_dual_head=False,
         template_file="elegoo_cc2.json",
         slicer_templates={"ElegooSlicer": "elegoo_cc2.json"},
     ),
@@ -721,6 +796,7 @@ class PaletteEntry:
         hex_color (Optional[str]): Hex color value, e.g. "#FF0000". (十六进制颜色值)
         color_name (Optional[str]): Manufacturer-provided display name. (厂商提供的颜色名称)
     """
+
     color: str
     material: str = "PLA Basic"
     hex_color: Optional[str] = None
@@ -744,6 +820,7 @@ class LUTMetadata:
         base_channel_idx (int): Base channel index. (底板通道索引)
         layer_order (str): Print order, "Top2Bottom" or "Bottom2Top". (打印顺序)
     """
+
     palette: list[PaletteEntry] = field(default_factory=list)
     manufacturer: str = ""
     type: str = ""
@@ -804,22 +881,26 @@ class LUTMetadata:
             # 新格式: {"White": {"material": "PLA Basic", "hex_color": "#FFF"}, ...}
             for color_name, props in palette_raw.items():
                 if isinstance(props, dict):
-                    palette.append(PaletteEntry(
-                        color=str(color_name),
-                        material=str(props.get("material", "PLA Basic")),
-                        hex_color=props.get("hex_color"),
-                        color_name=props.get("color_name"),
-                    ))
+                    palette.append(
+                        PaletteEntry(
+                            color=str(color_name),
+                            material=str(props.get("material", "PLA Basic")),
+                            hex_color=props.get("hex_color"),
+                            color_name=props.get("color_name"),
+                        )
+                    )
         elif isinstance(palette_raw, list):
             # 旧格式兼容: [{"color": "White", "material": "PLA Basic"}, ...]
             for item in palette_raw:
                 if isinstance(item, dict) and "color" in item and "material" in item:
-                    palette.append(PaletteEntry(
-                        color=str(item["color"]),
-                        material=str(item["material"]),
-                        hex_color=item.get("hex_color"),
-                        color_name=item.get("color_name"),
-                    ))
+                    palette.append(
+                        PaletteEntry(
+                            color=str(item["color"]),
+                            material=str(item["material"]),
+                            hex_color=item.get("hex_color"),
+                            color_name=item.get("color_name"),
+                        )
+                    )
 
         return cls(
             palette=palette,
