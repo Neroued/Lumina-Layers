@@ -139,6 +139,7 @@ export default function ExtractorCanvas() {
 
   const submitManualFix = useExtractorStore((s) => s.submitManualFix);
   const manualFixLoading = useExtractorStore((s) => s.manualFixLoading);
+  const rotateImage = useExtractorStore((s) => s.rotateImage);
 
   // ---------- Manual fix state: selected cell + color picker ----------
   const [selectedCell, setSelectedCell] = useState<[number, number] | null>(null);
@@ -364,15 +365,24 @@ export default function ExtractorCanvas() {
   // ===== Canvas mode =====
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col items-center justify-center gap-4 px-3 py-3 sm:px-5 sm:py-4 xl:px-7 xl:py-5">
-      {/* Corner hint */}
-      <p
-        data-testid="corner-hint"
-        className={`rounded-full px-3 py-1 text-sm font-medium ${
-          cornerCount >= 4 ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-amber-500/10 text-amber-600 dark:text-amber-300"
-        }`}
-      >
-        {hintText}
-      </p>
+      {/* Corner hint + rotate button */}
+      <div className="flex items-center gap-2">
+        <p
+          data-testid="corner-hint"
+          className={`rounded-full px-3 py-1 text-sm font-medium ${
+            cornerCount >= 4 ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-amber-500/10 text-amber-600 dark:text-amber-300"
+          }`}
+        >
+          {hintText}
+        </p>
+        <button
+          data-testid="rotate-image-btn"
+          onClick={rotateImage}
+          className="rounded-full border border-slate-200/80 bg-white px-3 py-1 text-sm text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-700/80 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+        >
+          {t("ext_rotate_btn")}
+        </button>
+      </div>
 
       {/* Canvas */}
       <canvas

@@ -5,7 +5,10 @@
  * Validates: Requirements 1.1, 1.3, 1.4, 3.1, 3.2, 4.1, 4.2, 5.1
  */
 import { describe, it, expect } from "vitest";
-import { isValidImageType, ACCEPT_IMAGE_FORMATS } from "../stores/converterStore";
+import {
+  isValidImageType,
+  ACCEPT_IMAGE_FORMATS,
+} from "../stores/converterStore";
 import { translations } from "../i18n/translations";
 
 const SUPPORTED_MIME_TYPES = [
@@ -24,14 +27,31 @@ describe("isValidImageType — 支持的格式返回 true", () => {
 });
 
 describe("isValidImageType — 不支持的格式返回 false", () => {
-  it.each([
-    "application/pdf",
-    "text/plain",
-    "image/bmp",
-    "image/tiff",
-    "",
-  ])('returns false for "%s"', (mime) => {
-    expect(isValidImageType(mime)).toBe(false);
+  it.each(["application/pdf", "text/plain", "image/bmp", "image/tiff", ""])(
+    'returns false for "%s"',
+    (mime) => {
+      expect(isValidImageType(mime)).toBe(false);
+    },
+  );
+});
+
+const RAW_FILE_NAMES = [
+  "photo.dng",
+  "photo.cr2",
+  "photo.cr3",
+  "photo.nef",
+  "photo.arw",
+  "photo.orf",
+  "photo.rw2",
+  "photo.raf",
+  "photo.pef",
+  "photo.srw",
+  "photo.raw",
+] as const;
+
+describe("RAW files accepted by extension", () => {
+  it.each(RAW_FILE_NAMES)("returns true for %s with empty MIME", (fileName) => {
+    expect(isValidImageType("", fileName)).toBe(true);
   });
 });
 
@@ -44,7 +64,7 @@ describe("ACCEPT_IMAGE_FORMATS 常量", () => {
 
   it("是逗号分隔的字符串", () => {
     const parts = ACCEPT_IMAGE_FORMATS.split(",");
-    expect(parts).toHaveLength(6);
+    expect(parts).toHaveLength(17);
     parts.forEach((part) => {
       expect(part.trim()).not.toBe("");
     });

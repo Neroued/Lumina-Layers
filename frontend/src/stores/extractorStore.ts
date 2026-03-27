@@ -13,6 +13,28 @@ import {
 } from "../api/extractor";
 import type { ExtractorPaletteEntry } from "../api/types";
 import { clampValue } from "./converterStore";
+import { uploadImagePreview } from "../api/system";
+
+const BASE_URL = "http://localhost:8000";
+
+export const RAW_EXTENSIONS = new Set([
+  ".dng",
+  ".cr2",
+  ".cr3",
+  ".nef",
+  ".arw",
+  ".orf",
+  ".rw2",
+  ".raf",
+  ".pef",
+  ".srw",
+  ".raw",
+]);
+
+export function isRawFile(file: File): boolean {
+  const ext = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
+  return RAW_EXTENSIONS.has(ext);
+}
 
 // ========== State Interface ==========
 
@@ -74,6 +96,7 @@ export interface ExtractorState {
 
 export interface ExtractorActions {
   setImageFile: (file: File | null) => void;
+  rotateImage: () => void;
   setColorMode: (mode: ExtractorColorMode) => void;
   setPage: (page: ExtractorPage) => void;
   addCornerPoint: (point: [number, number]) => void;
@@ -90,7 +113,10 @@ export interface ExtractorActions {
   submitMerge: () => Promise<void>;
   setError: (error: string | null) => void;
   clearError: () => void;
-  updatePaletteEntry: (index: number, entry: Partial<ExtractorPaletteEntry>) => void;
+  updatePaletteEntry: (
+    index: number,
+    entry: Partial<ExtractorPaletteEntry>,
+  ) => void;
   submitConfirmPalette: () => Promise<void>;
 }
 
@@ -138,9 +164,9 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
     ...DEFAULT_STATE,
 
     setImageFile: (file: File | null) => {
-      // Revoke previous object URL to avoid memory leaks
+      // Revoke previous blob URL to avoid memory leaks
       const prev = get().imagePreviewUrl;
-      if (prev) {
+      if (prev && prev.startsWith("blob:")) {
         URL.revokeObjectURL(prev);
       }
 
@@ -159,6 +185,35 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
           paletteConfirmed: false,
           paletteConfirmError: null,
         });
+        return;
+      }
+
+      if (isRawFile(file)) {
+        set({
+          imageFile: file,
+          imagePreviewUrl: null,
+          imageNaturalWidth: null,
+          imageNaturalHeight: null,
+          corner_points: [],
+          session_id: null,
+          lut_download_url: null,
+          warp_view_url: null,
+          lut_preview_url: null,
+          defaultPalette: [],
+          paletteConfirmed: false,
+          paletteConfirmError: null,
+        });
+        uploadImagePreview(file)
+          .then(({ preview_url, width, height }) => {
+            set({
+              imagePreviewUrl: `${BASE_URL}${preview_url}`,
+              imageNaturalWidth: width,
+              imageNaturalHeight: height,
+            });
+          })
+          .catch(() => {
+            set({ error: "RAW 图片预览失败，请检查后端是否安装 rawpy" });
+          });
         return;
       }
 
@@ -191,18 +246,52 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
       });
     },
 
-    setColorMode: (mode: ExtractorColorMode) => set({
-      color_mode: mode,
-      // Reset 8-color and 5-color page tracking when switching modes
-      page1Extracted: false,
-      page2Extracted: false,
-      page1Extracted_5c: false,
-      page2Extracted_5c: false,
-      mergeError: null,
-      defaultPalette: [],
-      paletteConfirmed: false,
-      paletteConfirmError: null,
-    }),
+    rotateImage: () => {
+      const { imagePreviewUrl, imageNaturalWidth, imageNaturalHeight } = get();
+      if (!imagePreviewUrl || !imageNaturalWidth || !imageNaturalHeight) return;
+
+      const canvas = document.createElement("canvas");
+      canvas.width = imageNaturalHeight;
+      canvas.height = imageNaturalWidth;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      const img = new Image();
+      img.onload = () => {
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.drawImage(img, -imageNaturalWidth / 2, -imageNaturalHeight / 2);
+
+        canvas.toBlob((blob) => {
+          if (!blob) return;
+          const newUrl = URL.createObjectURL(blob);
+          if (imagePreviewUrl.startsWith("blob:")) {
+            URL.revokeObjectURL(imagePreviewUrl);
+          }
+          set({
+            imagePreviewUrl: newUrl,
+            imageNaturalWidth: imageNaturalHeight,
+            imageNaturalHeight: imageNaturalWidth,
+            corner_points: [],
+          });
+        }, "image/png");
+      };
+      img.src = imagePreviewUrl;
+    },
+
+    setColorMode: (mode: ExtractorColorMode) =>
+      set({
+        color_mode: mode,
+        // Reset 8-color and 5-color page tracking when switching modes
+        page1Extracted: false,
+        page2Extracted: false,
+        page1Extracted_5c: false,
+        page2Extracted_5c: false,
+        mergeError: null,
+        defaultPalette: [],
+        paletteConfirmed: false,
+        paletteConfirmError: null,
+      }),
 
     setPage: (page: ExtractorPage) => set({ page }),
 
@@ -220,8 +309,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
     setOffsetY: (value: number) =>
       set({ offset_y: clampValue(value, -30, 30) }),
 
-    setZoom: (value: number) =>
-      set({ zoom: clampValue(value, 0.8, 1.2) }),
+    setZoom: (value: number) => set({ zoom: clampValue(value, 0.8, 1.2) }),
 
     setDistortion: (value: number) =>
       set({ distortion: clampValue(value, -0.2, 0.2) }),
@@ -288,8 +376,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
         });
       } catch (err) {
         set({
-          error:
-            err instanceof Error ? err.message : "颜色提取失败，请重试",
+          error: err instanceof Error ? err.message : "颜色提取失败，请重试",
           isLoading: false,
         });
       }
@@ -304,7 +391,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
         const response = await manualFixCell(
           state.session_id,
           [row, col],
-          color
+          color,
         );
         set({
           lut_preview_url: response.lut_preview_url
@@ -355,8 +442,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
         });
       } catch (err) {
         set({
-          mergeError:
-            err instanceof Error ? err.message : "合并失败，请重试",
+          mergeError: err instanceof Error ? err.message : "合并失败，请重试",
           mergeLoading: false,
         });
       }
@@ -365,7 +451,10 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
     setError: (error: string | null) => set({ error }),
     clearError: () => set({ error: null }),
 
-    updatePaletteEntry: (index: number, entry: Partial<ExtractorPaletteEntry>) => {
+    updatePaletteEntry: (
+      index: number,
+      entry: Partial<ExtractorPaletteEntry>,
+    ) => {
       const palette = [...get().defaultPalette];
       if (index >= 0 && index < palette.length) {
         palette[index] = { ...palette[index], ...entry };
@@ -397,5 +486,5 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
         });
       }
     },
-  })
+  }),
 );

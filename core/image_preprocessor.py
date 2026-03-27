@@ -24,6 +24,20 @@ except ImportError:
     HAS_HEIF = False
     print("[WARN] [HEIC] pillow-heif not installed. HEIC/HEIF support disabled.")
 
+# RAW support (optional dependency)
+try:
+    import rawpy
+
+    HAS_RAW = True
+except ImportError:
+    HAS_RAW = False
+    print("[WARN] [RAW] rawpy not installed. Camera RAW support disabled.")
+
+RAW_EXTENSIONS: set[str] = {
+    ".dng", ".cr2", ".cr3", ".nef", ".arw",
+    ".orf", ".rw2", ".raf", ".pef", ".srw", ".raw",
+}
+
 
 @dataclass
 class CropRegion:
@@ -68,7 +82,10 @@ class ImagePreprocessor:
     """
 
     # Supported formats
-    SUPPORTED_FORMATS = {"JPEG", "JPG", "PNG", "GIF", "BMP", "WEBP", "HEIF", "HEIC"}
+    SUPPORTED_FORMATS = {
+        "JPEG", "JPG", "PNG", "GIF", "BMP", "WEBP", "HEIF", "HEIC",
+        "DNG", "CR2", "CR3", "NEF", "ARW", "ORF", "RW2", "RAF", "PEF", "SRW", "RAW",
+    }
 
     @staticmethod
     def detect_format(image_path: str) -> str:
@@ -86,6 +103,16 @@ class ImagePreprocessor:
         """
         if not image_path or not os.path.exists(image_path):
             raise ValueError(f"Image file not found: {image_path}")
+
+        # RAW files: PIL cannot open them, detect by extension only
+        ext_upper = os.path.splitext(image_path)[1].upper().lstrip(".")
+        if os.path.splitext(image_path)[1].lower() in RAW_EXTENSIONS:
+            if not HAS_RAW:
+                raise ValueError(
+                    "RAW format detected but rawpy is not installed. "
+                    "Please install it: pip install rawpy"
+                )
+            return ext_upper if ext_upper else "RAW"
 
         try:
             with Image.open(image_path) as img:
@@ -128,6 +155,16 @@ class ImagePreprocessor:
         if not image_path or not os.path.exists(image_path):
             raise ValueError(f"Image file not found: {image_path}")
 
+        if os.path.splitext(image_path)[1].lower() in RAW_EXTENSIONS:
+            if not HAS_RAW:
+                raise ValueError("RAW format requires rawpy. Please install it: pip install rawpy")
+            import rawpy  # noqa: PLC0415
+
+            with rawpy.imread(image_path) as raw:
+                rgb = raw.postprocess(use_camera_wb=True, output_bps=8)
+            h, w = rgb.shape[:2]
+            return w, h
+
         try:
             with Image.open(image_path) as img:
                 return img.size  # (width, height)
@@ -151,6 +188,22 @@ class ImagePreprocessor:
         """
         if not image_path or not os.path.exists(image_path):
             raise ValueError(f"Image file not found: {image_path}")
+
+        if os.path.splitext(image_path)[1].lower() in RAW_EXTENSIONS:
+            if not HAS_RAW:
+                raise ValueError("RAW format requires rawpy. Please install it: pip install rawpy")
+            import rawpy  # noqa: PLC0415
+
+            with rawpy.imread(image_path) as raw:
+                rgb = raw.postprocess(use_camera_wb=True, output_bps=8)
+            img = Image.fromarray(rgb)
+            if output_path is None:
+                from config import TEMP_DIR
+
+                fd, output_path = tempfile.mkstemp(suffix=".png", dir=TEMP_DIR)
+                os.close(fd)
+            img.save(output_path, "PNG")
+            return output_path
 
         try:
             with Image.open(image_path) as img:
@@ -199,6 +252,28 @@ class ImagePreprocessor:
         """
         if not image_path or not os.path.exists(image_path):
             raise ValueError(f"Image file not found: {image_path}")
+
+        if os.path.splitext(image_path)[1].lower() in RAW_EXTENSIONS:
+            if not HAS_RAW:
+                raise ValueError("RAW format requires rawpy. Please install it: pip install rawpy")
+            import rawpy  # noqa: PLC0415
+
+            with rawpy.imread(image_path) as raw:
+                rgb = raw.postprocess(use_camera_wb=True, output_bps=8)
+            img = Image.fromarray(rgb)
+            img_w, img_h = img.size
+
+            region = CropRegion(x, y, width, height)
+            region = region.clamp(img_w, img_h)
+            box = (region.x, region.y, region.x + region.width, region.y + region.height)
+            cropped = img.crop(box).convert("RGB")
+            if output_path is None:
+                from config import TEMP_DIR
+
+                fd, output_path = tempfile.mkstemp(suffix=".png", dir=TEMP_DIR)
+                os.close(fd)
+            cropped.save(output_path, "PNG")
+            return output_path
 
         try:
             with Image.open(image_path) as img:
@@ -276,9 +351,10 @@ class ImagePreprocessor:
         # Get dimensions
         width, height = cls.get_image_dimensions(image_path)
 
-        # Convert to PNG if JPEG or HEIC/HEIF
+        # Convert to PNG if JPEG, HEIC/HEIF, or RAW
         was_converted = False
-        if fmt in ("JPEG", "JPG", "HEIF", "HEIC"):
+        raw_fmts = {ext.upper().lstrip(".") for ext in RAW_EXTENSIONS}
+        if fmt in ("JPEG", "JPG", "HEIF", "HEIC") or fmt in raw_fmts:
             processed_path = cls.convert_to_png(image_path)
             was_converted = True
         else:
