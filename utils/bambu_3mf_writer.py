@@ -6,6 +6,8 @@ Uses neroued-3mf (C++ streaming writer with Production Extension) for 3MF
 packaging, and injects Bambu/Orca vendor metadata via CustomPart.
 """
 
+from __future__ import annotations
+
 import io
 import os
 import sys
@@ -14,10 +16,26 @@ import xml.etree.ElementTree as ET
 import json
 import copy
 from typing import List, Dict, Optional
-import trimesh
 import numpy as np
 
-import neroued_3mf as n3mf
+# Lazy imports: avoid >60s startup cost when imported via API.
+# Only loaded when export functions are actually called.
+_trimesh = None
+_n3mf = None
+
+def _get_trimesh():
+    global _trimesh
+    if _trimesh is None:
+        import trimesh as _tm
+        _trimesh = _tm
+    return _trimesh
+
+def _get_n3mf():
+    global _n3mf
+    if _n3mf is None:
+        import neroued_3mf as _n
+        _n3mf = _n
+    return _n3mf
 
 _CONFIG_TEMPLATE_CACHE = None
 _PRINTER_TEMPLATE_CACHE: dict[str, dict] = {}
@@ -128,12 +146,12 @@ class BambuStudio3MFWriter:
         """
         self.output_path = output_path
         self.settings = {**self.DEFAULT_SETTINGS, **(settings or {})}
-        self.objects: list[tuple[trimesh.Trimesh, str, tuple]] = []
+        self.objects: list[tuple[_get_trimesh().Trimesh, str, tuple]] = []
         self.color_mode = color_mode
         self.printer_id = printer_id
         self.slicer = slicer
 
-    def add_mesh(self, mesh: trimesh.Trimesh, name: str, color_rgb: tuple):
+    def add_mesh(self, mesh: _get_trimesh().Trimesh, name: str, color_rgb: tuple):
         """Add a mesh object to the scene.
         将网格对象添加到场景中。
 
@@ -167,8 +185,8 @@ class BambuStudio3MFWriter:
         print(f"[BAMBU_3MF] Exporting {len(self.objects)} objects to {self.output_path}")
         _exp_t0 = time.perf_counter()
 
-        builder = n3mf.DocumentBuilder()
-        builder.set_unit(n3mf.Unit.Millimeter)
+        builder = _get_n3mf().DocumentBuilder()
+        builder.set_unit(_get_n3mf().Unit.Millimeter)
         builder.set_language("en-US")
 
         builder.enable_production()
@@ -180,14 +198,14 @@ class BambuStudio3MFWriter:
         builder.add_external_model_metadata("BambuStudio:3mfVersion", "1")
 
         materials = [
-            n3mf.BaseMaterial(name, n3mf.Color(rgb[0], rgb[1], rgb[2]))
+            _get_n3mf().BaseMaterial(name, _get_n3mf().Color(rgb[0], rgb[1], rgb[2]))
             for _, name, rgb in self.objects
         ]
         mat_group_id = builder.add_base_material_group(materials)
 
         object_ids: list[int] = []
         for idx, (mesh, name, _) in enumerate(self.objects):
-            n3mf_mesh = n3mf.Mesh.from_arrays(
+            n3mf_mesh = _get_n3mf().Mesh.from_arrays(
                 np.ascontiguousarray(mesh.vertices, dtype=np.float64),
                 np.ascontiguousarray(mesh.faces, dtype=np.int64),
             )
@@ -200,10 +218,10 @@ class BambuStudio3MFWriter:
 
         doc = builder.build()
 
-        opts = n3mf.WriteOptions()
+        opts = _get_n3mf().WriteOptions()
         opts.vertex_precision = 6
         opts.compact_xml = True
-        n3mf.write_to_file(self.output_path, doc, opts)
+        _get_n3mf().write_to_file(self.output_path, doc, opts)
 
         print(f"[BAMBU_3MF] [OK] Export complete: {self.output_path} ({time.perf_counter() - _exp_t0:.3f}s total)")
         return self.output_path
@@ -229,7 +247,7 @@ class BambuStudio3MFWriter:
 
     def _inject_metadata_parts(
         self,
-        builder: n3mf.DocumentBuilder,
+        builder: _get_n3mf().DocumentBuilder,
         object_ids: list[int],
         assembly_id: int,
     ) -> None:
@@ -249,10 +267,10 @@ class BambuStudio3MFWriter:
              self._build_cut_information_bytes()),
         ]
         for path, content_type, data in parts:
-            builder.add_custom_part(n3mf.CustomPart(path, content_type, data))
+            builder.add_custom_part(_get_n3mf().CustomPart(path, content_type, data))
 
-        builder.add_custom_content_type(n3mf.CustomContentType("config", "text/xml"))
-        builder.add_custom_content_type(n3mf.CustomContentType("json", "application/json"))
+        builder.add_custom_content_type(_get_n3mf().CustomContentType("config", "text/xml"))
+        builder.add_custom_content_type(_get_n3mf().CustomContentType("json", "application/json"))
 
     # ------------------------------------------------------------------
     # Individual metadata builders (return bytes, no filesystem I/O)
@@ -507,7 +525,7 @@ class BambuStudio3MFWriter:
 
 
 def export_scene_with_bambu_metadata(
-    scene: trimesh.Scene,
+    scene: _get_trimesh().Scene,
     output_path: str,
     slot_names: List[str],
     preview_colors: Dict,
@@ -520,7 +538,7 @@ def export_scene_with_bambu_metadata(
     将 Trimesh 场景导出为 BambuStudio/OrcaSlicer 兼容的 3MF 文件（含元数据）。
 
     Args:
-        scene (trimesh.Scene): Trimesh Scene containing all meshes. (包含所有网格的场景)
+        scene (_get_trimesh().Scene): Trimesh Scene containing all meshes. (包含所有网格的场景)
         output_path (str): Output .3mf file path. (输出 .3mf 文件路径)
         slot_names (List[str]): Actually used material names. (实际使用的材料名称列表)
         preview_colors (Dict): Material ID to RGBA color mapping. (材料 ID 到 RGBA 颜色映射)

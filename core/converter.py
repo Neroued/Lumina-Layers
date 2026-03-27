@@ -14,7 +14,6 @@ import time
 from collections import deque
 import numpy as np
 import cv2
-import trimesh
 from PIL import Image, ImageDraw, ImageFont
 from typing import List, Dict, Tuple, Optional
 
@@ -61,7 +60,6 @@ from core.pipeline.s11_glb_preview import (
     generate_empty_bed_glb,
     _create_preview_mesh,
     _merge_low_frequency_colors,
-    _build_color_voxel_mesh,
 )
 
 # --- s06_voxel_building ---
