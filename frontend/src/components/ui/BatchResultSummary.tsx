@@ -35,7 +35,7 @@ export default function BatchResultSummary({ result }: BatchResultSummaryProps) 
       {/* Download button */}
       {successCount > 0 && (
         <a
-          href={`http://localhost:8000${result.download_url}`}
+          href={`${result.download_url}`}
           download
           className="inline-flex items-center justify-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
           aria-label={t("batch_download_zip_aria")}

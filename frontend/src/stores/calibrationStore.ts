@@ -75,9 +75,9 @@ export const useCalibrationStore = create<CalibrationState & CalibrationActions>
           gap: state.gap,
           backing: state.backing,
         });
-        const downloadUrl = `http://localhost:8000${response.download_url}`;
+        const downloadUrl = `${response.download_url}`;
         const previewImageUrl = response.preview_url
-          ? `http://localhost:8000${response.preview_url}`
+          ? `${response.preview_url}`
           : null;
         // 校准板后端不生成 GLB 预览文件，不设置 modelUrl
         // 8 色模式返回 ZIP 包（两个 3MF），其他模式返回单个 3MF，均非 Three.js 可解析格式
