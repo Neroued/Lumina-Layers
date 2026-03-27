@@ -1,782 +1,428 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""Lumina Studio 2.0 — 开发环境启动器（Windows 优化版）
+"""Lumina Studio — Dev Launcher v2
 
-功能：
-  - 一键启动 Backend (FastAPI :8000) + Frontend (Vite :5174)
-  - 启动前自动清理残留端口和僵尸进程
-  - 使用 Windows Job Object 确保子进程随父进程终止
-  - 彩色日志输出，区分 Backend / Frontend
-  - 优雅退出（Ctrl+C 或关闭窗口时自动清理所有子进程）
+设计原则：
+  1. 直接启动 node/python，不经过 cmd.exe 中间层 → Job Object 能直接管控
+  2. 启动前暴力清理：杀掉所有监听目标端口的进程
+  3. 退出时同样暴力清理：taskkill /T /F 杀进程树
+  4. 不自动重启，不预检前端端口（Vite 自行顺延）
+  5. Ctrl+C / 关窗口 → 干净退出
 
 用法：
-    python start_dev.py              # 启动前后端
-    python start_dev.py --backend    # 仅启动后端
-    python start_dev.py --frontend   # 仅启动前端
-    python start_dev.py --kill       # 清理残留进程后退出
+    python start_dev.py              # 前后端
+    python start_dev.py --backend    # 仅后端
+    python start_dev.py --frontend   # 仅前端
+    python start_dev.py --kill       # 清理残留后退出
 """
-
-from __future__ import annotations
 
 import argparse
 import os
+import re
 import signal
 import socket
 import subprocess
 import sys
 import threading
 import time
-import re
-import atexit
-from typing import Optional, List
 from pathlib import Path
 
-# Windows 特定导入
-if os.name == "nt":
-    import ctypes
-    from ctypes import wintypes
+# ═══════════════════════════════════════════════════════════
+#  常量
+# ═══════════════════════════════════════════════════════════
 
-# 模块级引用，防止 ctypes 控制台回调被 GC 回收后成为悬空指针
-_console_handler_ref = None
-
-ROOT_DIR = Path(__file__).parent.resolve()
-FRONTEND_DIR = ROOT_DIR / "frontend"
+ROOT = Path(__file__).parent.resolve()
+FRONTEND_DIR = ROOT / "frontend"
+NODE_MODULES_BIN = FRONTEND_DIR / "node_modules" / ".bin"
 
 BACKEND_PORT = 8000
-FRONTEND_PORT = 5180
-POLL_INTERVAL = 0.5
-SHUTDOWN_TIMEOUT = 5
-MAX_AUTO_RESTART = 3
+FRONTEND_PORT = 5174
 
-# ── Windows Job Object 支持 ─────────────────────────────────
+# ═══════════════════════════════════════════════════════════
+#  Windows Job Object（保证子进程随父进程退出）
+# ═══════════════════════════════════════════════════════════
 
-if os.name == "nt":
-    kernel32 = ctypes.windll.kernel32
+_job = None
 
-    # 常量定义
-    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
-    # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE 只在 ExtendedLimitInformation (class=9) 里有效
-    JobObjectExtendedLimitInformation = 9
+def _init_job():
+    global _job
+    if os.name != "nt":
+        return
+    import ctypes
+    from ctypes import wintypes
+    k = ctypes.windll.kernel32
+    k.CreateJobObjectW.restype = wintypes.HANDLE
+    k.OpenProcess.restype = wintypes.HANDLE
 
-    # 确保 CreateJobObjectW / OpenProcess 返回 64 位 HANDLE（不设置会被截断为 32 位）
-    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
-    kernel32.OpenProcess.restype = wintypes.HANDLE
+    job = k.CreateJobObjectW(None, None)
+    if not job:
+        return
 
-    class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
-        """对应 JOBOBJECT_BASIC_LIMIT_INFORMATION，字段顺序与 Windows SDK 一致"""
+    class _Info(ctypes.Structure):
         _fields_ = [
-            ("PerProcessUserTimeLimit", ctypes.c_int64),
-            ("PerJobUserTimeLimit",     ctypes.c_int64),
-            ("LimitFlags",              wintypes.DWORD),
-            ("MinimumWorkingSetSize",   ctypes.c_size_t),
-            ("MaximumWorkingSetSize",   ctypes.c_size_t),
-            ("ActiveProcessLimit",      wintypes.DWORD),
-            ("Affinity",                ctypes.c_void_p),
-            ("PriorityClass",           wintypes.DWORD),
-            ("SchedulingClass",         wintypes.DWORD),
+            ("flags", ctypes.c_int64), ("perJob", ctypes.c_int64),
+            ("limit", wintypes.DWORD),
+            ("minWs", ctypes.c_size_t), ("maxWs", ctypes.c_size_t),
+            ("activeProc", wintypes.DWORD), ("affinity", ctypes.c_void_p),
+            ("priority", wintypes.DWORD), ("sched", wintypes.DWORD),
+        ]
+    class _Ext(ctypes.Structure):
+        _fields_ = [
+            ("basic", _Info), ("io", ctypes.c_uint64 * 6),
+            ("procMem", ctypes.c_size_t), ("jobMem", ctypes.c_size_t),
+            ("peakProc", ctypes.c_size_t), ("peakJob", ctypes.c_size_t),
         ]
 
-    class IO_COUNTERS(ctypes.Structure):
-        _fields_ = [
-            ("ReadOperationCount",  ctypes.c_uint64),
-            ("WriteOperationCount", ctypes.c_uint64),
-            ("OtherOperationCount", ctypes.c_uint64),
-            ("ReadTransferCount",   ctypes.c_uint64),
-            ("WriteTransferCount",  ctypes.c_uint64),
-            ("OtherTransferCount",  ctypes.c_uint64),
-        ]
+    info = _Ext()
+    info.basic.limit = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    if k.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info)):
+        _job = job
 
-    class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
-        """对应 JOBOBJECT_EXTENDED_LIMIT_INFORMATION（class=9），支持 KILL_ON_JOB_CLOSE"""
-        _fields_ = [
-            ("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
-            ("IoInfo",                IO_COUNTERS),
-            ("ProcessMemoryLimit",    ctypes.c_size_t),
-            ("JobMemoryLimit",        ctypes.c_size_t),
-            ("PeakProcessMemoryUsed", ctypes.c_size_t),
-            ("PeakJobMemoryUsed",     ctypes.c_size_t),
-        ]
+def _assign(pid):
+    if not _job or os.name != "nt":
+        return
+    import ctypes
+    k = ctypes.windll.kernel32
+    h = k.OpenProcess(0x0201, False, pid)
+    if h:
+        k.AssignProcessToJobObject(_job, h)
+        k.CloseHandle(h)
 
-    def create_job_object() -> Optional[wintypes.HANDLE]:
-        """创建 Windows Job Object；父进程退出时 OS 关闭 handle，触发 KILL_ON_JOB_CLOSE"""
-        job = kernel32.CreateJobObjectW(None, None)
-        if not job:
-            return None
+def _kill_job():
+    global _job
+    if _job and os.name == "nt":
+        import ctypes
+        ctypes.windll.kernel32.TerminateJobObject(_job, 1)
+        ctypes.windll.kernel32.CloseHandle(_job)
+        _job = None
 
-        info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
-        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+# ═══════════════════════════════════════════════════════════
+#  日志
+# ═══════════════════════════════════════════════════════════
 
-        ok = kernel32.SetInformationJobObject(
-            job,
-            JobObjectExtendedLimitInformation,
-            ctypes.byref(info),
-            ctypes.sizeof(info),
-        )
-        if not ok:
-            kernel32.CloseHandle(job)
-            return None
+_R = "\033[0m"; _B = "\033[1m"
+_RED = "\033[31m"; _GRN = "\033[32m"; _YEL = "\033[33m"
+_BLU = "\033[34m"; _CYN = "\033[36m"; _DIM = "\033[2m"
 
-        return job
+def _ts():
+    return time.strftime("%H:%M:%S")
 
-    def assign_process_to_job(job: wintypes.HANDLE, pid: int) -> bool:
-        """将指定进程加入 Job Object"""
-        try:
-            # 需要 PROCESS_SET_QUOTA 和 PROCESS_TERMINATE 权限
-            proc_handle = kernel32.OpenProcess(0x0200 | 0x0001, False, pid)
-            if not proc_handle:
-                return False
-            result = kernel32.AssignProcessToJobObject(job, proc_handle)
-            kernel32.CloseHandle(proc_handle)
-            return bool(result)
-        except Exception:
-            return False
+def _log(tag, c, msg):
+    print(f"{_DIM}{_ts()}{_R} {c}{_B}[{tag}]{_R} {msg}", flush=True)
 
-    def terminate_job(job: wintypes.HANDLE) -> None:
-        """强制终止 Job Object 中的所有进程"""
-        if job:
-            kernel32.TerminateJobObject(job, 1)
-            kernel32.CloseHandle(job)
+def _sys(m):  _log("SYS", _YEL, m)
+def _ok(m):   _log(" OK", _GRN, m)
+def _err(m):  _log("ERR", _RED, m)
+def _be(m):   _log(" B ", _CYN, m)
+def _fe(m):   _log(" F ", _BLU, m)
 
-# ── 颜色工具 ──────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════
+#  进程工具
+# ═══════════════════════════════════════════════════════════
 
-class C:
-    """ANSI 颜色常量"""
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
-    RED = "\033[31m"
-    GREEN = "\033[32m"
-    YELLOW = "\033[33m"
-    BLUE = "\033[34m"
-    CYAN = "\033[36m"
-    DIM = "\033[2m"
+def _port_in_use(port):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.3)
+        return s.connect_ex(("127.0.0.1", port)) == 0
 
-    # Windows CMD 支持
-    @classmethod
-    def enable_windows_colors(cls):
-        if os.name == "nt":
-            kernel32 = ctypes.windll.kernel32
-            kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
+def _kill_pid_tree(pid):
+    """taskkill /T /F 杀整个进程树"""
+    subprocess.run(
+        ["taskkill", "/T", "/F", "/PID", str(pid)],
+        capture_output=True, creationflags=0x08000000,
+    )
 
+def _kill_listening(ports):
+    """杀掉所有监听指定端口的进程（进程树一起杀）"""
+    if os.name != "nt":
+        return
+    try:
+        out = subprocess.run(
+            "netstat -ano", shell=True, capture_output=True,
+            encoding="gbk", errors="ignore", creationflags=0x08000000,
+        ).stdout
+        killed = set()
+        for line in out.splitlines():
+            port_str = "|".join(str(p) for p in ports)
+            m = re.search(
+                rf"\s+TCP\s+[\d\.]+:({port_str})\s+\S+\s+LISTENING\s+(\d+)",
+                line,
+            )
+            if m:
+                pid = int(m.group(2))
+                if pid not in killed:
+                    _kill_pid_tree(pid)
+                    _sys(f"已终止 PID {pid} (port {m.group(1)})")
+                    killed.add(pid)
+    except Exception:
+        pass
 
-def _log(tag: str, color: str, msg: str) -> None:
-    ts = time.strftime("%H:%M:%S")
-    print(f"{C.DIM}{ts}{C.RESET} {color}{C.BOLD}[{tag}]{C.RESET} {msg}", flush=True)
+def _wait_port_free(port, timeout=10):
+    for _ in range(int(timeout / 0.3)):
+        if not _port_in_use(port):
+            return True
+        time.sleep(0.3)
+    return False
 
+# ═══════════════════════════════════════════════════════════
+#  查找可执行文件
+# ═══════════════════════════════════════════════════════════
 
-def log_sys(msg: str) -> None:
-    _log("SYS", C.YELLOW, msg)
-
-
-def log_ok(msg: str) -> None:
-    _log(" OK", C.GREEN, msg)
-
-
-def log_err(msg: str) -> None:
-    _log("ERR", C.RED, msg)
-
-
-def log_info(msg: str) -> None:
-    _log("INFO", C.BLUE, msg)
-
-
-# ── 工具函数 ──────────────────────────────────────────────
-
-def find_venv_python() -> str:
-    """查找项目 venv 中的 Python 解释器"""
-    candidates = [
-        ROOT_DIR / "venv" / "Scripts" / "python.exe",
-        ROOT_DIR / ".venv" / "Scripts" / "python.exe",
-        ROOT_DIR / "venv" / "bin" / "python",
-        ROOT_DIR / ".venv" / "bin" / "python",
-    ]
-    for p in candidates:
+def _find_python():
+    for p in (ROOT / "venv" / "Scripts" / "python.exe",
+              ROOT / ".venv" / "Scripts" / "python.exe"):
         if p.exists():
             return str(p)
     return sys.executable
 
-
-def find_npm() -> str:
-    """查找 npm 可执行文件路径"""
-    # 首先尝试虚拟环境中的 npm
-    candidates = [
-        ROOT_DIR / "frontend" / "node_modules" / ".bin" / "npm.cmd",
-        ROOT_DIR / "frontend" / "node_modules" / ".bin" / "npm",
-    ]
-    
-    # 检查虚拟环境目录
-    venv_node = ROOT_DIR / "venv" / "Scripts" / "npm.cmd"
-    if venv_node.exists():
-        candidates.insert(0, venv_node)
-    
-    for p in candidates:
-        if p.exists():
-            return str(p)
-    
-    # 尝试在 PATH 中查找
-    try:
-        result = subprocess.run(
-            ["where", "npm.cmd"],
-            capture_output=True,
-            text=True,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-        )
-        if result.returncode == 0:
-            paths = result.stdout.strip().splitlines()
-            if paths:
-                return paths[0].strip()
-    except Exception:
-        pass
-    
-    # 默认回退
-    return "npm"
-
-
-def is_port_in_use(port: int) -> bool:
-    """检查端口是否被占用"""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        return s.connect_ex(("127.0.0.1", port)) == 0
-
-
-def get_processes_using_port(port: int) -> List[int]:
-    """获取占用指定端口的进程 PID 列表（跨平台）"""
-    pids = []
-    try:
-        if os.name == "nt":
-            # Windows: 使用 netstat，只匹配本地地址含端口且状态为 LISTENING 的行
-            result = subprocess.run(
-                "netstat -ano",
-                capture_output=True,
-                text=True,
-                shell=True,
-                encoding="gbk",
-                errors="ignore"
-            )
-            port_pattern = re.compile(
-                rf"\s+TCP\s+[\d\.]+:{port}\s+\S+\s+LISTENING\s+(\d+)"
-            )
-            for line in result.stdout.splitlines():
-                match = port_pattern.search(line)
-                if match:
-                    pid = int(match.group(1))
-                    if pid not in pids:
-                        pids.append(pid)
-        else:
-            # Linux/macOS: 使用 lsof
-            result = subprocess.run(
-                ["lsof", "-ti", f":{port}"],
-                capture_output=True,
-                text=True
-            )
-            for pid_str in result.stdout.strip().split():
-                if pid_str.isdigit():
-                    pids.append(int(pid_str))
-    except Exception as e:
-        log_err(f"获取端口 {port} 进程失败: {e}")
-    return pids
-
-
-def kill_process_tree(pid: int, force: bool = False) -> bool:
-    """终止进程及其所有子进程"""
-    try:
-        if os.name == "nt":
-            # Windows: 使用 taskkill /T 终止进程树
-            cmd = ["taskkill", "/T", "/F" if force else "", "/PID", str(pid)]
-            cmd = [c for c in cmd if c]  # 移除空字符串
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                creationflags=subprocess.CREATE_NO_WINDOW
-            )
-            return result.returncode == 0
-        else:
-            # Linux/macOS: 使用 pgid 终止进程组
-            try:
-                pgid = os.getpgid(pid)
-                os.killpg(pgid, signal.SIGKILL if force else signal.SIGTERM)
-                return True
-            except ProcessLookupError:
-                return True  # 进程已不存在
-    except Exception as e:
-        log_err(f"终止进程 {pid} 失败: {e}")
-        return False
-
-
-
-def cleanup_residual_processes() -> None:
-    """清理可能残留的进程"""
-    log_sys("正在清理残留进程...")
-
-    # 1. 检查并终止占用端口的进程
-    for port in [BACKEND_PORT, FRONTEND_PORT]:
-        if is_port_in_use(port):
-            log_sys(f"端口 {port} 被占用，正在查找并终止相关进程...")
-            pids = get_processes_using_port(port)
-            for pid in pids:
-                if pid != os.getpid():  # 不要自杀
-                    kill_process_tree(pid, force=True)
-                    log_info(f"已终止占用端口 {port} 的进程 (PID: {pid})")
-
-    # 2. 尝试终止可能残留的 python 进程（运行 api_server.py 的）
-    if os.name == "nt":
-        # 使用 wmic 查找运行 api_server.py 的 python 进程
+def _find_node():
+    """找到 node.exe（Vite 需要直接用 node 跑，不走 cmd 中间层）"""
+    for candidate in ("node", "node.exe"):
         try:
-            result = subprocess.run(
-                ["wmic", "process", "where", "CommandLine like '%api_server.py%'", "get", "ProcessId"],
-                capture_output=True,
-                text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW
+            r = subprocess.run(
+                ["where", candidate], capture_output=True, text=True,
+                creationflags=0x08000000,
             )
-            for line in result.stdout.splitlines()[1:]:  # 跳过标题行
-                pid_str = line.strip()
-                if pid_str.isdigit():
-                    pid = int(pid_str)
-                    if pid != os.getpid():
-                        kill_process_tree(pid, force=True)
-                        log_info(f"已终止残留后端进程 (PID: {pid})")
+            if r.returncode == 0:
+                return r.stdout.strip().splitlines()[0].strip()
         except Exception:
             pass
+    return "node"
 
-    # 等待端口释放
-    time.sleep(0.5)
-    log_ok("清理完成")
+# ═══════════════════════════════════════════════════════════
+#  子进程管理
+# ═══════════════════════════════════════════════════════════
 
-
-# ── 进程管理 ──────────────────────────────────────────────
-
-class ServiceProcess:
-    """封装一个子服务进程，确保正确管理和清理"""
-
-    _job_handle: Optional[int] = None  # Windows Job Object HANDLE
-
-    def __init__(self, name: str, cmd: List[str], cwd: Path, port: int, color: str):
+class Proc:
+    def __init__(self, name, cmd, cwd, log_fn, port=None):
         self.name = name
         self.cmd = cmd
         self.cwd = cwd
+        self.log_fn = log_fn
         self.port = port
-        self.actual_port = port
-        self.port_detected = threading.Event()
-        self.color = color
-        self.proc: Optional[subprocess.Popen] = None
-        self._reader_thread: Optional[threading.Thread] = None
-        self._shutdown_event = threading.Event()
+        self.p = None
+        self.fe_port = None
+        self.fe_port_event = threading.Event()
 
-    @classmethod
-    def set_job_handle(cls, handle) -> None:
-        """设置全局 Job Object 句柄"""
-        cls._job_handle = handle
-
-    def start(self) -> bool:
-        """启动服务进程，返回是否成功"""
-        self._shutdown_event.clear()
-
-        # 检查端口
-        if is_port_in_use(self.port):
-            log_err(f"端口 {self.port} 仍被占用，启动失败")
-            return False
-
-        _log(self.name, self.color, f"启动中... (port={self.port})")
-
+    def start(self):
         try:
-            # Windows 特定标志
-            creationflags = 0
+            flags = 0
             if os.name == "nt":
-                # CREATE_NEW_PROCESS_GROUP: 允许独立接收 Ctrl+C
-                # CREATE_NO_WINDOW: 不创建控制台窗口
-                creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
-
-            self.proc = subprocess.Popen(
-                self.cmd,
-                cwd=str(self.cwd),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                encoding="utf-8",
-                errors="replace",
-                bufsize=1,
-                creationflags=creationflags if os.name == "nt" else 0,
-                # 不使用 shell，避免额外的 cmd.exe 进程
-                shell=False,
+                flags = subprocess.CREATE_NEW_PROCESS_GROUP | 0x08000000
+            self.p = subprocess.Popen(
+                self.cmd, cwd=str(self.cwd),
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                encoding="utf-8", errors="replace", bufsize=1,
+                creationflags=flags,
             )
-
-            # 将进程加入 Job Object（Windows）
-            if os.name == "nt" and self._job_handle and self.proc.pid:
-                assign_process_to_job(self._job_handle, self.proc.pid)
-
-            # 启动输出读取线程
-            self._reader_thread = threading.Thread(
-                target=self._stream_output,
-                daemon=True,
-            )
-            self._reader_thread.start()
-
-            _log(self.name, self.color, f"已启动 (pid={self.proc.pid})")
-            return True
-
         except Exception as e:
-            log_err(f"启动 {self.name} 失败: {e}")
+            _err(f"{self.name} 启动失败: {e}")
             return False
 
-    def _stream_output(self) -> None:
-        """实时转发子进程输出"""
-        if not self.proc or not self.proc.stdout:
-            return
+        _assign(self.p.pid)
+        threading.Thread(target=self._reader, daemon=True).start()
+        self.log_fn(f"已启动 (pid={self.p.pid})")
+        return True
 
+    def _reader(self):
         try:
-            for line in self.proc.stdout:
-                if self._shutdown_event.is_set():
-                    break
-                line = line.rstrip("\n")
+            for raw in self.p.stdout:
+                line = raw.rstrip("\n")
                 if line:
-                    _log(self.name, self.color, line)
-                    # 检测前端实际端口
-                    if self.name == "Frontend" and not self.port_detected.is_set():
-                        clean_line = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', line)
-                        match = re.search(r"http://(?:localhost|127\.0\.0\.1|\[::1\]):(\d+)", clean_line)
-                        if match:
-                            self.actual_port = int(match.group(1))
-                            self.port_detected.set()
+                    self.log_fn(line)
+                    # 检测 Vite 实际端口
+                    if "Frontend" in self.name and not self.fe_port_event.is_set():
+                        m = re.search(
+                            r"http://(?:localhost|127\.0\.0\.1):(\d+)",
+                            re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', line),
+                        )
+                        if m:
+                            self.fe_port = int(m.group(1))
+                            self.fe_port_event.set()
         except (ValueError, OSError):
-            pass  # 进程已关闭
+            pass
 
-    def stop(self, timeout: int = SHUTDOWN_TIMEOUT) -> None:
-        """优雅地停止服务进程"""
-        self._shutdown_event.set()
-
-        if not self.proc:
+    def stop(self):
+        if not self.p:
             return
-
-        if self.proc.poll() is not None:
-            self.proc = None
+        if self.p.poll() is not None:
+            self.p = None
             return
-
-        _log(self.name, self.color, f"正在停止 (pid={self.proc.pid})...")
-
-        # 1. 尝试优雅终止（发送 Ctrl+Break 到进程组）
-        #    注意：CREATE_NEW_PROCESS_GROUP 会禁用 CTRL_C_EVENT(0)，必须用 CTRL_BREAK_EVENT(1)
+        self.log_fn("停止中...")
+        _kill_pid_tree(self.p.pid)
         try:
-            if os.name == "nt":
-                try:
-                    ctypes.windll.kernel32.GenerateConsoleCtrlEvent(1, self.proc.pid)
-                    time.sleep(0.5)
-                except Exception:
-                    pass
-            else:
-                # Linux/macOS: 发送 SIGTERM 到进程组
-                try:
-                    pgid = os.getpgid(self.proc.pid)
-                    os.killpg(pgid, signal.SIGTERM)
-                except OSError:
-                    self.proc.terminate()
+            self.p.wait(timeout=5)
+        except Exception:
+            pass
+        self.p = None
+
+    @property
+    def alive(self):
+        return self.p is not None and self.p.poll() is None
+
+# ═══════════════════════════════════════════════════════════
+#  主流程
+# ═══════════════════════════════════════════════════════════
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--backend", action="store_true")
+    ap.add_argument("--frontend", action="store_true")
+    ap.add_argument("--kill", action="store_true")
+    args = ap.parse_args()
+
+    # Windows 颜色
+    if os.name == "nt":
+        try:
+            import ctypes
+            ctypes.windll.kernel32.SetConsoleMode(
+                ctypes.windll.kernel32.GetStdHandle(-11), 7
+            )
         except Exception:
             pass
 
-        # 2. 等待进程退出
-        try:
-            self.proc.wait(timeout=timeout)
-            _log(self.name, self.color, "已停止")
-            self.proc = None
-            return
-        except subprocess.TimeoutExpired:
-            pass
+    print(f"\n{_B}{_CYN}  Lumina Studio — Dev Launcher v2{_R}\n")
 
-        # 3. 强制终止
-        _log(self.name, self.color, "强制终止...")
-        try:
-            if os.name == "nt":
-                kill_process_tree(self.proc.pid, force=True)
-            else:
-                try:
-                    pgid = os.getpgid(self.proc.pid)
-                    os.killpg(pgid, signal.SIGKILL)
-                except OSError:
-                    self.proc.kill()
-
-            self.proc.wait(timeout=3)
-            _log(self.name, self.color, "已强制终止")
-        except Exception as e:
-            log_err(f"终止 {self.name} 失败: {e}")
-
-        self.proc = None
-
-    @property
-    def alive(self) -> bool:
-        """检查进程是否仍在运行"""
-        return self.proc is not None and self.proc.poll() is None
-
-
-# ── 开发管理器 ──────────────────────────────────────────────
-
-class DevManager:
-    """管理所有开发服务"""
-
-    def __init__(self, run_backend: bool = True, run_frontend: bool = True):
-        self.services: List[ServiceProcess] = []
-        self._shutdown = False
-        self._lock = threading.Lock()
-
-        # 查找 Python 解释器
-        venv_python = find_venv_python()
-
-        if run_backend:
-            self.services.append(ServiceProcess(
-                name="Backend",
-                cmd=[venv_python, "api_server.py"],
-                cwd=ROOT_DIR,
-                port=BACKEND_PORT,
-                color=C.CYAN,
-            ))
-
-        if run_frontend:
-            # 查找 npm 并使用正确的命令格式
-            npm_cmd = find_npm()
-            
-            # Windows 上如果 npm 是 .cmd 文件，需要通过 cmd /c 执行
-            if os.name == "nt" and (npm_cmd.endswith(".cmd") or npm_cmd.endswith(".bat")):
-                cmd = ["cmd", "/c", npm_cmd, "run", "dev"]
-            else:
-                cmd = [npm_cmd, "run", "dev"]
-            
-            self.services.append(ServiceProcess(
-                name="Frontend",
-                cmd=cmd,
-                cwd=FRONTEND_DIR,
-                port=FRONTEND_PORT,
-                color=C.BLUE,
-            ))
-
-    def start_all(self) -> None:
-        """启动所有服务"""
-        with self._lock:
-            self._shutdown = False
-            for svc in self.services:
-                if not svc.start():
-                    log_err(f"{svc.name} 启动失败")
-
-    def stop_all(self) -> None:
-        """停止所有服务"""
-        with self._lock:
-            if self._shutdown:
-                return
-            self._shutdown = True
-
-            # 使用线程并发停止，加快退出速度
-            threads = []
-            for svc in reversed(self.services):
-                t = threading.Thread(target=svc.stop)
-                t.start()
-                threads.append(t)
-
-            for t in threads:
-                t.join(timeout=SHUTDOWN_TIMEOUT + 2)
-
-    def restart_all(self) -> None:
-        """重启所有服务"""
-        log_sys("正在重启所有服务...")
-        self.stop_all()
-        time.sleep(1)
-        # 清理可能残留的进程
-        cleanup_residual_processes()
-        self.start_all()
-        log_ok("重启完成")
-
-    def check_health(self) -> bool:
-        """检查服务健康状况，返回是否全部健康"""
-        if self._shutdown:
-            return True
-
-        all_healthy = True
-        for svc in self.services:
-            if svc.proc and not svc.alive:
-                ret = svc.proc.returncode
-                log_err(f"{svc.name} 意外退出 (code={ret})")
-                all_healthy = False
-
-        return all_healthy
-
-
-# ── 主程序 ──────────────────────────────────────────────
-
-def print_banner():
-    """打印启动横幅"""
-    print(f"""
-{C.BOLD}{C.CYAN}╔══════════════════════════════════════════╗
-║     Lumina Studio 2.0 — Dev Launcher     ║
-╚══════════════════════════════════════════╝{C.RESET}
-""")
-
-
-def print_help():
-    """打印帮助信息"""
-    print(f"""
-{C.BOLD}可用命令：{C.RESET}
-  {C.GREEN}r{C.RESET} / restart  — 重启所有服务
-  {C.GREEN}s{C.RESET} / status   — 查看服务状态
-  {C.GREEN}k{C.RESET} / kill     — 清理残留进程
-  {C.GREEN}q{C.RESET} / quit     — 退出
-  {C.GREEN}h{C.RESET} / help     — 显示帮助
-""")
-
-
-def print_status(manager: DevManager):
-    """打印服务状态"""
-    for svc in manager.services:
-        status = f"{C.GREEN}运行中{C.RESET}" if svc.alive else f"{C.RED}已停止{C.RESET}"
-        pid = svc.proc.pid if svc.proc else "-"
-        _log(svc.name, svc.color, f"状态: {status} (PID: {pid})")
-
-
-def input_listener(manager: DevManager):
-    """监听用户输入命令"""
-    while True:
-        try:
-            cmd = input().strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            break
-
-        if cmd in ("r", "restart"):
-            manager.restart_all()
-        elif cmd in ("s", "status"):
-            print_status(manager)
-        elif cmd in ("k", "kill"):
-            cleanup_residual_processes()
-        elif cmd in ("q", "quit", "exit"):
-            log_sys("用户请求退出...")
-            manager.stop_all()
-            sys.exit(0)
-        elif cmd in ("h", "help", "?"):
-            print_help()
-
-
-def setup_signal_handlers(manager: DevManager):
-    """设置信号处理器"""
-    def signal_handler(signum, frame):
-        sig_name = signal.Signals(signum).name if hasattr(signal, "Signals") else str(signum)
-        log_sys(f"收到信号 {sig_name}，正在清理...")
-        manager.stop_all()
-
-        # Windows: 终止 Job Object
-        if os.name == "nt":
-            try:
-                if ServiceProcess._job_handle:
-                    terminate_job(ServiceProcess._job_handle)
-            except Exception:
-                pass
-
-        sys.exit(0)
-
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-
-    # Windows 特定: 处理控制台关闭事件
-    if os.name == "nt":
-        try:
-            def console_handler(ctrl_type):
-                # 只处理 Python signal handler 捕获不到的事件（窗口关闭、注销）
-                # CTRL_C_EVENT(0) 和 CTRL_BREAK_EVENT(1) 已由 signal_handler 处理，不在此拦截
-                if ctrl_type in (2, 6):  # CTRL_CLOSE_EVENT, CTRL_LOGOFF_EVENT
-                    log_sys("检测到控制台关闭，正在清理...")
-                    manager.stop_all()
-                    if ServiceProcess._job_handle:
-                        terminate_job(ServiceProcess._job_handle)
-                    # 必须显式退出，否则 Python 主循环继续运行，终端无法归还
-                    os._exit(0)
-                return False
-
-            global _console_handler_ref
-            console_handler_cftype = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
-            # 必须存入模块级变量，否则函数返回后 ctypes 对象被 GC，回调成悬空指针
-            _console_handler_ref = console_handler_cftype(console_handler)
-            ctypes.windll.kernel32.SetConsoleCtrlHandler(_console_handler_ref, True)
-        except Exception as e:
-            log_err(f"设置控制台处理器失败: {e}")
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Lumina Studio 开发启动器")
-    parser.add_argument("--backend", action="store_true", help="仅启动后端")
-    parser.add_argument("--frontend", action="store_true", help="仅启动前端")
-    parser.add_argument("--kill", action="store_true", help="仅清理残留进程")
-    args = parser.parse_args()
-
-    # 启用 Windows 颜色支持
-    C.enable_windows_colors()
-
-    # 仅清理模式
+    # ── 仅清理模式 ──
     if args.kill:
-        print_banner()
-        cleanup_residual_processes()
+        _sys("清理所有残留进程...")
+        _kill_listening([BACKEND_PORT, FRONTEND_PORT,
+                         FRONTEND_PORT + 1, FRONTEND_PORT + 2,
+                         FRONTEND_PORT + 3, FRONTEND_PORT + 4])
+        _ok("完成")
         return
 
-    # 确定启动哪些服务
-    run_backend = args.backend or (not args.backend and not args.frontend)
-    run_frontend = args.frontend or (not args.backend and not args.frontend)
+    run_b = args.backend or (not args.backend and not args.frontend)
+    run_f = args.frontend or (not args.backend and not args.frontend)
 
-    print_banner()
+    # ── Job Object ──
+    _init_job()
+    if _job:
+        _ok("Job Object 已启用")
 
-    # 初始化 Windows Job Object
-    if os.name == "nt":
-        job = create_job_object()
-        if job:
-            ServiceProcess.set_job_handle(job)
-            log_ok("已启用 Windows Job Object 进程管理")
+    # ── 清理残留（覆盖 Vite 可能顺延到的端口范围）──
+    _sys("清理残留进程...")
+    ports_to_clean = [BACKEND_PORT]
+    if run_f:
+        ports_to_clean += [FRONTEND_PORT + i for i in range(6)]
+    _kill_listening(ports_to_clean)
+    # 等后端端口释放（前端不用等，Vite 自行处理）
+    if run_b:
+        _wait_port_free(BACKEND_PORT, timeout=10)
+    _ok("清理完成")
+
+    # ── 构建命令 ──
+    procs = []
+    if run_b:
+        procs.append(Proc(
+            "Backend",
+            [_find_python(), "api_server.py"],
+            ROOT, _be, BACKEND_PORT,
+        ))
+    if run_f:
+        # 关键：直接用 node 跑 vite.js，不走 cmd /c npm.cmd
+        # 这样 Popen 进程就是 node.exe，Job Object 能直接管控
+        vite_js = FRONTEND_DIR / "node_modules" / "vite" / "bin" / "vite.js"
+        if vite_js.exists():
+            fe_cmd = [_find_node(), str(vite_js)]
         else:
-            log_err("创建 Job Object 失败，进程可能无法正确清理")
+            # fallback: 用 npm.cmd（会有 cmd 中间层问题）
+            _sys("未找到 vite.js，fallback 到 npm")
+            fe_cmd = ["npm", "run", "dev"]
+        procs.append(Proc(
+            "Frontend",
+            fe_cmd,
+            FRONTEND_DIR, _fe, FRONTEND_PORT,
+        ))
 
-    # 预清理残留进程
-    cleanup_residual_processes()
+    # ── 启动 ──
+    for p in procs:
+        if not p.start():
+            _err(f"{p.name} 启动失败")
 
-    # 创建管理器
-    manager = DevManager(run_backend=run_backend, run_frontend=run_frontend)
+    # ── 等前端端口 ──
+    fe_proc = next((p for p in procs if "Frontend" in p.name), None)
+    fe_port = FRONTEND_PORT
+    if fe_proc and fe_proc.fe_port_event.wait(timeout=5.0):
+        fe_port = fe_proc.fe_port
 
-    # 注册退出清理
-    atexit.register(manager.stop_all)
-
-    # 设置信号处理
-    setup_signal_handlers(manager)
-
-    # 启动服务
-    manager.start_all()
-
-    # 等待前端端口检测
-    frontend_svc = next((svc for svc in manager.services if svc.name == "Frontend"), None)
-    actual_frontend_port = FRONTEND_PORT
-    if frontend_svc:
-        if frontend_svc.port_detected.wait(timeout=5.0):
-            actual_frontend_port = frontend_svc.actual_port
-
-    # 打印启动信息
-    svc_names = " + ".join(svc.name for svc in manager.services)
-    log_ok(f"{svc_names} 已启动")
-    print(f"""
-{C.DIM}────────────────────────────────────────────{C.RESET}
-  Backend:  {C.CYAN}http://localhost:{BACKEND_PORT}{C.RESET}
-  Frontend: {C.BLUE}http://localhost:{actual_frontend_port}{C.RESET}
-{C.DIM}────────────────────────────────────────────{C.RESET}
-  {C.GREEN}r{C.RESET}=重启  {C.GREEN}s{C.RESET}=状态  {C.GREEN}k{C.RESET}=清理  {C.GREEN}q{C.RESET}=退出  {C.GREEN}h{C.RESET}=帮助
-{C.DIM}────────────────────────────────────────────{C.RESET}
+    _ok("全部启动")
+    print(f"""{_DIM}────────────────────────────────────────────{_R}
+  Backend:  {_CYN}http://localhost:{BACKEND_PORT}{_R}
+  Frontend: {_BLU}http://localhost:{fe_port}{_R}
+{_DIM}────────────────────────────────────────────{_R}
+  {_GRN}r{_R}=重启  {_GRN}s{_R}=状态  {_GRN}q{_R}=退出
+{_DIM}────────────────────────────────────────────{_R}
 """)
 
-    # 启动输入监听线程
-    input_thread = threading.Thread(target=input_listener, args=(manager,), daemon=True)
-    input_thread.start()
+    # ── 退出处理 ──
+    def _shutdown():
+        for p in procs:
+            p.stop()
+        _kill_job()
 
-    # 主循环：健康检查
-    restart_count = 0
-    try:
+    def _on_signal(signum, frame):
+        _sys("退出中...")
+        _shutdown()
+        os._exit(0)
+
+    signal.signal(signal.SIGINT, _on_signal)
+    signal.signal(signal.SIGTERM, _on_signal)
+
+    # Windows 控制台关闭
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            _cb_ref = None
+            _CH = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
+            def _on_console(ctrl):
+                if ctrl in (2, 6):
+                    _shutdown()
+                    os._exit(0)
+                return False
+            _cb_ref = _CH(_on_console)
+            ctypes.windll.kernel32.SetConsoleCtrlHandler(_cb_ref, True)
+            # 防 GC
+            setattr(_shutdown, '_cb', _cb_ref)
+        except Exception:
+            pass
+
+    # ── 输入监听 ──
+    def _input():
         while True:
-            if not manager.check_health():
-                restart_count += 1
-                if restart_count > MAX_AUTO_RESTART:
-                    log_err(f"已连续自动重启 {MAX_AUTO_RESTART} 次，停止重试。请检查服务日志。")
-                    log_sys("按 r 手动重启，或 q 退出")
-                else:
-                    log_sys(f"检测到服务异常，自动重启 ({restart_count}/{MAX_AUTO_RESTART})...")
-                    manager.restart_all()
-            else:
-                restart_count = 0
-            time.sleep(POLL_INTERVAL)
-    except KeyboardInterrupt:
-        log_sys("收到中断信号，正在退出...")
-        manager.stop_all()
+            try:
+                c = input().strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                break
+            if c in ("r", "restart"):
+                _sys("重启...")
+                for p in procs:
+                    p.stop()
+                time.sleep(1)
+                _kill_listening(ports_to_clean)
+                if run_b:
+                    _wait_port_free(BACKEND_PORT, timeout=10)
+                for p in procs:
+                    p.start()
+            elif c in ("s", "status"):
+                for p in procs:
+                    st = f"{_GRN}运行中{_R}" if p.alive else f"{_RED}已停止{_R}"
+                    p.log_fn(st)
+            elif c in ("q", "quit"):
+                _on_signal(0, None)
+
+    threading.Thread(target=_input, daemon=True).start()
+
+    # ── 主循环 ──
+    while True:
+        time.sleep(1)
+        dead = [p for p in procs if p.p and not p.alive]
+        if dead:
+            for p in dead:
+                _err(f"{p.name} 已退出 (code={p.p.returncode})")
+            break  # 有进程挂了就退出，不自动重启
+
+    _shutdown()
 
 
 if __name__ == "__main__":
