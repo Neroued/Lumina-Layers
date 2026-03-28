@@ -122,6 +122,10 @@ async def extractor_rotate(
     """Rotate an image 90° counter-clockwise and return the rotated PNG.
     将图片逆时针旋转 90° 并返回旋转后的 PNG。
     """
+    # Clean up previous rotation temp files to prevent memory/disk leak
+    # 清理上一次旋转产生的临时文件，防止内存/磁盘泄漏
+    registry.cleanup_session("extractor-rotate")
+
     try:
         img_arr = await upload_to_ndarray(image)
     except ValueError as e:
@@ -132,8 +136,12 @@ async def extractor_rotate(
         raise HTTPException(status_code=500, detail="Image rotation failed")
 
     rotated_bytes = ndarray_to_png_bytes(rotated)
+    # Release intermediate arrays early
+    # 尽早释放中间数组
+    del img_arr
     h, w = rotated.shape[:2]
     file_id = registry.register_bytes("extractor-rotate", rotated_bytes, "rotated.png")
+    del rotated, rotated_bytes
 
     return {
         "preview_url": f"/api/files/{file_id}",
@@ -150,15 +158,21 @@ async def extractor_preview_wb(
     """Apply auto white balance to an image and return the preview PNG.
     对图片应用自动白平衡并返回预览 PNG。
     """
+    # Clean up previous white-balance temp files to prevent memory/disk leak
+    # 清理上一次白平衡预览产生的临时文件，防止内存/磁盘泄漏
+    registry.cleanup_session("extractor-wb")
+
     try:
         img_arr = await upload_to_ndarray(image)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
     balanced = apply_auto_white_balance(img_arr)
+    del img_arr
     balanced_bytes = ndarray_to_png_bytes(balanced)
     h, w = balanced.shape[:2]
     file_id = registry.register_bytes("extractor-wb", balanced_bytes, "wb_preview.png")
+    del balanced, balanced_bytes
 
     return {
         "preview_url": f"/api/files/{file_id}",

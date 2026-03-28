@@ -141,7 +141,8 @@ def _generate_recipes(color_mode: str, total_cells: int, page_choice: str = "Pag
                 from core.calibration import get_top_1296_colors
 
                 top_stacks = get_top_1296_colors()
-            stacks = [list(s) for s in top_stacks[:total_cells]]
+            # get_top_1296_colors* 返回底到顶约定，需反转为顶到底（与校色板生成一致）
+            stacks = [list(reversed(s)) for s in top_stacks[:total_cells]]
             return np.array(stacks, dtype=np.int32)
         except Exception as e:
             print(f"[EXTRACTOR] Failed to generate 6-color stacks: {e}")

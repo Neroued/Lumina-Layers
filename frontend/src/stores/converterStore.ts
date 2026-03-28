@@ -1340,9 +1340,9 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       set({ lutListLoading: true, error: null });
       try {
         const res = await apiUploadLut(file);
-        // 上传成功后刷新列表并选中新 LUT
+        // 上传成功后刷新列表并通过 setLutName 选中新 LUT（同步 color_mode）
         await _get().fetchLutList();
-        set({ lut_name: res.name });
+        _get().setLutName(res.name);
       } catch (err) {
         set({
           error: err instanceof Error ? err.message : "LUT 上传失败",
