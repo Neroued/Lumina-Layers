@@ -1,5 +1,5 @@
 pillow-heif>=0.18.0
-rawpy
+rawpy>=0.21.0
 python-multipart
 numpy
 opencv-python

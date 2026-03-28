@@ -17,8 +17,6 @@ import type { ExtractorPaletteEntry } from "../api/types";
 import { clampValue } from "./converterStore";
 import { uploadImagePreview } from "../api/system";
 
-const BASE_URL = "http://localhost:8000";
-
 export const RAW_EXTENSIONS = new Set([
   ".dng",
   ".cr2",
@@ -220,7 +218,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
         uploadImagePreview(file)
           .then(({ preview_url, width, height }) => {
             set({
-              imagePreviewUrl: `${BASE_URL}${preview_url}`,
+              imagePreviewUrl: preview_url,
               imageNaturalWidth: width,
               imageNaturalHeight: height,
             });
@@ -274,7 +272,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
         );
 
         // Fetch rotated image as blob to create a new File for subsequent extract calls
-        const res = await fetch(`${BASE_URL}${preview_url}`);
+        const res = await fetch(preview_url);
         const blob = await res.blob();
         const baseName = imageFile.name.replace(/\.[^.]+$/, "");
         const rotatedFile = new File([blob], `${baseName}.png`, {
@@ -288,7 +286,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
 
         set({
           imageFile: rotatedFile,
-          imagePreviewUrl: `${BASE_URL}${preview_url}`,
+          imagePreviewUrl: preview_url,
           imageNaturalWidth: width,
           imageNaturalHeight: height,
           corner_points: [],
@@ -360,7 +358,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
           );
           set({
             originalPreviewUrl: saved,
-            imagePreviewUrl: `${BASE_URL}${preview_url}`,
+            imagePreviewUrl: preview_url,
             imageNaturalWidth: width,
             imageNaturalHeight: height,
             isLoading: false,

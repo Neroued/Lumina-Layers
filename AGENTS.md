@@ -1,4 +1,3 @@
-# 任何时候都讲中文！！
 # Repository Guidelines
 
 ## Scope

@@ -41,8 +41,6 @@ import {
 import { useSettingsStore } from "./settingsStore";
 import { uploadImagePreview } from "../api/system";
 
-const BASE_URL = "http://localhost:8000";
-
 export const RAW_EXTENSIONS_CONVERTER = new Set([
   ".dng",
   ".cr2",
@@ -582,7 +580,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         uploadImagePreview(file)
           .then(({ preview_url, width, height }) => {
             set({
-              imagePreviewUrl: `${BASE_URL}${preview_url}`,
+              imagePreviewUrl: preview_url,
               aspectRatio: width / height,
             });
           })
@@ -1746,7 +1744,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           uploadImagePreview(lastFile)
             .then(({ preview_url, width, height }) => {
               set({
-                imagePreviewUrl: `${BASE_URL}${preview_url}`,
+                imagePreviewUrl: preview_url,
                 aspectRatio: width / height,
               });
             })
@@ -1838,7 +1836,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           uploadImagePreview(singleFile)
             .then(({ preview_url, width, height }) => {
               set({
-                imagePreviewUrl: `${BASE_URL}${preview_url}`,
+                imagePreviewUrl: preview_url,
                 aspectRatio: width / height,
               });
             })
