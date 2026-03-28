@@ -33,6 +33,9 @@ export const RAW_EXTENSIONS = new Set([
   ".raw",
 ]);
 
+export const ACCEPT_EXTRACTOR_FORMATS =
+  "image/*," + Array.from(RAW_EXTENSIONS).join(",");
+
 export function isRawFile(file: File): boolean {
   const ext = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
   return RAW_EXTENSIONS.has(ext);

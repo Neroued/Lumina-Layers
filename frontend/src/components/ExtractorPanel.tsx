@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { useExtractorStore } from "../stores/extractorStore";
+import { useExtractorStore, ACCEPT_EXTRACTOR_FORMATS } from "../stores/extractorStore";
 import { useI18n } from "../i18n/context";
 import { ExtractorColorMode, ExtractorPage } from "../api/types";
 import Dropdown from "./ui/Dropdown";
@@ -140,7 +140,7 @@ export default function ExtractorPanel() {
               <label className="text-sm font-medium text-slate-700 dark:text-slate-200">{t("ext_upload_label")}</label>
               <ImageUpload
                 onFileSelect={(file) => setImageFile(file)}
-                accept="image/*"
+                accept={ACCEPT_EXTRACTOR_FORMATS}
                 preview={imagePreviewUrl ?? undefined}
               />
             </div>
