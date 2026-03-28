@@ -1494,6 +1494,10 @@ export const translations: Record<string, Record<"zh" | "en", string>> = {
     zh: "暗角校正",
     en: "Vignette Correction",
   },
+  ext_auto_wb_label: {
+    zh: "自动白平衡",
+    en: "Auto White Balance",
+  },
   ext_extract_btn_label: {
     zh: "提取颜色",
     en: "Extract Colors",

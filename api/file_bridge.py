@@ -18,7 +18,41 @@ except ImportError:
     HAS_HEIF: bool = False
     print("[WARN] [HEIC] pillow-heif not installed. HEIC/HEIF support disabled.")
 
+# RAW support (optional dependency)
+try:
+    import rawpy
+
+    HAS_RAW: bool = True
+except ImportError:
+    HAS_RAW: bool = False
+    print("[WARN] [RAW] rawpy not installed. Camera RAW support disabled.")
+
 HEIC_EXTENSIONS: set[str] = {".heic", ".heif"}
+RAW_EXTENSIONS: set[str] = {
+    ".dng", ".cr2", ".cr3", ".nef", ".arw",
+    ".orf", ".rw2", ".raf", ".pef", ".srw", ".raw",
+}
+
+
+def _decode_raw_to_pil(data: bytes) -> Image.Image:
+    """用 rawpy 将 RAW 字节解码为 PIL Image（RGB）。
+
+    Args:
+        data: RAW 文件字节内容
+
+    Returns:
+        PIL Image，RGB 模式
+
+    Raises:
+        ValueError: rawpy 未安装或解码失败
+    """
+    if not HAS_RAW:
+        raise ValueError("RAW 格式需要 rawpy 库。请执行: pip install rawpy")
+    import rawpy  # noqa: PLC0415
+
+    with rawpy.imread(io.BytesIO(data)) as raw:
+        rgb = raw.postprocess(use_camera_wb=True, output_bps=8)
+    return Image.fromarray(rgb)
 
 
 async def upload_to_ndarray(file: UploadFile) -> np.ndarray:
@@ -34,13 +68,16 @@ async def upload_to_ndarray(file: UploadFile) -> np.ndarray:
         ValueError: 文件格式无效或无法解码
     """
     contents = await file.read()
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext in RAW_EXTENSIONS:
+        img = _decode_raw_to_pil(contents)
+        return np.array(img, dtype=np.uint8)
     try:
         img = Image.open(io.BytesIO(contents))
         if img.mode != "RGB":
             img = img.convert("RGB")
         return np.array(img, dtype=np.uint8)
     except Exception as e:
-        ext = os.path.splitext(file.filename or "")[1].lower()
         if ext in HEIC_EXTENSIONS and not HAS_HEIF:
             raise ValueError("HEIC/HEIF 格式需要 pillow-heif 库。请执行: pip install pillow-heif")
         raise ValueError(f"无法解码图像文件: {e}")
@@ -85,32 +122,47 @@ async def ensure_png_tempfile(file: UploadFile) -> str:
     ext = os.path.splitext(file.filename or "")[1].lower()
     raw_path = await upload_to_tempfile(file)
 
-    if ext not in HEIC_EXTENSIONS:
+    if ext not in HEIC_EXTENSIONS and ext not in RAW_EXTENSIONS:
         return raw_path
 
-    if not HAS_HEIF:
+    if ext in HEIC_EXTENSIONS and not HAS_HEIF:
         os.unlink(raw_path)
         raise HTTPException(
             status_code=422,
             detail="HEIC/HEIF 格式需要 pillow-heif 库。请执行: pip install pillow-heif",
         )
 
-    try:
-        with Image.open(raw_path) as img:
-            if img.mode != "RGB":
-                img = img.convert("RGB")
-            from config import TEMP_DIR
-
-            fd, png_path = tempfile.mkstemp(suffix=".png", dir=TEMP_DIR)
-            os.close(fd)
-            img.save(png_path, "PNG")
-        os.unlink(raw_path)
-        return png_path
-    except Exception as e:
+    if ext in RAW_EXTENSIONS and not HAS_RAW:
         os.unlink(raw_path)
         raise HTTPException(
             status_code=422,
-            detail=f"HEIC/HEIF 文件解码失败: {e}",
+            detail="RAW 格式需要 rawpy 库。请执行: pip install rawpy",
+        )
+
+    try:
+        if ext in RAW_EXTENSIONS:
+            with open(raw_path, "rb") as f:
+                data = f.read()
+            img = _decode_raw_to_pil(data)
+        else:
+            img = Image.open(raw_path)
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        from config import TEMP_DIR
+
+        fd, png_path = tempfile.mkstemp(suffix=".png", dir=TEMP_DIR)
+        os.close(fd)
+        img.save(png_path, "PNG")
+        os.unlink(raw_path)
+        return png_path
+    except HTTPException:
+        raise
+    except Exception as e:
+        os.unlink(raw_path)
+        fmt = "RAW" if ext in RAW_EXTENSIONS else "HEIC/HEIF"
+        raise HTTPException(
+            status_code=422,
+            detail=f"{fmt} 文件解码失败: {e}",
         )
 
 
@@ -162,4 +214,15 @@ def _guess_media_type(path: str) -> str:
         ".heic": "image/heic",
         ".heif": "image/heif",
         ".svg": "image/svg+xml",
+        ".dng": "image/x-adobe-dng",
+        ".cr2": "image/x-canon-cr2",
+        ".cr3": "image/x-canon-cr3",
+        ".nef": "image/x-nikon-nef",
+        ".arw": "image/x-sony-arw",
+        ".orf": "image/x-olympus-orf",
+        ".rw2": "image/x-panasonic-rw2",
+        ".raf": "image/x-fuji-raf",
+        ".pef": "image/x-pentax-pef",
+        ".srw": "image/x-samsung-srw",
+        ".raw": "image/x-raw",
     }.get(ext, "application/octet-stream")

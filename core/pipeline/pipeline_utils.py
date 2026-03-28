@@ -403,6 +403,11 @@ def detect_lut_color_mode(lut_path):
         if lut_path.endswith('.json'):
             from utils.lut_manager import LUTManager
             rgb, stacks, _meta = LUTManager.load_lut_with_metadata(lut_path)
+            # 优先使用存储的 color_mode
+            if _meta and _meta.color_mode:
+                print(f"[AUTO_DETECT] Using stored color_mode from metadata: {_meta.color_mode}")
+                return _meta.color_mode
+            # 回退到基于数量的推断
             total_colors = len(rgb) if rgb is not None else 0
             layer_count = int(stacks.shape[1]) if isinstance(stacks, np.ndarray) and stacks.ndim == 2 else None
             max_mat = int(np.max(stacks)) if isinstance(stacks, np.ndarray) and stacks.size > 0 else None

@@ -14,22 +14,25 @@ import type {
 /** 调用后端清除系统缓存，返回清理统计信息 */
 export async function clearCache(): Promise<ClearCacheResponse> {
   const response = await apiClient.post<ClearCacheResponse>(
-    "/system/clear-cache"
+    "/system/clear-cache",
   );
   return response.data;
 }
 
 /** 获取用户设置 */
 export async function getSettings(): Promise<UserSettingsResponse> {
-  const response = await apiClient.get<UserSettingsResponse>("/system/settings");
+  const response =
+    await apiClient.get<UserSettingsResponse>("/system/settings");
   return response.data;
 }
 
 /** 保存用户设置 */
-export async function saveSettings(settings: UserSettings): Promise<SaveSettingsResponse> {
+export async function saveSettings(
+  settings: UserSettings,
+): Promise<SaveSettingsResponse> {
   const response = await apiClient.post<SaveSettingsResponse>(
     "/system/settings",
-    settings
+    settings,
   );
   return response.data;
 }
@@ -50,4 +53,20 @@ export async function getPrinters(): Promise<PrinterInfo[]> {
 export async function getSlicers(): Promise<SlicerOption[]> {
   const response = await apiClient.get<SlicerListResponse>("/system/slicers");
   return response.data.slicers;
+}
+
+/** 上传图片至后端，获取 PNG 预览 URL（支持 RAW/HEIC 等浏览器不支持的格式） */
+export async function uploadImagePreview(
+  file: File,
+): Promise<{ preview_url: string; width: number; height: number }> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await apiClient.post<{
+    preview_url: string;
+    width: number;
+    height: number;
+  }>("/system/image-preview", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return response.data;
 }

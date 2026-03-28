@@ -11,10 +11,12 @@ import json
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from PIL import Image
 
 import config
 from api.dependencies import get_file_registry, get_session_store
+from api.file_bridge import ensure_png_tempfile
 from api.file_registry import FileRegistry
 from api.schemas.system import (
     CacheCleanupDetails,
@@ -126,6 +128,31 @@ def perform_cache_cleanup(
         output_files_cleaned=output_files_cleaned,
         total_freed_bytes=freed_bytes,
     )
+
+
+@router.post("/image-preview")
+async def image_preview(
+    file: UploadFile,
+    file_registry: FileRegistry = Depends(get_file_registry),
+) -> dict:
+    """Convert any image (including RAW/HEIC) to PNG and return a preview URL.
+    将任意图片（包括 RAW/HEIC）转为 PNG 并返回预览 URL。
+
+    Args:
+        file: 上传的图片文件
+        file_registry: 文件注册表依赖
+
+    Returns:
+        dict: {preview_url, width, height}
+    """
+    png_path = await ensure_png_tempfile(file)
+    try:
+        with Image.open(png_path) as img:
+            width, height = img.size
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"无法读取图片尺寸: {e}")
+    file_id = file_registry.register_path("image-preview", png_path, "preview.png")
+    return {"preview_url": f"/api/files/{file_id}", "width": width, "height": height}
 
 
 @router.post("/clear-cache")

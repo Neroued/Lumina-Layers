@@ -10,9 +10,34 @@ import {
   manualFixCell,
   mergeEightColor,
   mergeFiveColorExtended,
+  previewAutoWb,
+  rotateExtractorImage,
 } from "../api/extractor";
 import type { ExtractorPaletteEntry } from "../api/types";
 import { clampValue } from "./converterStore";
+import { uploadImagePreview } from "../api/system";
+
+export const RAW_EXTENSIONS = new Set([
+  ".dng",
+  ".cr2",
+  ".cr3",
+  ".nef",
+  ".arw",
+  ".orf",
+  ".rw2",
+  ".raf",
+  ".pef",
+  ".srw",
+  ".raw",
+]);
+
+export const ACCEPT_EXTRACTOR_FORMATS =
+  "image/*," + Array.from(RAW_EXTENSIONS).join(",");
+
+export function isRawFile(file: File): boolean {
+  const ext = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
+  return RAW_EXTENSIONS.has(ext);
+}
 
 // ========== State Interface ==========
 
@@ -36,6 +61,8 @@ export interface ExtractorState {
   zoom: number;
   distortion: number;
   vignette_correction: boolean;
+  auto_wb: boolean;
+  originalPreviewUrl: string | null;
 
   // API 状态
   isLoading: boolean;
@@ -74,6 +101,7 @@ export interface ExtractorState {
 
 export interface ExtractorActions {
   setImageFile: (file: File | null) => void;
+  rotateImage: () => Promise<void>;
   setColorMode: (mode: ExtractorColorMode) => void;
   setPage: (page: ExtractorPage) => void;
   addCornerPoint: (point: [number, number]) => void;
@@ -83,6 +111,7 @@ export interface ExtractorActions {
   setZoom: (value: number) => void;
   setDistortion: (value: number) => void;
   setVignetteCorrection: (value: boolean) => void;
+  setAutoWb: (value: boolean) => Promise<void>;
   setManufacturer: (value: string) => void;
   setType: (value: string) => void;
   submitExtract: () => Promise<void>;
@@ -90,7 +119,10 @@ export interface ExtractorActions {
   submitMerge: () => Promise<void>;
   setError: (error: string | null) => void;
   clearError: () => void;
-  updatePaletteEntry: (index: number, entry: Partial<ExtractorPaletteEntry>) => void;
+  updatePaletteEntry: (
+    index: number,
+    entry: Partial<ExtractorPaletteEntry>,
+  ) => void;
   submitConfirmPalette: () => Promise<void>;
 }
 
@@ -109,6 +141,8 @@ const DEFAULT_STATE: ExtractorState = {
   zoom: 1.0,
   distortion: 0.0,
   vignette_correction: false,
+  auto_wb: false,
+  originalPreviewUrl: null,
   isLoading: false,
   error: null,
   session_id: null,
@@ -138,9 +172,9 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
     ...DEFAULT_STATE,
 
     setImageFile: (file: File | null) => {
-      // Revoke previous object URL to avoid memory leaks
+      // Revoke previous blob URL to avoid memory leaks
       const prev = get().imagePreviewUrl;
-      if (prev) {
+      if (prev && prev.startsWith("blob:")) {
         URL.revokeObjectURL(prev);
       }
 
@@ -158,7 +192,40 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
           defaultPalette: [],
           paletteConfirmed: false,
           paletteConfirmError: null,
+          auto_wb: false,
+          originalPreviewUrl: null,
         });
+        return;
+      }
+
+      if (isRawFile(file)) {
+        set({
+          imageFile: file,
+          imagePreviewUrl: null,
+          imageNaturalWidth: null,
+          imageNaturalHeight: null,
+          corner_points: [],
+          session_id: null,
+          lut_download_url: null,
+          warp_view_url: null,
+          lut_preview_url: null,
+          defaultPalette: [],
+          paletteConfirmed: false,
+          paletteConfirmError: null,
+          auto_wb: false,
+          originalPreviewUrl: null,
+        });
+        uploadImagePreview(file)
+          .then(({ preview_url, width, height }) => {
+            set({
+              imagePreviewUrl: preview_url,
+              imageNaturalWidth: width,
+              imageNaturalHeight: height,
+            });
+          })
+          .catch(() => {
+            set({ error: "RAW 图片预览失败，请检查后端是否安装 rawpy" });
+          });
         return;
       }
 
@@ -188,21 +255,66 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
         defaultPalette: [],
         paletteConfirmed: false,
         paletteConfirmError: null,
+        auto_wb: false,
+        originalPreviewUrl: null,
       });
     },
 
-    setColorMode: (mode: ExtractorColorMode) => set({
-      color_mode: mode,
-      // Reset 8-color and 5-color page tracking when switching modes
-      page1Extracted: false,
-      page2Extracted: false,
-      page1Extracted_5c: false,
-      page2Extracted_5c: false,
-      mergeError: null,
-      defaultPalette: [],
-      paletteConfirmed: false,
-      paletteConfirmError: null,
-    }),
+    rotateImage: async () => {
+      const { imageFile, imagePreviewUrl } = get();
+      if (!imageFile) return;
+
+      set({ isLoading: true, error: null });
+      try {
+        const { preview_url, width, height } = await rotateExtractorImage(
+          imageFile,
+          imageFile.name,
+        );
+
+        // Fetch rotated image as blob to create a new File for subsequent extract calls
+        const res = await fetch(preview_url);
+        const blob = await res.blob();
+        const baseName = imageFile.name.replace(/\.[^.]+$/, "");
+        const rotatedFile = new File([blob], `${baseName}.png`, {
+          type: "image/png",
+        });
+
+        // Revoke previous blob URL
+        if (imagePreviewUrl && imagePreviewUrl.startsWith("blob:")) {
+          URL.revokeObjectURL(imagePreviewUrl);
+        }
+
+        set({
+          imageFile: rotatedFile,
+          imagePreviewUrl: preview_url,
+          imageNaturalWidth: width,
+          imageNaturalHeight: height,
+          corner_points: [],
+          isLoading: false,
+          auto_wb: false,
+          originalPreviewUrl: null,
+        });
+      } catch (err) {
+        set({
+          error: err instanceof Error ? err.message : "图片旋转失败",
+          isLoading: false,
+        });
+      }
+    },
+
+    setColorMode: (mode: ExtractorColorMode) =>
+      set({
+        color_mode: mode,
+        // Reset 8-color and 5-color page tracking when switching modes
+        page1Extracted: false,
+        page2Extracted: false,
+        page1Extracted_5c: false,
+        page2Extracted_5c: false,
+        mergeError: null,
+        defaultPalette: [],
+        paletteConfirmed: false,
+        paletteConfirmError: null,
+      }),
 
     setPage: (page: ExtractorPage) => set({ page }),
 
@@ -220,14 +332,57 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
     setOffsetY: (value: number) =>
       set({ offset_y: clampValue(value, -30, 30) }),
 
-    setZoom: (value: number) =>
-      set({ zoom: clampValue(value, 0.8, 1.2) }),
+    setZoom: (value: number) => set({ zoom: clampValue(value, 0.8, 1.2) }),
 
     setDistortion: (value: number) =>
       set({ distortion: clampValue(value, -0.2, 0.2) }),
 
     setVignetteCorrection: (value: boolean) =>
       set({ vignette_correction: value }),
+
+    setAutoWb: async (value: boolean) => {
+      const { imageFile, imagePreviewUrl, originalPreviewUrl } = get();
+      if (!imageFile) {
+        set({ auto_wb: value });
+        return;
+      }
+
+      if (value) {
+        // 开启白平衡：保存原始预览，调后端获取白平衡预览
+        set({ isLoading: true, error: null, auto_wb: true });
+        try {
+          const saved = originalPreviewUrl ?? imagePreviewUrl;
+          const { preview_url, width, height } = await previewAutoWb(
+            imageFile,
+            imageFile.name,
+          );
+          set({
+            originalPreviewUrl: saved,
+            imagePreviewUrl: preview_url,
+            imageNaturalWidth: width,
+            imageNaturalHeight: height,
+            isLoading: false,
+          });
+        } catch (err) {
+          set({
+            auto_wb: false,
+            error: err instanceof Error ? err.message : "白平衡预览失败",
+            isLoading: false,
+          });
+        }
+      } else {
+        // 关闭白平衡：恢复原始预览
+        if (originalPreviewUrl) {
+          set({
+            auto_wb: false,
+            imagePreviewUrl: originalPreviewUrl,
+            originalPreviewUrl: null,
+          });
+        } else {
+          set({ auto_wb: false });
+        }
+      }
+    },
 
     setManufacturer: (value: string) => set({ manufacturer: value }),
 
@@ -248,6 +403,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
           zoom: state.zoom,
           distortion: state.distortion,
           vignette_correction: state.vignette_correction,
+          auto_wb: state.auto_wb,
         });
         const BASE = "";
 
@@ -288,8 +444,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
         });
       } catch (err) {
         set({
-          error:
-            err instanceof Error ? err.message : "颜色提取失败，请重试",
+          error: err instanceof Error ? err.message : "颜色提取失败，请重试",
           isLoading: false,
         });
       }
@@ -304,7 +459,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
         const response = await manualFixCell(
           state.session_id,
           [row, col],
-          color
+          color,
         );
         set({
           lut_preview_url: response.lut_preview_url
@@ -355,8 +510,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
         });
       } catch (err) {
         set({
-          mergeError:
-            err instanceof Error ? err.message : "合并失败，请重试",
+          mergeError: err instanceof Error ? err.message : "合并失败，请重试",
           mergeLoading: false,
         });
       }
@@ -365,7 +519,10 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
     setError: (error: string | null) => set({ error }),
     clearError: () => set({ error: null }),
 
-    updatePaletteEntry: (index: number, entry: Partial<ExtractorPaletteEntry>) => {
+    updatePaletteEntry: (
+      index: number,
+      entry: Partial<ExtractorPaletteEntry>,
+    ) => {
       const palette = [...get().defaultPalette];
       if (index >= 0 && index < palette.length) {
         palette[index] = { ...palette[index], ...entry };
@@ -397,5 +554,5 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
         });
       }
     },
-  })
+  }),
 );
