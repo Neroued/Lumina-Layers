@@ -19,7 +19,7 @@ from api.schemas.extractor import ConfirmPaletteRequest, ExtractorManualFixReque
 from api.schemas.responses import ExtractResponse, ManualFixResponse
 from api.session_store import SessionStore
 from config import ColorSystem, LUTMetadata, PaletteEntry
-from core.extractor import manual_fix_cell, run_extraction
+from core.extractor import apply_auto_white_balance, manual_fix_cell, rotate_image, run_extraction
 from utils.lut_manager import LUTManager
 
 router = APIRouter(prefix="/api/extractor", tags=["Extractor"])
@@ -114,6 +114,59 @@ def _build_merged_metadata(
     return metadata
 
 
+@router.post("/rotate")
+async def extractor_rotate(
+    image: UploadFile = File(..., description="待旋转的图片"),
+    registry: FileRegistry = Depends(get_file_registry),
+):
+    """Rotate an image 90° counter-clockwise and return the rotated PNG.
+    将图片逆时针旋转 90° 并返回旋转后的 PNG。
+    """
+    try:
+        img_arr = await upload_to_ndarray(image)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    rotated = rotate_image(img_arr, "Rotate Left 90°")
+    if rotated is None:
+        raise HTTPException(status_code=500, detail="Image rotation failed")
+
+    rotated_bytes = ndarray_to_png_bytes(rotated)
+    h, w = rotated.shape[:2]
+    file_id = registry.register_bytes("extractor-rotate", rotated_bytes, "rotated.png")
+
+    return {
+        "preview_url": f"/api/files/{file_id}",
+        "width": w,
+        "height": h,
+    }
+
+
+@router.post("/preview-wb")
+async def extractor_preview_wb(
+    image: UploadFile = File(..., description="待处理的图片"),
+    registry: FileRegistry = Depends(get_file_registry),
+):
+    """Apply auto white balance to an image and return the preview PNG.
+    对图片应用自动白平衡并返回预览 PNG。
+    """
+    try:
+        img_arr = await upload_to_ndarray(image)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    balanced = apply_auto_white_balance(img_arr)
+    balanced_bytes = ndarray_to_png_bytes(balanced)
+    h, w = balanced.shape[:2]
+    file_id = registry.register_bytes("extractor-wb", balanced_bytes, "wb_preview.png")
+
+    return {
+        "preview_url": f"/api/files/{file_id}",
+        "width": w,
+        "height": h,
+    }
+
+
 @router.post("/extract")
 async def extractor_extract(
     image: UploadFile = File(..., description="校准板照片"),
@@ -125,6 +178,7 @@ async def extractor_extract(
     zoom: float = Form(1.0, description="透视校正缩放"),
     distortion: float = Form(0.0, description="畸变校正"),
     vignette_correction: bool = Form(False, description="暗角校正"),
+    auto_wb: bool = Form(False, description="自动白平衡"),
     store: SessionStore = Depends(get_session_store),
     registry: FileRegistry = Depends(get_file_registry),
 ) -> ExtractResponse:
@@ -161,6 +215,7 @@ async def extractor_extract(
             bright=vignette_correction,
             color_mode=color_mode,
             page_choice=page,
+            auto_wb=auto_wb,
         )
     except Exception as e:
         _handle_core_error(e, "Color extraction")

@@ -51,6 +51,7 @@ export default function ExtractorPanel() {
     zoom,
     distortion,
     vignette_correction,
+    auto_wb,
     isLoading,
     error,
     lut_download_url,
@@ -75,6 +76,7 @@ export default function ExtractorPanel() {
     setZoom,
     setDistortion,
     setVignetteCorrection,
+    setAutoWb,
     setManufacturer,
     setType,
     submitExtract,
@@ -153,8 +155,9 @@ export default function ExtractorPanel() {
             <Slider label={t("ext_zoom_label")} value={zoom} min={0.8} max={1.2} step={0.01} onChange={setZoom} />
             <Slider label={t("ext_distortion_label")} value={distortion} min={-0.2} max={0.2} step={0.01} onChange={setDistortion} />
           </div>
-          <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-1">
+          <div className="grid grid-cols-2 gap-3">
             <Checkbox label={t("ext_vignette_label")} checked={vignette_correction} onChange={setVignetteCorrection} />
+            <Checkbox label={t("ext_auto_wb_label")} checked={auto_wb} onChange={(v) => void setAutoWb(v)} />
           </div>
         </section>
 

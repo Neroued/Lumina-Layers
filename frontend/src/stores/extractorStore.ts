@@ -10,6 +10,8 @@ import {
   manualFixCell,
   mergeEightColor,
   mergeFiveColorExtended,
+  previewAutoWb,
+  rotateExtractorImage,
 } from "../api/extractor";
 import type { ExtractorPaletteEntry } from "../api/types";
 import { clampValue } from "./converterStore";
@@ -58,6 +60,8 @@ export interface ExtractorState {
   zoom: number;
   distortion: number;
   vignette_correction: boolean;
+  auto_wb: boolean;
+  originalPreviewUrl: string | null;
 
   // API 状态
   isLoading: boolean;
@@ -96,7 +100,7 @@ export interface ExtractorState {
 
 export interface ExtractorActions {
   setImageFile: (file: File | null) => void;
-  rotateImage: () => void;
+  rotateImage: () => Promise<void>;
   setColorMode: (mode: ExtractorColorMode) => void;
   setPage: (page: ExtractorPage) => void;
   addCornerPoint: (point: [number, number]) => void;
@@ -106,6 +110,7 @@ export interface ExtractorActions {
   setZoom: (value: number) => void;
   setDistortion: (value: number) => void;
   setVignetteCorrection: (value: boolean) => void;
+  setAutoWb: (value: boolean) => Promise<void>;
   setManufacturer: (value: string) => void;
   setType: (value: string) => void;
   submitExtract: () => Promise<void>;
@@ -135,6 +140,8 @@ const DEFAULT_STATE: ExtractorState = {
   zoom: 1.0,
   distortion: 0.0,
   vignette_correction: false,
+  auto_wb: false,
+  originalPreviewUrl: null,
   isLoading: false,
   error: null,
   session_id: null,
@@ -184,6 +191,8 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
           defaultPalette: [],
           paletteConfirmed: false,
           paletteConfirmError: null,
+          auto_wb: false,
+          originalPreviewUrl: null,
         });
         return;
       }
@@ -202,6 +211,8 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
           defaultPalette: [],
           paletteConfirmed: false,
           paletteConfirmError: null,
+          auto_wb: false,
+          originalPreviewUrl: null,
         });
         uploadImagePreview(file)
           .then(({ preview_url, width, height }) => {
@@ -243,40 +254,51 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
         defaultPalette: [],
         paletteConfirmed: false,
         paletteConfirmError: null,
+        auto_wb: false,
+        originalPreviewUrl: null,
       });
     },
 
-    rotateImage: () => {
-      const { imagePreviewUrl, imageNaturalWidth, imageNaturalHeight } = get();
-      if (!imagePreviewUrl || !imageNaturalWidth || !imageNaturalHeight) return;
+    rotateImage: async () => {
+      const { imageFile, imagePreviewUrl } = get();
+      if (!imageFile) return;
 
-      const canvas = document.createElement("canvas");
-      canvas.width = imageNaturalHeight;
-      canvas.height = imageNaturalWidth;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
+      set({ isLoading: true, error: null });
+      try {
+        const { preview_url, width, height } = await rotateExtractorImage(
+          imageFile,
+          imageFile.name,
+        );
 
-      const img = new Image();
-      img.onload = () => {
-        ctx.translate(canvas.width / 2, canvas.height / 2);
-        ctx.rotate(-Math.PI / 2);
-        ctx.drawImage(img, -imageNaturalWidth / 2, -imageNaturalHeight / 2);
+        // Fetch rotated image as blob to create a new File for subsequent extract calls
+        const res = await fetch(`${BASE_URL}${preview_url}`);
+        const blob = await res.blob();
+        const baseName = imageFile.name.replace(/\.[^.]+$/, "");
+        const rotatedFile = new File([blob], `${baseName}.png`, {
+          type: "image/png",
+        });
 
-        canvas.toBlob((blob) => {
-          if (!blob) return;
-          const newUrl = URL.createObjectURL(blob);
-          if (imagePreviewUrl.startsWith("blob:")) {
-            URL.revokeObjectURL(imagePreviewUrl);
-          }
-          set({
-            imagePreviewUrl: newUrl,
-            imageNaturalWidth: imageNaturalHeight,
-            imageNaturalHeight: imageNaturalWidth,
-            corner_points: [],
-          });
-        }, "image/png");
-      };
-      img.src = imagePreviewUrl;
+        // Revoke previous blob URL
+        if (imagePreviewUrl && imagePreviewUrl.startsWith("blob:")) {
+          URL.revokeObjectURL(imagePreviewUrl);
+        }
+
+        set({
+          imageFile: rotatedFile,
+          imagePreviewUrl: `${BASE_URL}${preview_url}`,
+          imageNaturalWidth: width,
+          imageNaturalHeight: height,
+          corner_points: [],
+          isLoading: false,
+          auto_wb: false,
+          originalPreviewUrl: null,
+        });
+      } catch (err) {
+        set({
+          error: err instanceof Error ? err.message : "图片旋转失败",
+          isLoading: false,
+        });
+      }
     },
 
     setColorMode: (mode: ExtractorColorMode) =>
@@ -317,6 +339,50 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
     setVignetteCorrection: (value: boolean) =>
       set({ vignette_correction: value }),
 
+    setAutoWb: async (value: boolean) => {
+      const { imageFile, imagePreviewUrl, originalPreviewUrl } = get();
+      if (!imageFile) {
+        set({ auto_wb: value });
+        return;
+      }
+
+      if (value) {
+        // 开启白平衡：保存原始预览，调后端获取白平衡预览
+        set({ isLoading: true, error: null, auto_wb: true });
+        try {
+          const saved = originalPreviewUrl ?? imagePreviewUrl;
+          const { preview_url, width, height } = await previewAutoWb(
+            imageFile,
+            imageFile.name,
+          );
+          set({
+            originalPreviewUrl: saved,
+            imagePreviewUrl: `${BASE_URL}${preview_url}`,
+            imageNaturalWidth: width,
+            imageNaturalHeight: height,
+            isLoading: false,
+          });
+        } catch (err) {
+          set({
+            auto_wb: false,
+            error: err instanceof Error ? err.message : "白平衡预览失败",
+            isLoading: false,
+          });
+        }
+      } else {
+        // 关闭白平衡：恢复原始预览
+        if (originalPreviewUrl) {
+          set({
+            auto_wb: false,
+            imagePreviewUrl: originalPreviewUrl,
+            originalPreviewUrl: null,
+          });
+        } else {
+          set({ auto_wb: false });
+        }
+      }
+    },
+
     setManufacturer: (value: string) => set({ manufacturer: value }),
 
     setType: (value: string) => set({ type: value }),
@@ -336,6 +402,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
           zoom: state.zoom,
           distortion: state.distortion,
           vignette_correction: state.vignette_correction,
+          auto_wb: state.auto_wb,
         });
         const BASE = "http://localhost:8000";
 

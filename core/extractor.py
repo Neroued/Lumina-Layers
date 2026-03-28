@@ -319,7 +319,69 @@ def apply_brightness_correction(img):
     return cv2.cvtColor(cv2.merge([l_new, a, b]), cv2.COLOR_LAB2RGB)
 
 
-def run_extraction(img, points, offset_x, offset_y, zoom, barrel, bright, color_mode="CMYW", page_choice="Page 1"):
+def apply_auto_white_balance(img: np.ndarray) -> np.ndarray:
+    """Apply automatic white balance using bright near-neutral pixel detection.
+    使用高亮近中性色像素检测进行自动白平衡。
+
+    Strategy:
+    1. Find bright pixels (top 15% luminance).
+    2. Among those, select near-neutral ones (low chroma in LAB space).
+    3. Use their average RGB as the white reference.
+    4. Scale each channel so the reference becomes pure white (255).
+    Falls back to top-percentile method if no neutral pixels are found.
+
+    Args:
+        img (np.ndarray): Input RGB image, dtype uint8. (RGB 输入图像)
+
+    Returns:
+        np.ndarray: White-balanced RGB image, dtype uint8. (白平衡后的 RGB 图像)
+    """
+    h, w = img.shape[:2]
+    img_f = img.astype(np.float64)
+
+    # Step 1: find bright pixels (top 15% by luminance)
+    lum = 0.299 * img_f[:, :, 0] + 0.587 * img_f[:, :, 1] + 0.114 * img_f[:, :, 2]
+    bright_thresh = np.percentile(lum, 85)
+    bright_mask = lum >= bright_thresh
+
+    # Step 2: among bright pixels, find near-neutral ones (low chroma)
+    # Convert to LAB to measure chroma = sqrt(a^2 + b^2)
+    img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB).astype(np.float64)
+    a_ch = lab[:, :, 1] - 128.0
+    b_ch = lab[:, :, 2] - 128.0
+    chroma = np.sqrt(a_ch ** 2 + b_ch ** 2)
+
+    # Near-neutral: chroma < 15 (fairly desaturated)
+    neutral_mask = bright_mask & (chroma < 15)
+    count = neutral_mask.sum()
+
+    if count < 50:
+        # Fallback: relax chroma constraint
+        neutral_mask = bright_mask & (chroma < 30)
+        count = neutral_mask.sum()
+
+    if count < 50:
+        # Final fallback: just use top 2% brightest
+        top_thresh = np.percentile(lum, 98)
+        neutral_mask = lum >= top_thresh
+        count = neutral_mask.sum()
+
+    if count < 10:
+        return img
+
+    white_ref = img_f[neutral_mask].mean(axis=0)
+    if white_ref.min() < 10:
+        return img
+
+    gains = 255.0 / white_ref
+    print(f"[AUTO_WB] white_ref=[{white_ref[0]:.1f}, {white_ref[1]:.1f}, {white_ref[2]:.1f}], "
+          f"gains=[{gains[0]:.3f}, {gains[1]:.3f}, {gains[2]:.3f}], neutral_pixels={count}")
+    balanced = np.clip(img_f * gains, 0, 255).astype(np.uint8)
+    return balanced
+
+
+def run_extraction(img, points, offset_x, offset_y, zoom, barrel, bright, color_mode="CMYW", page_choice="Page 1", auto_wb=False):
     """
     Main extraction pipeline with dynamic grid size support.
 
@@ -332,6 +394,8 @@ def run_extraction(img, points, offset_x, offset_y, zoom, barrel, bright, color_
         barrel: Barrel distortion correction
         bright: Enable brightness correction
         color_mode: Color system mode
+        page_choice: Page selection for dual-page modes
+        auto_wb: Enable automatic white balance
 
     Returns:
         Tuple of (visualization, preview, lut_path, status_message)
@@ -371,7 +435,7 @@ def run_extraction(img, points, offset_x, offset_y, zoom, barrel, bright, color_
         physical_grid = PHYSICAL_GRID_SIZE  # 34
         total_cells = 1024
 
-    print(f"[EXTRACTOR] Mode: {color_mode}, Logic: {grid_size}x{grid_size} inside {physical_grid}x{physical_grid}")
+    print(f"[EXTRACTOR] Mode: {color_mode}, Logic: {grid_size}x{grid_size} inside {physical_grid}x{physical_grid}, auto_wb={auto_wb}, bright={bright}")
 
     # Perspective transform
     half = DST_SIZE / physical_grid / 2.0
@@ -382,6 +446,9 @@ def run_extraction(img, points, offset_x, offset_y, zoom, barrel, bright, color_
 
     M = cv2.getPerspectiveTransform(src, dst)
     warped = cv2.warpPerspective(img, M, (DST_SIZE, DST_SIZE))
+
+    if auto_wb:
+        warped = apply_auto_white_balance(warped)
 
     if bright:
         warped = apply_brightness_correction(warped)
