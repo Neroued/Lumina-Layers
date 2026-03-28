@@ -555,7 +555,7 @@ function _clientLog(label: string) {
   const elapsed = _generateStartTime != null ? performance.now() - _generateStartTime : null;
   const msg = elapsed != null ? `${label} (+${elapsed.toFixed(0)}ms)` : label;
   console.log(`[LUMINA] ${msg}`);
-  fetch('http://localhost:8000/api/client-log', {
+  fetch('/api/client-log', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ label, elapsed_ms: elapsed }),

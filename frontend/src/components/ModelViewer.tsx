@@ -6,7 +6,7 @@ import * as THREE from "three";
 function _clog(label: string) {
   const start = (window as any).__luminaGenerateStart as number | undefined;
   const elapsed_ms = start != null ? performance.now() - start : null;
-  fetch('http://localhost:8000/api/client-log', {
+  fetch('/api/client-log', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ label, elapsed_ms }),

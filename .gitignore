@@ -282,6 +282,9 @@ frontend/dist/
 
 # Temporary assets
 assets/temp_*.npy
+assets/temp_*.json
+# AI IDE local config
+.claude/
 .idea/
 *.3mf
 .cursor/
