@@ -9,6 +9,7 @@ S10 — 颜色配方报告生成（可选步骤）。
 """
 
 import os
+import time
 
 import numpy as np
 
@@ -30,6 +31,8 @@ def run(ctx: dict) -> dict:
     PipelineContext 输出键 / Output keys:
         - color_recipe_path (str | None): 颜色配方报告路径
     """
+    _t0 = time.perf_counter()
+
     processor = ctx['processor']
     matched_rgb = ctx['matched_rgb']
     material_matrix = ctx['material_matrix']
@@ -71,4 +74,9 @@ def run(ctx: dict) -> dict:
 
     ctx['color_recipe_path'] = color_recipe_path
 
+    _elapsed = time.perf_counter() - _t0
+    _hifi_timings = ctx.get('_hifi_timings', {})
+    _hifi_timings['color_recipe_s'] = _elapsed
+    ctx['_hifi_timings'] = _hifi_timings
+    print(f"[S10] color_recipe done: {_elapsed:.3f}s")
     return ctx

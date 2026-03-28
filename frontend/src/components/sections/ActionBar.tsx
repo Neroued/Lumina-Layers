@@ -17,6 +17,7 @@ export default function ActionBar() {
   const imageFile = useConverterStore((s) => s.imageFile);
   const lut_name = useConverterStore((s) => s.lut_name);
   const isLoading = useConverterStore((s) => s.isLoading);
+  const isGenerating = useConverterStore((s) => s.isGenerating);
   const error = useConverterStore((s) => s.error);
   const previewImageUrl = useConverterStore((s) => s.previewImageUrl);
   const submitPreview = useConverterStore((s) => s.submitPreview);
@@ -85,8 +86,8 @@ export default function ActionBar() {
                 label={t("action_generate")}
                 variant="primary"
                 onClick={() => void submitGenerate()}
-                disabled={!canSubmit || isLoading}
-                loading={isLoading}
+                disabled={!canSubmit || isLoading || isGenerating}
+                loading={isGenerating}
                 className="w-full"
               />
             </WikiTooltip>

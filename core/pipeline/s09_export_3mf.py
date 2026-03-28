@@ -3,7 +3,6 @@ S09 — Coordinate transform and 3MF export.
 S09 — 坐标变换与 3MF 导出。
 
 从 converter.py 搬入的导出逻辑：
-- 5-Color Z 翻转
 - 单面模式 X 镜像
 - BambuStudio 3MF 导出（含嵌入打印设置）
 """
@@ -51,23 +50,6 @@ def run(ctx: dict) -> dict:
     _hifi_timings = ctx.get("_hifi_timings", {})
 
     is_single_sided = "单面" in structure_mode or "Single" in structure_mode
-    is_5color = "5-Color Extended" in color_mode
-
-    # 5-Color: Z flip so viewing surface faces up in BambuStudio
-    if is_5color:
-        max_z = max(
-            g.vertices[:, 2].max() for g in scene.geometry.values() if hasattr(g, "vertices") and len(g.vertices) > 0
-        )
-        z_flip = np.array(
-            [
-                [1, 0, 0, 0],
-                [0, 1, 0, 0],
-                [0, 0, -1, max_z],
-                [0, 0, 0, 1],
-            ]
-        )
-        for geom_name in list(scene.geometry.keys()):
-            scene.geometry[geom_name].apply_transform(z_flip)
 
     # Single-sided: X mirror correction (needed by BambuStudio writer)
     if is_single_sided:
@@ -76,17 +58,11 @@ def run(ctx: dict) -> dict:
         for geom_name in list(scene.geometry.keys()):
             scene.geometry[geom_name].apply_transform(mirror_transform)
 
-    # 5-Color: additional X mirror to correct left-right after single-sided mirror
-    if is_5color:
-        model_width_mm = target_w * pixel_scale
-        x_mirror_again = np.array([[-1, 0, 0, model_width_mm], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
-        for geom_name in list(scene.geometry.keys()):
-            scene.geometry[geom_name].apply_transform(x_mirror_again)
-
     _prog = ctx.get("progress")
     if _prog is not None:
         _prog(0.50, "导出 3MF 中... | Exporting 3MF...")
 
+    print(f"[S09] export_3mf start")
     _export_t0 = time.perf_counter() if _bench_enabled else None
 
     base_name = os.path.splitext(os.path.basename(image_path))[0]
@@ -130,8 +106,10 @@ def run(ctx: dict) -> dict:
             slicer=ctx.get("slicer", "BambuStudio"),
         )
         if _bench_enabled and _export_t0 is not None:
-            _hifi_timings["export_3mf_s"] = time.perf_counter() - _export_t0
+            _export_elapsed = time.perf_counter() - _export_t0
+            _hifi_timings["export_3mf_s"] = _export_elapsed
             ctx["_hifi_timings"] = _hifi_timings
+            print(f"[S09] export_3mf done: {_export_elapsed:.3f}s")
         print(f"[S09] 3MF exported with embedded settings: {out_path}")
     except Exception as e:
         print(f"[S09] Error exporting 3MF: {e}")

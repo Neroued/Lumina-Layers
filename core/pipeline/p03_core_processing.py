@@ -9,6 +9,9 @@ P03 — 核心图像处理（量化 + LUT 匹配）。
 """
 
 
+import time
+
+
 def run(ctx: dict) -> dict:
     """Execute core image processing: quantization and LUT color matching.
     执行核心图像处理：量化与 LUT 颜色匹配。
@@ -39,6 +42,7 @@ def run(ctx: dict) -> dict:
         KeyError: 缺少必需的输入键时抛出
     """
     from core.image_processing import LuminaImageProcessor
+    _t0 = time.perf_counter()
 
     # ---- 读取必需输入 ----
     actual_lut_path = ctx['actual_lut_path']
@@ -82,4 +86,7 @@ def run(ctx: dict) -> dict:
     ctx['target_h'] = target_h
     ctx['debug_data'] = result.get('debug_data') if isinstance(result, dict) else None
     ctx['quantized_image'] = result.get('quantized_image')
+    _elapsed = time.perf_counter() - _t0
+    ctx.setdefault('_preview_timings', {})['p03_s'] = _elapsed
+    print(f"[P03] core_processing done: {_elapsed:.3f}s")
     return ctx

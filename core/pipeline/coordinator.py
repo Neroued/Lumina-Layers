@@ -422,6 +422,12 @@ def _run_vector_branch(ctx: dict) -> dict:
         ctx["result_tuple"] = (out_path, glb_path, preview_img, msg, None)
         return ctx
 
+    except ModuleNotFoundError as e:
+        error_msg = f"Vector processing failed: {e}"
+        print(f"[COORDINATOR] {error_msg}")
+        ctx["error"] = error_msg
+        return ctx
+
     except Exception as e:
         error_msg = (
             f"Vector processing failed: {e}\n\n"

@@ -11,6 +11,8 @@ S01 — 输入验证、LUT 路径解析与颜色系统配置。
 - separate_backing 处理
 """
 
+import time
+
 from config import ColorSystem, ModelingMode
 
 
@@ -38,6 +40,8 @@ def run(ctx: dict) -> dict:
     Raises:
         KeyError: 缺少必需的输入键时抛出
     """
+    _t0 = time.perf_counter()
+
     # ---- 读取必需输入 ----
     image_path = ctx["image_path"]
     lut_path = ctx["lut_path"]
@@ -150,4 +154,9 @@ def run(ctx: dict) -> dict:
         print(f"[S01] Warning: Invalid backing_color_id={backing_color_id}, using default (0)")
         ctx["backing_color_id"] = 0
 
+    _elapsed = time.perf_counter() - _t0
+    _hifi_timings = ctx.get('_hifi_timings', {})
+    _hifi_timings['input_val_s'] = _elapsed
+    ctx['_hifi_timings'] = _hifi_timings
+    print(f"[S01] done: {_elapsed:.3f}s")
     return ctx

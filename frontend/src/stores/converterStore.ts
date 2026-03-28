@@ -238,6 +238,7 @@ export interface ConverterState {
 
   // UI 状态
   isLoading: boolean;
+  isGenerating: boolean;
   error: string | null;
   previewImageUrl: string | null;
   modelUrl: string | null;
@@ -511,6 +512,7 @@ const DEFAULT_STATE: ConverterState = {
   isCropping: false,
   autoDetectColorsLoading: false,
   isLoading: false,
+  isGenerating: false,
   error: null,
   previewImageUrl: null,
   modelUrl: null,
@@ -546,6 +548,19 @@ const DEFAULT_STATE: ConverterState = {
 // ========== Preview AbortController ==========
 
 let _previewAbortController: AbortController | null = null;
+
+// ========== Client-side timing log (writes to server log) ==========
+let _generateStartTime: number | null = null;
+function _clientLog(label: string) {
+  const elapsed = _generateStartTime != null ? performance.now() - _generateStartTime : null;
+  const msg = elapsed != null ? `${label} (+${elapsed.toFixed(0)}ms)` : label;
+  console.log(`[LUMINA] ${msg}`);
+  fetch('/api/client-log', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ label, elapsed_ms: elapsed }),
+  }).catch(() => {});
+}
 
 // ========== Store ==========
 
@@ -1519,7 +1534,11 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         return null;
       }
 
-      set({ isLoading: true, error: null });
+      set({ isGenerating: true, error: null });
+      _generateStartTime = performance.now();
+      (window as any).__luminaGenerateStart = _generateStartTime;
+      _clientLog('generate: click');
+      console.time('[LUMINA] generate');
       try {
         // 合并 colorRemapMap 转换的 replacement_regions 与已有的 replacement_regions
         let mergedReplacements: ColorReplacementItem[] | undefined =
@@ -1608,22 +1627,28 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           return null;
         }
 
+        console.timeLog('[LUMINA] generate', 'request sent');
+        _clientLog('generate: request sent');
         const response = await apiConvertGenerate(state.sessionId, baseParams);
+        console.timeLog('[LUMINA] generate', 'response received');
+        _clientLog('generate: response received');
         const modelUrl = response.preview_3d_url
           ? `${response.preview_3d_url}`
           : null;
         set({
-          isLoading: false,
+          isGenerating: false,
           modelUrl,
           threemfDiskPath: response.threemf_disk_path ?? null,
           downloadUrl: response.download_url
             ? `${response.download_url}`
             : null,
         });
+        console.timeLog('[LUMINA] generate', 'UI unlocked (isGenerating=false, modelUrl set)');
+        _clientLog('generate: UI unlocked');
         return modelUrl;
       } catch (err) {
         set({
-          isLoading: false,
+          isGenerating: false,
           error: err instanceof Error ? err.message : "生成失败",
         });
         return null;

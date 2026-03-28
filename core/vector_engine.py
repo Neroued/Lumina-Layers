@@ -372,10 +372,19 @@ class VectorProcessor:
             if not occluders:
                 clipped = geom
             else:
+                occ = occluders[0] if len(occluders) == 1 else unary_union(occluders)
                 try:
-                    clipped = geom.difference(occluders[0] if len(occluders) == 1 else unary_union(occluders))
+                    clipped = geom.difference(occ)
                 except Exception:
-                    clipped = geom
+                    # First attempt failed — repair both geometries and retry.
+                    try:
+                        fixed_geom = geom if geom.is_valid else geom.buffer(0)
+                        fixed_occ = occ if occ.is_valid else occ.buffer(0)
+                        clipped = fixed_geom.difference(fixed_occ)
+                    except Exception:
+                        # Cannot compute difference — drop shape to avoid
+                        # overlapping geometry that breaks the mesh.
+                        clipped = None
 
             if clipped is not None and not clipped.is_empty:
                 if not clipped.is_valid:
@@ -739,7 +748,11 @@ class VectorProcessor:
                 skipped_types[type_name] = skipped_types.get(type_name, 0) + 1
                 continue
 
-            has_fill = element.fill is not None and element.fill.value is not None
+            has_fill = (
+                element.fill is not None
+                and element.fill.value is not None
+                and str(element.fill.value).lower() != "none"
+            )
             has_stroke = (
                 element.stroke is not None and element.stroke.value is not None and element.stroke.value != "none"
             )

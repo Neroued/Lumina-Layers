@@ -4,14 +4,25 @@ Lumina Studio - Calibration Generator Module
 Generates calibration boards for physical color testing.
 """
 
+from __future__ import annotations
+
 import os
 from typing import Optional
 import itertools
 import zipfile
 
 import numpy as np
-import trimesh
 from PIL import Image
+
+# Lazy trimesh import: avoid >60s startup cost when imported via API.
+_trimesh = None
+
+def _get_trimesh():
+    global _trimesh
+    if _trimesh is None:
+        import trimesh as _tm
+        _trimesh = _tm
+    return _trimesh
 
 from colormath.color_objects import sRGBColor, LabColor
 from colormath.color_conversions import convert_color
@@ -25,7 +36,7 @@ from utils.bambu_3mf_writer import export_scene_with_bambu_metadata
 
 def _generate_voxel_mesh(
     voxel_matrix: np.ndarray, material_index: int, grid_h: int, grid_w: int
-) -> Optional[trimesh.Trimesh]:
+) -> Optional[_get_trimesh().Trimesh]:
     """
     Generate mesh for a specific material from voxel data.
 
@@ -95,7 +106,7 @@ def _generate_voxel_mesh(
     if not vertices:
         return None
 
-    mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
+    mesh = _get_trimesh().Trimesh(vertices=vertices, faces=faces)
     mesh.merge_vertices()
     mesh.update_faces(mesh.unique_faces())
     return mesh
@@ -175,7 +186,7 @@ def generate_calibration_board(color_mode: str, block_size_mm: float, gap_mm: fl
             full_matrix[z, py : py + pixels_per_block, px : px + pixels_per_block] = mat_id
 
     # Build 3MF scene
-    scene = trimesh.Scene()
+    scene = _get_trimesh().Scene()
     for mat_id in range(4):
         mesh = _generate_voxel_mesh(full_matrix, mat_id, voxel_h, voxel_w)
         if mesh:
@@ -413,7 +424,7 @@ def generate_smart_board(block_size_mm=5.0, gap_mm=0.8):
         full_matrix[viewing_surface_z, py : py + pixels_per_block, px : px + pixels_per_block] = mat_id
 
     # Generate 3MF scene
-    scene = trimesh.Scene()
+    scene = _get_trimesh().Scene()
 
     for mat_id in range(6):
         mesh = _generate_voxel_mesh(full_matrix, mat_id, voxel_h, voxel_w)
@@ -595,7 +606,7 @@ def generate_smart_board_rybw(block_size_mm=5.0, gap_mm=0.8):
         py = r * (pixels_per_block + pixels_gap)
         full_matrix[viewing_surface_z, py : py + pixels_per_block, px : px + pixels_per_block] = mat_id
 
-    scene = trimesh.Scene()
+    scene = _get_trimesh().Scene()
     for mat_id in range(6):
         mesh = _generate_voxel_mesh(full_matrix, mat_id, voxel_h, voxel_w)
         if mesh:
@@ -715,7 +726,7 @@ def generate_8color_board(page_index: int = 0, block_size_mm: float = 5.0, gap_m
             full_matrix[z, py : py + px_blk, px : px + px_blk] = mid
 
     # 6. Export 3MF & Preview
-    scene = trimesh.Scene()
+    scene = _get_trimesh().Scene()
     conf = ColorSystem.EIGHT_COLOR
     for mid in range(8):
         m = _generate_voxel_mesh(full_matrix, mid, v_w, v_w)
@@ -902,7 +913,7 @@ def generate_bw_calibration_board(block_size_mm=5.0, gap_mm=0.8, backing_color="
             full_matrix[z, py : py + pixels_per_block, px : px + pixels_per_block] = mat_id
 
     # Generate 3MF scene
-    scene = trimesh.Scene()
+    scene = _get_trimesh().Scene()
 
     for mat_id in range(2):
         mesh = _generate_voxel_mesh(full_matrix, mat_id, voxel_h, voxel_w)
@@ -1240,7 +1251,7 @@ def generate_5color1444_board(block_size_mm=5.0, gap_mm=0.8):
         py = r * (pixels_per_block + pixels_gap)
         full_matrix[viewing_surface_z, py : py + pixels_per_block, px : px + pixels_per_block] = mat_id
 
-    scene = trimesh.Scene()
+    scene = _get_trimesh().Scene()
 
     for mat_id, rgba in preview_colors.items():
         mesh = _generate_voxel_mesh(full_matrix, mat_id, voxel_h, voxel_w)
@@ -1449,7 +1460,7 @@ def _generate_5color_base_page(block_size_mm, gap_mm, preview_colors, slot_names
             full_matrix[z, py : py + pixels_per_block, px : px + pixels_per_block] = mat_id
 
     # Generate 3MF
-    scene = trimesh.Scene()
+    scene = _get_trimesh().Scene()
     for mat_id, rgba in preview_colors.items():
         if mat_id < 4:  # Only 4 colors for base page
             mesh = _generate_voxel_mesh(full_matrix, mat_id, voxel_h, voxel_w)
@@ -1573,7 +1584,7 @@ def _generate_5color_extended_page(block_size_mm, gap_mm, preview_colors, slot_n
         full_matrix[viewing_surface_z, py : py + pixels_per_block, px : px + pixels_per_block] = mat_id
 
     # Generate 3MF
-    scene = trimesh.Scene()
+    scene = _get_trimesh().Scene()
     for mat_id, rgba in preview_colors.items():
         mesh = _generate_voxel_mesh(full_matrix, mat_id, voxel_h, voxel_w)
         if mesh:

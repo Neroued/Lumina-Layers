@@ -18,9 +18,9 @@ T = TypeVar("T")
 
 
 def _worker_init() -> None:
-    """Worker process initializer: force UTF-8 stdout/stderr on Windows.
-    工作进程初始化器：在 Windows 上强制 stdout/stderr 使用 UTF-8 编码，
-    避免 emoji 等非 GBK 字符导致 UnicodeEncodeError。
+    """Worker process initializer: force UTF-8 stdout/stderr on Windows,
+    then redirect stdout to the same log file as the main process.
+    工作进程初始化器：在 Windows 上强制 UTF-8 编码，并将 stdout 重定向到主进程日志文件。
     """
     if sys.platform == "win32":
         sys.stdout = io.TextIOWrapper(
@@ -29,6 +29,14 @@ def _worker_init() -> None:
         sys.stderr = io.TextIOWrapper(
             sys.stderr.buffer, encoding="utf-8", errors="replace"
         )
+
+    log_path = os.environ.get("LUMINA_LOG_PATH")
+    if log_path:
+        try:
+            from api.logger import setup_file_logging
+            setup_file_logging(log_path=log_path)
+        except Exception:
+            pass
 
 
 class WorkerPoolManager:

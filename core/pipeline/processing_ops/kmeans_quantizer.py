@@ -13,6 +13,10 @@ import numpy as np
 import cv2
 from scipy.spatial import KDTree
 
+# 模块级 K-Means 缓存：key = md5(rgb)[:16]_{n_colors}_{seed}
+_kmeans_cache: dict = {}
+_KMEANS_CACHE_MAX = 4
+
 
 def quantize_colors(rgb: np.ndarray, n_colors: int, seed: int = 42) -> np.ndarray:
     """K-Means 颜色量化（含预缩放优化、K-Means++ 初始化、后量化去噪）。
@@ -28,6 +32,13 @@ def quantize_colors(rgb: np.ndarray, n_colors: int, seed: int = 42) -> np.ndarra
     """
     h, w = rgb.shape[:2]
     total_pixels = h * w
+
+    # 缓存查找：用轻量指纹（shape + 采样像素 + 参数）避免全量 hash
+    _sample = rgb[::max(1, rgb.shape[0]//32), ::max(1, rgb.shape[1]//32)].tobytes()
+    _cache_key = f"{rgb.shape}_{len(_sample)}_{hash(_sample)}_{n_colors}_{seed}"
+    if _cache_key in _kmeans_cache:
+        print(f"[IMAGE_PROCESSOR] K-Means cache hit: {_cache_key}")
+        return _kmeans_cache[_cache_key].copy()
 
     # 方案 3：预缩放优化
     # 如果像素数超过 50 万，先缩小做 K-Means，再映射回原图
@@ -100,4 +111,9 @@ def quantize_colors(rgb: np.ndarray, n_colors: int, seed: int = 42) -> np.ndarra
     print(f"[IMAGE_PROCESSOR] ⏱️ Post-quantization cleanup: {time.time() - t0:.2f}s")
 
     print(f"[IMAGE_PROCESSOR] Quantization complete!")
+    # 写入缓存（LRU 简化：超限时清空最旧条目）
+    if len(_kmeans_cache) >= _KMEANS_CACHE_MAX:
+        oldest = next(iter(_kmeans_cache))
+        del _kmeans_cache[oldest]
+    _kmeans_cache[_cache_key] = quantized_image.copy()
     return quantized_image

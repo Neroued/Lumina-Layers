@@ -11,11 +11,19 @@ background tasks lifecycle.
 """
 
 import asyncio
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+
+from api.logger import setup_file_logging
+
+# Install file logging as early as possible so all startup prints are captured.
+_log_path = setup_file_logging()
+if _log_path is not None:
+    os.environ["LUMINA_LOG_PATH"] = str(_log_path.resolve())
 
 from api.dependencies import (
     file_registry,
@@ -116,6 +124,17 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="File not found or expired")
         path, filename = result
         return file_to_response(path, filename)
+
+    @app.post("/api/client-log")
+    async def client_log(payload: dict):
+        """Receive frontend timing events and write to server log."""
+        label = payload.get("label", "?")
+        elapsed = payload.get("elapsed_ms", None)
+        msg = f"[CLIENT] {label}"
+        if elapsed is not None:
+            msg += f" (+{elapsed:.0f}ms)"
+        print(msg)
+        return {"ok": True}
 
     return app
 

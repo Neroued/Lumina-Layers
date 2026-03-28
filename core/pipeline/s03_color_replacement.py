@@ -10,6 +10,7 @@ S03 — 颜色替换（全局替换 + 区域替换 + matched_rgb 覆盖）。
 - matched_rgb_path 覆盖逻辑
 """
 
+import time
 from collections import deque
 import numpy as np
 
@@ -163,6 +164,8 @@ def run(ctx: dict) -> dict:
         - matched_rgb (np.ndarray): 更新后的 RGB（如有替换）
         - material_matrix (np.ndarray): 更新后的材料矩阵（如有替换）
     """
+    _t0 = time.perf_counter()
+
     matched_rgb = ctx['matched_rgb']
     material_matrix = ctx['material_matrix']
     mask_solid = ctx['mask_solid']
@@ -249,5 +252,9 @@ def run(ctx: dict) -> dict:
     ctx['matched_rgb'] = matched_rgb
     ctx['material_matrix'] = material_matrix
 
-    print(f"[S03] Color replacement step complete")
+    _elapsed = time.perf_counter() - _t0
+    _hifi_timings = ctx.get('_hifi_timings', {})
+    _hifi_timings['color_replace_s'] = _elapsed
+    ctx['_hifi_timings'] = _hifi_timings
+    print(f"[S03] color_replace done: {_elapsed:.3f}s")
     return ctx

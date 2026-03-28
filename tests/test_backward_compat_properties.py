@@ -51,7 +51,7 @@ _PUBLIC_IMPORT_NAMES = [
     "generate_empty_bed_glb",
     "_create_preview_mesh",
     "_merge_low_frequency_colors",
-    "_build_color_voxel_mesh",
+    "_build_color_contour_mesh",
     # s06_voxel_building
     "_build_voxel_matrix",
     "_build_voxel_matrix_faceup",

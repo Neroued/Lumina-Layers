@@ -19,6 +19,13 @@ from config import PrinterConfig
 from core.mesh_generators import get_mesher
 
 
+def _timed_generate_mesh(mesher, full_matrix, mat_id, target_h):
+    """Wrapper that returns (mesh, elapsed_s) measured inside the worker thread."""
+    _t = time.perf_counter()
+    result = mesher.generate_mesh(full_matrix, mat_id, target_h)
+    return result, time.perf_counter() - _t
+
+
 def run(ctx: dict) -> dict:
     """Generate multi-material 3D meshes with optional parallel execution.
     生成多材质 3D 网格，支持可选的并行执行。
@@ -67,22 +74,23 @@ def run(ctx: dict) -> dict:
     parallel_enabled = max_workers > 1 and os.getenv("LUMINA_DISABLE_PARALLEL_MESH", "0") != "1"
     mesh_results = {}
     mesh_errors = {}
+    mat_timings = {}
     if parallel_enabled:
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             future_map = {
-                pool.submit(mesher.generate_mesh, full_matrix, mat_id, target_h): mat_id
+                pool.submit(_timed_generate_mesh, mesher, full_matrix, mat_id, target_h): mat_id
                 for mat_id in range(num_materials)
             }
             for future in as_completed(future_map):
                 mat_id = future_map[future]
                 try:
-                    mesh_results[mat_id] = future.result()
+                    mesh_results[mat_id], mat_timings[mat_id] = future.result()
                 except Exception as e:
                     mesh_errors[mat_id] = e
     else:
         for mat_id in range(num_materials):
             try:
-                mesh_results[mat_id] = mesher.generate_mesh(full_matrix, mat_id, target_h)
+                mesh_results[mat_id], mat_timings[mat_id] = _timed_generate_mesh(mesher, full_matrix, mat_id, target_h)
             except Exception as e:
                 mesh_errors[mat_id] = e
 
@@ -104,12 +112,14 @@ def run(ctx: dict) -> dict:
                 geom_name=name
             )
             valid_slot_names.append(name)
-            print(f"[S07] Added mesh for {name}")
+            _mt = mat_timings.get(mat_id, 0.0)
+            print(f"[S07]   {name}: {len(mesh.vertices):,}v {len(mesh.faces):,}f  {_mt:.3f}s")
 
     if _bench_enabled and _mesh_t0 is not None:
-        _hifi_timings = ctx.get('_hifi_timings', {})
-        _hifi_timings['mesh_gen_s'] = time.perf_counter() - _mesh_t0
-        ctx['_hifi_timings'] = _hifi_timings
+        _mesh_elapsed = time.perf_counter() - _mesh_t0
+        _hifi_timings = ctx.setdefault('_hifi_timings', {})
+        _hifi_timings['mesh_gen_s'] = _mesh_elapsed
+        print(f"[S07] mesh_gen done: {_mesh_elapsed:.3f}s")
 
     ctx['scene'] = scene
     ctx['valid_slot_names'] = valid_slot_names

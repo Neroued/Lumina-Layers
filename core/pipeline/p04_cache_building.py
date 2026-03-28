@@ -8,6 +8,7 @@ P04 — 预览缓存构建。
 - 统一缓存契约：保证 quantized_image 始终可用
 """
 
+import time
 import numpy as np
 
 from config import BedManager
@@ -42,6 +43,7 @@ def run(ctx: dict) -> dict:
         KeyError: 缺少必需的输入键时抛出
     """
     # ---- 读取必需输入 ----
+    _t0 = time.perf_counter()
     matched_rgb = ctx['matched_rgb']
     material_matrix = ctx['material_matrix']
     mask_solid = ctx['mask_solid']
@@ -91,4 +93,7 @@ def run(ctx: dict) -> dict:
     # ---- 写入输出 ----
     ctx['preview_rgba'] = preview_rgba
     ctx['cache'] = cache
+    _elapsed = time.perf_counter() - _t0
+    ctx.setdefault('_preview_timings', {})['p04_s'] = _elapsed
+    print(f"[P04] cache_building done: {_elapsed:.3f}s")
     return ctx
