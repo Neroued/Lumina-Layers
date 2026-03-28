@@ -13,6 +13,7 @@ P01 — 预览输入验证与参数规范化。
 import time
 
 from config import ModelingMode, ColorSystem
+from utils.lut_manager import LUTManager
 
 
 def run(ctx: dict) -> dict:
@@ -81,24 +82,19 @@ def run(ctx: dict) -> dict:
     
     if color_mode == "Merged" and actual_lut_path.endswith('.json'):
         try:
-            import json
-            with open(actual_lut_path, 'r', encoding='utf-8') as f:
-                lut_data = json.load(f)
-            if 'palette' in lut_data:
-                # Sort palette keys alphabetically to match recipe material IDs
-                slot_names = sorted(lut_data['palette'].keys())
+            _, _, lut_metadata = LUTManager.load_lut_with_metadata(actual_lut_path)
+            if lut_metadata.palette:
+                slot_names = [e.color for e in lut_metadata.palette]
                 print(f"[P01] Merged LUT: Using palette order: {slot_names}")
-                
-                # Build preview_colors dict with material names as keys
+
                 preview_colors = {}
-                for name in slot_names:
-                    hex_color = lut_data['palette'][name].get('hex_color', '#FFFFFF')
-                    # Convert hex to RGBA
+                for idx, entry in enumerate(lut_metadata.palette):
+                    hex_color = entry.hex_color or '#FFFFFF'
                     r = int(hex_color[1:3], 16)
                     g = int(hex_color[3:5], 16)
                     b = int(hex_color[5:7], 16)
-                    preview_colors[name] = [r, g, b, 255]
-                    print(f"[P01] Material '{name}' -> RGB{[r,g,b]} ({hex_color})")
+                    preview_colors[idx] = [r, g, b, 255]
+                    print(f"[P01] Material '{entry.color}' -> RGB{[r,g,b]} ({hex_color})")
             else:
                 print(f"[P01] Warning: Merged LUT has no palette, using default color_conf")
         except Exception as e:

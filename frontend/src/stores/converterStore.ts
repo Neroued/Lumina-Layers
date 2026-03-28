@@ -39,6 +39,26 @@ import {
   colorRemapToReplacementRegions,
 } from "../utils/colorUtils";
 import { useSettingsStore } from "./settingsStore";
+import { uploadImagePreview } from "../api/system";
+
+export const RAW_EXTENSIONS_CONVERTER = new Set([
+  ".dng",
+  ".cr2",
+  ".cr3",
+  ".nef",
+  ".arw",
+  ".orf",
+  ".rw2",
+  ".raf",
+  ".pef",
+  ".srw",
+  ".raw",
+]);
+
+function isRawFileConverter(file: File): boolean {
+  const ext = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
+  return RAW_EXTENSIONS_CONVERTER.has(ext);
+}
 
 // ========== Selection Mode Types ==========
 
@@ -81,12 +101,31 @@ const VALID_IMAGE_TYPES = new Set([
   "image/webp",
   "image/heic",
   "image/heif",
+  "image/x-adobe-dng",
+  "image/x-canon-cr2",
+  "image/x-canon-cr3",
+  "image/x-nikon-nef",
+  "image/x-sony-arw",
+  "image/x-olympus-orf",
+  "image/x-panasonic-rw2",
+  "image/x-fuji-raf",
+  "image/x-pentax-pef",
+  "image/x-samsung-srw",
+  "image/x-raw",
 ]);
 
-export const ACCEPT_IMAGE_FORMATS = Array.from(VALID_IMAGE_TYPES).join(",");
+export const ACCEPT_IMAGE_FORMATS =
+  Array.from(VALID_IMAGE_TYPES).join(",") +
+  "," +
+  Array.from(RAW_EXTENSIONS_CONVERTER).join(",");
 
-export function isValidImageType(mimeType: string): boolean {
-  return VALID_IMAGE_TYPES.has(mimeType);
+export function isValidImageType(mimeType: string, fileName?: string): boolean {
+  if (VALID_IMAGE_TYPES.has(mimeType)) return true;
+  if (fileName) {
+    const ext = fileName.toLowerCase().slice(fileName.lastIndexOf("."));
+    if (RAW_EXTENSIONS_CONVERTER.has(ext)) return true;
+  }
+  return false;
 }
 
 // ========== State Interface ==========
@@ -123,10 +162,10 @@ export interface ConverterState {
   loop_width: number;
   loop_length: number;
   loop_hole: number;
-  loop_angle: number;              // -180 到 180 度，默认 0
-  loop_offset_x: number;           // -20 到 20 mm，默认 0
-  loop_offset_y: number;           // -20 到 20 mm，默认 0
-  loop_position_preset: string;    // 默认 "top-center"
+  loop_angle: number; // -180 到 180 度，默认 0
+  loop_offset_x: number; // -20 到 20 mm，默认 0
+  loop_offset_y: number; // -20 到 20 mm，默认 0
+  loop_position_preset: string; // 默认 "top-center"
 
   // 浮雕
   enable_relief: boolean;
@@ -531,14 +570,38 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
 
     // --- 图片 ---
     setImageFile: (file: File | null) => {
-      // Revoke previous object URL to avoid memory leaks
+      // Revoke previous blob URL to avoid memory leaks
       const prev = _get().imagePreviewUrl;
-      if (prev) {
+      if (prev && prev.startsWith("blob:")) {
         URL.revokeObjectURL(prev);
       }
 
       if (!file) {
         set({ imageFile: null, imagePreviewUrl: null, aspectRatio: null });
+        return;
+      }
+
+      if (isRawFileConverter(file)) {
+        const shouldOpenCrop = _get().enableCrop;
+        set({
+          imageFile: file,
+          imagePreviewUrl: null,
+          aspectRatio: null,
+          cropModalOpen: shouldOpenCrop,
+          hasManualPreview: false,
+          layerImages: [],
+          layerImagesOpen: false,
+        });
+        uploadImagePreview(file)
+          .then(({ preview_url, width, height }) => {
+            set({
+              imagePreviewUrl: preview_url,
+              aspectRatio: width / height,
+            });
+          })
+          .catch(() => {
+            /* non-fatal */
+          });
         return;
       }
 
@@ -561,7 +624,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         layerImages: [],
         layerImagesOpen: false,
       });
-      console.log('[DEBUG] setImageFile: cleared layerImages');
+      console.log("[DEBUG] setImageFile: cleared layerImages");
     },
 
     // --- 基础参数 ---
@@ -782,11 +845,23 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
 
     // --- 大画幅 ---
     setLargeFormatEnabled: (enabled: boolean) =>
-      set({ largeFormatEnabled: enabled, threemfDiskPath: null, downloadUrl: null }),
+      set({
+        largeFormatEnabled: enabled,
+        threemfDiskPath: null,
+        downloadUrl: null,
+      }),
     setTileWidthMm: (width: number) =>
-      set({ tileWidthMm: clampValue(width, 50, 500), threemfDiskPath: null, downloadUrl: null }),
+      set({
+        tileWidthMm: clampValue(width, 50, 500),
+        threemfDiskPath: null,
+        downloadUrl: null,
+      }),
     setTileHeightMm: (height: number) =>
-      set({ tileHeightMm: clampValue(height, 50, 500), threemfDiskPath: null, downloadUrl: null }),
+      set({
+        tileHeightMm: clampValue(height, 50, 500),
+        threemfDiskPath: null,
+        downloadUrl: null,
+      }),
 
     // --- 热床尺寸 ---
     setBedLabel: (label: string) => {
@@ -942,13 +1017,17 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           clickY: y,
         };
         const existing = state.selectedRegions;
-        const idx = existing.findIndex((r) => r.regionId === newRegion.regionId);
+        const idx = existing.findIndex(
+          (r) => r.regionId === newRegion.regionId,
+        );
         if (idx >= 0) {
           const next = existing.filter((_, i) => i !== idx);
           const lastRegion = next.length > 0 ? next[next.length - 1] : null;
           set({
             selectedRegions: next,
-            selectedColor: lastRegion ? lastRegion.colorHex.replace(/^#/, "") : null,
+            selectedColor: lastRegion
+              ? lastRegion.colorHex.replace(/^#/, "")
+              : null,
           });
         } else {
           set({
@@ -966,11 +1045,15 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
     // --- 移除已选区域 ---
     removeRegionFromSelection: (regionId: string) => {
       set((state) => {
-        const next = state.selectedRegions.filter((r) => r.regionId !== regionId);
+        const next = state.selectedRegions.filter(
+          (r) => r.regionId !== regionId,
+        );
         const lastRegion = next.length > 0 ? next[next.length - 1] : null;
         return {
           selectedRegions: next,
-          selectedColor: lastRegion ? lastRegion.colorHex.replace(/^#/, "") : null,
+          selectedColor: lastRegion
+            ? lastRegion.colorHex.replace(/^#/, "")
+            : null,
         };
       });
     },
@@ -1045,7 +1128,8 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           if (!sid) break;
           set({
             replacePreviewLoading: true,
-            regionReplacementCount: curState.regionReplacementCount + regions.length,
+            regionReplacementCount:
+              curState.regionReplacementCount + regions.length,
             threemfDiskPath: null,
             downloadUrl: null,
           });
@@ -1054,7 +1138,10 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
               if (region.clickX != null && region.clickY != null) {
                 await apiDetectRegion(sid, region.clickX, region.clickY);
               }
-              const response = await apiRegionReplace(sid, `#${pending.targetHex}`);
+              const response = await apiRegionReplace(
+                sid,
+                `#${pending.targetHex}`,
+              );
               const updates: Partial<ConverterState> = {
                 previewImageUrl: `${response.preview_url}`,
               };
@@ -1244,7 +1331,9 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         const beds = response.beds;
 
         const settingsPrinterModel = useSettingsStore.getState().printerModel;
-        const printerBed = beds.find((bed) => bed.printer_id === settingsPrinterModel);
+        const printerBed = beds.find(
+          (bed) => bed.printer_id === settingsPrinterModel,
+        );
 
         set({
           bedSizes: beds,
@@ -1264,9 +1353,9 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       set({ lutListLoading: true, error: null });
       try {
         const res = await apiUploadLut(file);
-        // 上传成功后刷新列表并选中新 LUT
+        // 上传成功后刷新列表并通过 setLutName 选中新 LUT（同步 color_mode）
         await _get().fetchLutList();
-        set({ lut_name: res.name });
+        _get().setLutName(res.name);
       } catch (err) {
         set({
           error: err instanceof Error ? err.message : "LUT 上传失败",
@@ -1356,8 +1445,14 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       _previewAbortController = new AbortController();
       const { signal } = _previewAbortController;
 
-      set({ isLoading: true, error: null, hasManualPreview: false, layerImages: [], layerImagesOpen: false });
-      console.log('[DEBUG] submitPreview: cleared layerImages');
+      set({
+        isLoading: true,
+        error: null,
+        hasManualPreview: false,
+        layerImages: [],
+        layerImagesOpen: false,
+      });
+      console.log("[DEBUG] submitPreview: cleared layerImages");
       try {
         const response = await apiConvertPreview(
           state.imageFile,
@@ -1404,7 +1499,9 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           layerImages: [],
           layerImagesOpen: false,
         });
-        console.log('[DEBUG] submitPreview success: cleared layerImages for new sessionId');
+        console.log(
+          "[DEBUG] submitPreview success: cleared layerImages for new sessionId",
+        );
       } catch (err) {
         // Ignore aborted requests (user started a new preview)
         if (err instanceof Error && err.name === "CanceledError") {
@@ -1648,7 +1745,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
 
     // --- 批量模式 ---
     addBatchFiles: (files: File[]) => {
-      const valid = files.filter((f) => isValidImageType(f.type));
+      const valid = files.filter((f) => isValidImageType(f.type, f.name));
       if (valid.length === 0) return;
       set((state) => ({ batchFiles: [...state.batchFiles, ...valid] }));
     },
@@ -1660,20 +1757,41 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       if (remaining.length === 1) {
         // Auto-downgrade: move last file to imageFile, exit BatchMode
         const lastFile = remaining[0];
-        const previewUrl = URL.createObjectURL(lastFile);
-        const img = new Image();
-        img.onload = () => {
-          set({ aspectRatio: img.naturalWidth / img.naturalHeight });
-        };
-        img.src = previewUrl;
+        if (isRawFileConverter(lastFile)) {
+          set({
+            batchFiles: [],
+            imageFile: lastFile,
+            imagePreviewUrl: null,
+            aspectRatio: null,
+            batchMode: false,
+            hasManualPreview: false,
+          });
+          uploadImagePreview(lastFile)
+            .then(({ preview_url, width, height }) => {
+              set({
+                imagePreviewUrl: preview_url,
+                aspectRatio: width / height,
+              });
+            })
+            .catch(() => {
+              /* non-fatal */
+            });
+        } else {
+          const previewUrl = URL.createObjectURL(lastFile);
+          const img = new Image();
+          img.onload = () => {
+            set({ aspectRatio: img.naturalWidth / img.naturalHeight });
+          };
+          img.src = previewUrl;
 
-        set({
-          batchFiles: [],
-          imageFile: lastFile,
-          imagePreviewUrl: previewUrl,
-          batchMode: false,
-          hasManualPreview: false,
-        });
+          set({
+            batchFiles: [],
+            imageFile: lastFile,
+            imagePreviewUrl: previewUrl,
+            batchMode: false,
+            hasManualPreview: false,
+          });
+        }
       } else if (remaining.length === 0) {
         // All files removed: clear all image state
         const prev = state.imagePreviewUrl;
@@ -1700,7 +1818,9 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
 
     handleFilesSelect: (files: File[]) => {
       // Filter out falsy values and invalid formats
-      const validFiles = files.filter((f) => f && isValidImageType(f.type));
+      const validFiles = files.filter(
+        (f) => f && isValidImageType(f.type, f.name),
+      );
       if (validFiles.length === 0) return;
 
       const state = _get();
@@ -1716,15 +1836,46 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       }
 
       if (validFiles.length === 1) {
-        const isSvg = validFiles[0].name.toLowerCase().endsWith(".svg")
-          || validFiles[0].type === "image/svg+xml";
+        const singleFile = validFiles[0];
+        const isSvg =
+          singleFile.name.toLowerCase().endsWith(".svg") ||
+          singleFile.type === "image/svg+xml";
         const autoModelingMode = isSvg ? ModelingModeEnum.VECTOR : undefined;
+
+        if (isRawFileConverter(singleFile)) {
+          const prev = state.imagePreviewUrl;
+          if (prev && prev.startsWith("blob:")) URL.revokeObjectURL(prev);
+          set({
+            imageFile: singleFile,
+            imagePreviewUrl: null,
+            aspectRatio: null,
+            previewImageUrl: null,
+            sessionId: null,
+            previewGlbUrl: null,
+            batchMode: false,
+            hasManualPreview: false,
+            cropModalOpen: state.enableCrop,
+            layerImages: [],
+            layerImagesOpen: false,
+          });
+          uploadImagePreview(singleFile)
+            .then(({ preview_url, width, height }) => {
+              set({
+                imagePreviewUrl: preview_url,
+                aspectRatio: width / height,
+              });
+            })
+            .catch(() => {
+              /* non-fatal */
+            });
+          return;
+        }
 
         if (state.imageFile) {
           const prev = state.imagePreviewUrl;
-          if (prev) URL.revokeObjectURL(prev);
+          if (prev && prev.startsWith("blob:")) URL.revokeObjectURL(prev);
 
-          const previewUrl = URL.createObjectURL(validFiles[0]);
+          const previewUrl = URL.createObjectURL(singleFile);
           const img = new Image();
           img.onload = () => {
             set({ aspectRatio: img.naturalWidth / img.naturalHeight });
@@ -1732,7 +1883,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           img.src = previewUrl;
 
           set({
-            imageFile: validFiles[0],
+            imageFile: singleFile,
             imagePreviewUrl: previewUrl,
             previewImageUrl: null,
             sessionId: null,
@@ -1745,7 +1896,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
             ...(autoModelingMode ? { modeling_mode: autoModelingMode } : {}),
           });
         } else {
-          const previewUrl = URL.createObjectURL(validFiles[0]);
+          const previewUrl = URL.createObjectURL(singleFile);
           const img = new Image();
           img.onload = () => {
             set({ aspectRatio: img.naturalWidth / img.naturalHeight });
@@ -1753,7 +1904,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           img.src = previewUrl;
 
           set({
-            imageFile: validFiles[0],
+            imageFile: singleFile,
             imagePreviewUrl: previewUrl,
             batchMode: false,
             hasManualPreview: false,
@@ -1789,7 +1940,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         layerImages: [],
         layerImagesOpen: false,
       });
-      console.log('[DEBUG] handleFilesSelect (batch): cleared layerImages');
+      console.log("[DEBUG] handleFilesSelect (batch): cleared layerImages");
     },
 
     submitBatch: async () => {

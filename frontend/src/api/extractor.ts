@@ -17,6 +17,7 @@ export async function extractColors(
     zoom: number;
     distortion: number;
     vignette_correction: boolean;
+    auto_wb: boolean;
   }
 ): Promise<ExtractResponse> {
   const fd = new FormData();
@@ -29,6 +30,7 @@ export async function extractColors(
   fd.append("zoom", String(params.zoom));
   fd.append("distortion", String(params.distortion));
   fd.append("vignette_correction", String(params.vignette_correction));
+  fd.append("auto_wb", String(params.auto_wb));
 
   const response = await apiClient.post<ExtractResponse>(
     "/extractor/extract",
@@ -68,6 +70,36 @@ export async function mergeFiveColorExtended(): Promise<ExtractResponse> {
     {},
     { timeout: 600_000 }
   );
+  return response.data;
+}
+
+/** 自动白平衡预览（后端处理） */
+export async function previewAutoWb(
+  image: File | Blob,
+  filename: string = "image.png",
+): Promise<{ preview_url: string; width: number; height: number }> {
+  const fd = new FormData();
+  fd.append("image", image, filename);
+  const response = await apiClient.post<{
+    preview_url: string;
+    width: number;
+    height: number;
+  }>("/extractor/preview-wb", fd, { timeout: 60_000 });
+  return response.data;
+}
+
+/** 旋转图片 90°（后端处理） */
+export async function rotateExtractorImage(
+  image: File | Blob,
+  filename: string = "image.png",
+): Promise<{ preview_url: string; width: number; height: number }> {
+  const fd = new FormData();
+  fd.append("image", image, filename);
+  const response = await apiClient.post<{
+    preview_url: string;
+    width: number;
+    height: number;
+  }>("/extractor/rotate", fd, { timeout: 60_000 });
   return response.data;
 }
 

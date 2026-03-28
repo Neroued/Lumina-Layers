@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "*",
+      "Bash(pip show:*)",
+      "Bash",
+      "Read",
+      "Write",
+      "Glob",
+      "Grep",
+      "WebFetch(domain:github.com)"
+    ]
+  }
+}

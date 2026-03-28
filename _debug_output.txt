@@ -1,0 +1,13 @@
+STDOUT:
+[LOG] logs\lumina_20260327_172743.log
+[POOL] Started with 4 workers
+[POOL] Shutdown complete
+
+
+STDERR:
+INFO:     Started server process [90448]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+ERROR:    [Errno 10048] error while attempting to bind on address ('0.0.0.0', 8000): [winerror 10048] ͨ��ÿ���׽��ֵ�ַ(Э��/�����ַ/�˿�)ֻ����ʹ��һ�Ρ�
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
