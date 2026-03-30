@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useSlicerStore } from "../slicerStore";
 import type { SlicerInfo } from "../../api/types";
+import { DEFAULT_SETTINGS, useSettingsStore } from "../settingsStore";
 
 /**
  * Slicer_Store 单元测试
@@ -23,6 +24,7 @@ const mockLaunch = vi.mocked(apiLaunchSlicer);
 const MOCK_SLICERS: SlicerInfo[] = [
   { id: "bambu_studio", display_name: "Bambu Studio", exe_path: "C:\\bambu.exe" },
   { id: "orca_slicer", display_name: "OrcaSlicer", exe_path: "C:\\orca.exe" },
+  { id: "anycubic_slicer_next", display_name: "Anycubic Slicer Next", exe_path: "C:\\anycubic.exe" },
 ];
 
 function resetStore(): void {
@@ -40,6 +42,7 @@ describe("detectSlicers", () => {
   beforeEach(() => {
     resetStore();
     vi.clearAllMocks();
+    useSettingsStore.setState({ ...DEFAULT_SETTINGS });
   });
 
   it("成功时更新 slicers 列表并自动选中第一个", async () => {
@@ -81,6 +84,19 @@ describe("detectSlicers", () => {
     const state = useSlicerStore.getState();
     expect(state.slicers).toEqual([]);
     expect(state.selectedSlicerId).toBeNull();
+  });
+
+  it("当前导出软件为 Anycubic 时优先选中 Anycubic Slicer Next", async () => {
+    useSettingsStore.setState({
+      ...DEFAULT_SETTINGS,
+      slicerSoftware: "AnycubicSlicerNext",
+      lastSlicerId: "bambu_studio",
+    });
+    mockDetect.mockResolvedValue({ slicers: MOCK_SLICERS });
+
+    await useSlicerStore.getState().detectSlicers();
+
+    expect(useSlicerStore.getState().selectedSlicerId).toBe("anycubic_slicer_next");
   });
 });
 

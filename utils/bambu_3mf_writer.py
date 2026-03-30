@@ -23,19 +23,24 @@ import numpy as np
 _trimesh = None
 _n3mf = None
 
+
 def _get_trimesh():
     global _trimesh
     if _trimesh is None:
         import trimesh as _tm
+
         _trimesh = _tm
     return _trimesh
+
 
 def _get_n3mf():
     global _n3mf
     if _n3mf is None:
         import neroued_3mf as _n
+
         _n3mf = _n
     return _n3mf
+
 
 _CONFIG_TEMPLATE_CACHE = None
 _PRINTER_TEMPLATE_CACHE: dict[str, dict] = {}
@@ -144,12 +149,14 @@ class BambuStudio3MFWriter:
             printer_id (str): Printer identifier for template selection, default 'bambu-h2d'. (打印机标识)
             slicer (str): Slicer software identifier, default 'BambuStudio'. (切片器标识)
         """
+        from config import normalize_slicer_software_id
+
         self.output_path = output_path
         self.settings = {**self.DEFAULT_SETTINGS, **(settings or {})}
         self.objects: list[tuple[_get_trimesh().Trimesh, str, tuple]] = []
         self.color_mode = color_mode
         self.printer_id = printer_id
-        self.slicer = slicer
+        self.slicer = normalize_slicer_software_id(slicer)
 
     def add_mesh(self, mesh: _get_trimesh().Trimesh, name: str, color_rgb: tuple):
         """Add a mesh object to the scene.
@@ -198,8 +205,7 @@ class BambuStudio3MFWriter:
         builder.add_external_model_metadata("BambuStudio:3mfVersion", "1")
 
         materials = [
-            _get_n3mf().BaseMaterial(name, _get_n3mf().Color(rgb[0], rgb[1], rgb[2]))
-            for _, name, rgb in self.objects
+            _get_n3mf().BaseMaterial(name, _get_n3mf().Color(rgb[0], rgb[1], rgb[2])) for _, name, rgb in self.objects
         ]
         mat_group_id = builder.add_base_material_group(materials)
 
@@ -238,8 +244,30 @@ class BambuStudio3MFWriter:
             "SnapmakerOrca": "BambuStudio-2.2.4",
             "ElegooSlicer": "ElegooSlicer-1.3.2.9",
             "OrcaSlicer": "BambuStudio-2.3.2-rc2",
+            "AnycubicSlicerNext": "BambuStudio-1.3.9.4",
         }
         return _VERSION_MAP.get(self.slicer, "BambuStudio-02.02.01.04")
+
+    def _is_anycubic_slicer(self) -> bool:
+        """Return whether the current export targets Anycubic Slicer Next.
+        返回当前导出是否面向 Anycubic Slicer Next。
+        """
+        return self.slicer == "AnycubicSlicerNext"
+
+    @staticmethod
+    def _format_number(value: float) -> str:
+        """Format a float for stable metadata output.
+        将浮点数格式化为稳定的元数据输出字符串。
+        """
+        return format(float(value), ".15g")
+
+    def _get_identify_id(self) -> str:
+        """Return a slicer-specific plate identify_id value.
+        返回切片器专属的 plate identify_id 值。
+        """
+        if self._is_anycubic_slicer():
+            return "160"
+        return "1"
 
     # ------------------------------------------------------------------
     # Bambu vendor metadata injection (CustomPart)
@@ -255,22 +283,27 @@ class BambuStudio3MFWriter:
         通过 CustomPart 向 3MF 中注入所有 Bambu 厂商元数据。
         """
         parts = [
-            ("Metadata/model_settings.config", "text/xml",
-             self._build_model_settings_bytes(object_ids, assembly_id)),
-            ("Metadata/project_settings.config", "text/xml",
-             self._build_project_settings_bytes()),
-            ("Metadata/slice_info.config", "text/xml",
-             self._build_slice_info_bytes()),
-            ("Metadata/filament_sequence.json", "application/json",
-             self._build_filament_sequence_bytes()),
-            ("Metadata/cut_information.xml", "text/xml",
-             self._build_cut_information_bytes()),
+            ("Metadata/model_settings.config", "text/xml", self._build_model_settings_bytes(object_ids, assembly_id)),
+            ("Metadata/project_settings.config", "text/xml", self._build_project_settings_bytes()),
+            ("Metadata/slice_info.config", "text/xml", self._build_slice_info_bytes()),
         ]
+        if self._is_anycubic_slicer():
+            parts.append(
+                ("Metadata/custom_gcode_per_layer.xml", "text/xml", self._build_custom_gcode_per_layer_bytes())
+            )
+        else:
+            parts.extend(
+                [
+                    ("Metadata/filament_sequence.json", "application/json", self._build_filament_sequence_bytes()),
+                    ("Metadata/cut_information.xml", "text/xml", self._build_cut_information_bytes()),
+                ]
+            )
         for path, content_type, data in parts:
             builder.add_custom_part(_get_n3mf().CustomPart(path, content_type, data))
 
         builder.add_custom_content_type(_get_n3mf().CustomContentType("config", "text/xml"))
         builder.add_custom_content_type(_get_n3mf().CustomContentType("json", "application/json"))
+        builder.add_custom_content_type(_get_n3mf().CustomContentType("xml", "text/xml"))
 
     # ------------------------------------------------------------------
     # Individual metadata builders (return bytes, no filesystem I/O)
@@ -283,22 +316,64 @@ class BambuStudio3MFWriter:
         config = ET.Element("config")
 
         obj_elem = ET.SubElement(config, "object", attrib={"id": str(assembly_id)})
+        ET.SubElement(obj_elem, "metadata", attrib={"key": "extruder", "value": "1"})
 
-        for idx, ((_, name, _), obj_id) in enumerate(zip(self.objects, object_ids)):
+        source_file = os.path.basename(self.output_path)
+
+        for idx, ((mesh, name, _), obj_id) in enumerate(zip(self.objects, object_ids)):
+            bounds = np.asarray(getattr(mesh, "bounds", np.zeros((2, 3))), dtype=np.float64)
+            if bounds.shape != (2, 3):
+                bounds = np.zeros((2, 3), dtype=np.float64)
+            center_x, center_y, center_z = bounds.mean(axis=0)
+            max_x, max_y, max_z = bounds[1]
+            matrix_value = (
+                "1 0 0 "
+                f"{self._format_number(max_x)} "
+                "0 1 0 "
+                f"{self._format_number(max_y)} "
+                "0 0 1 "
+                f"{self._format_number(max_z)} "
+                "0 0 0 1"
+            )
             part = ET.SubElement(obj_elem, "part", attrib={"id": str(obj_id), "subtype": "normal_part"})
             ET.SubElement(part, "metadata", attrib={"key": "name", "value": name})
+            ET.SubElement(part, "metadata", attrib={"key": "matrix", "value": matrix_value})
+            ET.SubElement(part, "metadata", attrib={"key": "source_file", "value": source_file})
+            ET.SubElement(part, "metadata", attrib={"key": "source_object_id", "value": "0"})
+            ET.SubElement(part, "metadata", attrib={"key": "source_volume_id", "value": str(idx)})
+            ET.SubElement(part, "metadata", attrib={"key": "source_offset_x", "value": self._format_number(center_x)})
+            ET.SubElement(part, "metadata", attrib={"key": "source_offset_y", "value": self._format_number(center_y)})
+            ET.SubElement(part, "metadata", attrib={"key": "source_offset_z", "value": self._format_number(center_z)})
             ET.SubElement(part, "metadata", attrib={"key": "extruder", "value": str(idx + 1)})
+            ET.SubElement(
+                part,
+                "mesh_stat",
+                attrib={
+                    "edges_fixed": "0",
+                    "degenerate_facets": "0",
+                    "facets_removed": "0",
+                    "facets_reversed": "0",
+                    "backwards_edges": "0",
+                },
+            )
 
         plate = ET.SubElement(config, "plate")
         ET.SubElement(plate, "metadata", attrib={"key": "plater_id", "value": "1"})
         ET.SubElement(plate, "metadata", attrib={"key": "plater_name", "value": ""})
         ET.SubElement(plate, "metadata", attrib={"key": "locked", "value": "false"})
-        ET.SubElement(plate, "metadata", attrib={"key": "filament_map_mode", "value": "Auto For Flush"})
+        if not self._is_anycubic_slicer():
+            ET.SubElement(plate, "metadata", attrib={"key": "filament_map_mode", "value": "Auto For Flush"})
+        ET.SubElement(plate, "metadata", attrib={"key": "thumbnail_file", "value": "Metadata/plate_1.png"})
+        ET.SubElement(
+            plate, "metadata", attrib={"key": "thumbnail_no_light_file", "value": "Metadata/plate_no_light_1.png"}
+        )
+        ET.SubElement(plate, "metadata", attrib={"key": "top_file", "value": "Metadata/top_1.png"})
+        ET.SubElement(plate, "metadata", attrib={"key": "pick_file", "value": "Metadata/pick_1.png"})
 
         model_instance = ET.SubElement(plate, "model_instance")
         ET.SubElement(model_instance, "metadata", attrib={"key": "object_id", "value": str(assembly_id)})
         ET.SubElement(model_instance, "metadata", attrib={"key": "instance_id", "value": "0"})
-        ET.SubElement(model_instance, "metadata", attrib={"key": "identify_id", "value": "1"})
+        ET.SubElement(model_instance, "metadata", attrib={"key": "identify_id", "value": self._get_identify_id()})
 
         tree = ET.ElementTree(config)
         ET.indent(tree, space="  ")
@@ -312,40 +387,37 @@ class BambuStudio3MFWriter:
         """Build project_settings.config JSON as bytes.
         构建 project_settings.config JSON（字节形式）。
         """
-        from config import ColorSystem
-
-        color_conf = ColorSystem.get(self.color_mode)
         num_colors = len(self.objects)
 
         settings = self._get_base_config_template()
 
-        filament_arrays = self._build_filament_arrays(num_colors, color_conf)
-
-        _RESIZABLE_ARRAY_KEYS = frozenset([
-            "nozzle_temperature",
-            "nozzle_temperature_initial_layer",
-            "nozzle_temperature_range_low",
-            "nozzle_temperature_range_high",
-            "bed_temperature",
-            "bed_temperature_initial_layer",
-            "activate_air_filtration",
-            "additional_cooling_fan_speed",
-            "chamber_temperatures",
-            "close_fan_the_first_x_layers",
-            "complete_print_exhaust_fan_speed",
-            "cool_plate_temp",
-            "cool_plate_temp_initial_layer",
-            "during_print_exhaust_fan_speed",
-            "eng_plate_temp",
-            "eng_plate_temp_initial_layer",
-            "fan_cooling_layer_time",
-            "fan_max_speed",
-            "fan_min_speed",
-            "hot_plate_temp",
-            "hot_plate_temp_initial_layer",
-            "textured_plate_temp",
-            "textured_plate_temp_initial_layer",
-        ])
+        _RESIZABLE_ARRAY_KEYS = frozenset(
+            [
+                "nozzle_temperature",
+                "nozzle_temperature_initial_layer",
+                "nozzle_temperature_range_low",
+                "nozzle_temperature_range_high",
+                "bed_temperature",
+                "bed_temperature_initial_layer",
+                "activate_air_filtration",
+                "additional_cooling_fan_speed",
+                "chamber_temperatures",
+                "close_fan_the_first_x_layers",
+                "complete_print_exhaust_fan_speed",
+                "cool_plate_temp",
+                "cool_plate_temp_initial_layer",
+                "during_print_exhaust_fan_speed",
+                "eng_plate_temp",
+                "eng_plate_temp_initial_layer",
+                "fan_cooling_layer_time",
+                "fan_max_speed",
+                "fan_min_speed",
+                "hot_plate_temp",
+                "hot_plate_temp_initial_layer",
+                "textured_plate_temp",
+                "textured_plate_temp_initial_layer",
+            ]
+        )
 
         for key, value in settings.items():
             if isinstance(value, list) and len(value) > 0:
@@ -354,10 +426,10 @@ class BambuStudio3MFWriter:
                         template_value = value[0] if value else "0"
                         settings[key] = [template_value] * num_colors
 
-        settings.update(filament_arrays)
+        settings.update(self._build_filament_arrays(num_colors))
 
-        settings["single_extruder_multi_material"] = "1"
-        settings["enable_prime_tower"] = "1"
+        settings.setdefault("single_extruder_multi_material", "1")
+        settings.setdefault("enable_prime_tower", "1")
 
         if self.settings:
             for key in [
@@ -385,8 +457,14 @@ class BambuStudio3MFWriter:
         """
         config = ET.Element("config")
         header = ET.SubElement(config, "header")
-        ET.SubElement(header, "header_item", attrib={"key": "X-BBL-Client-Type", "value": "slicer"})
-        ET.SubElement(header, "header_item", attrib={"key": "X-BBL-Client-Version", "value": "Lumina-1.6.3"})
+        if self._is_anycubic_slicer():
+            ET.SubElement(header, "header_item", attrib={"key": "X-ACNext-Client-Type", "value": "slicer"})
+            ET.SubElement(
+                header, "header_item", attrib={"key": "X-ACNext-Client-Version", "value": "1.3.9.4 20260319225535"}
+            )
+        else:
+            ET.SubElement(header, "header_item", attrib={"key": "X-BBL-Client-Type", "value": "slicer"})
+            ET.SubElement(header, "header_item", attrib={"key": "X-BBL-Client-Version", "value": "Lumina-1.6.3"})
 
         tree = ET.ElementTree(config)
         ET.indent(tree, space="  ")
@@ -415,6 +493,24 @@ class BambuStudio3MFWriter:
 
         tree = ET.ElementTree(config)
         ET.indent(tree, space=" ")
+
+        buf = io.BytesIO()
+        buf.write(b'<?xml version="1.0" encoding="utf-8"?>\n')
+        tree.write(buf, encoding="utf-8", xml_declaration=False)
+        return buf.getvalue()
+
+    @staticmethod
+    def _build_custom_gcode_per_layer_bytes() -> bytes:
+        """Build Anycubic custom_gcode_per_layer.xml as bytes.
+        构建 Anycubic 的 custom_gcode_per_layer.xml（字节形式）。
+        """
+        config = ET.Element("custom_gcodes_per_layer")
+        plate = ET.SubElement(config, "plate")
+        ET.SubElement(plate, "plate_info", attrib={"id": "1"})
+        ET.SubElement(plate, "mode", attrib={"value": "MultiExtruder"})
+
+        tree = ET.ElementTree(config)
+        ET.indent(tree, space="  ")
 
         buf = io.BytesIO()
         buf.write(b'<?xml version="1.0" encoding="utf-8"?>\n')
@@ -469,13 +565,12 @@ class BambuStudio3MFWriter:
             "nozzle_temperature_initial_layer": ["220"] * 8,
         }
 
-    def _build_filament_arrays(self, num_colors: int, color_conf: dict) -> dict:
+    def _build_filament_arrays(self, num_colors: int) -> dict:
         """Build filament-related arrays with length matching num_colors.
         构建长度匹配 num_colors 的耗材相关数组。
 
         Args:
             num_colors: Number of colors in the mode (2, 4, 6, or 8)
-            color_conf: ColorSystem configuration dict
 
         Returns:
             dict: Filament arrays with correct lengths
@@ -486,35 +581,6 @@ class BambuStudio3MFWriter:
         for _, _, color_rgb in self.objects:
             hex_color = f"#{color_rgb[0]:02X}{color_rgb[1]:02X}{color_rgb[2]:02X}"
             arrays["filament_colour"].append(hex_color)
-
-        template = load_printer_template(self.printer_id, slicer=self.slicer)
-        tmpl_fsi = template.get("filament_settings_id", "Bambu PLA Basic @BBL H2D")
-        if isinstance(tmpl_fsi, list):
-            default_fsi = tmpl_fsi[0] if tmpl_fsi else "Bambu PLA Basic @BBL H2D"
-        else:
-            default_fsi = tmpl_fsi
-        arrays["filament_settings_id"] = [default_fsi] * num_colors
-        arrays["filament_type"] = ["PLA"] * num_colors
-        arrays["filament_vendor"] = ["Bambu Lab"] * num_colors
-        arrays["filament_ids"] = ["GFA00"] * num_colors
-        arrays["filament_cost"] = ["24.99"] * num_colors
-        arrays["filament_density"] = ["1.26"] * num_colors
-        arrays["filament_diameter"] = ["1.75"] * num_colors
-        arrays["filament_colour_type"] = ["1"] * num_colors
-        arrays["filament_map"] = ["1"] * num_colors
-
-        arrays["nozzle_temperature"] = ["220"] * num_colors
-        arrays["nozzle_temperature_initial_layer"] = ["220"] * num_colors
-        arrays["nozzle_temperature_range_low"] = ["190"] * num_colors
-        arrays["nozzle_temperature_range_high"] = ["240"] * num_colors
-        arrays["bed_temperature"] = ["60"] * num_colors
-        arrays["bed_temperature_initial_layer"] = ["60"] * num_colors
-
-        arrays["filament_flow_ratio"] = ["1"] * num_colors
-        arrays["filament_max_volumetric_speed"] = ["15"] * num_colors
-        arrays["filament_minimal_purge_on_wipe_tower"] = ["15"] * num_colors
-        arrays["filament_soluble"] = ["0"] * num_colors
-        arrays["filament_is_support"] = ["0"] * num_colors
 
         return arrays
 

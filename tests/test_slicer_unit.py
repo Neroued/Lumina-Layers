@@ -22,20 +22,22 @@ from api.schemas.slicer import (
 )
 from core.slicer import (
     DetectedSlicer,
+    _match_slicer_id,
     detect_installed_slicers,
     launch_slicer,
     scan_registry,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_app():
     """Build a minimal FastAPI app with only the slicer router."""
     from fastapi import FastAPI
     from api.routers.slicer import router
+
     app = FastAPI()
     app.include_router(router)
     return app
@@ -48,6 +50,7 @@ def _make_client() -> TestClient:
 # =========================================================================
 # 1. scan_registry — non-Windows returns empty list (Requirement 1.3)
 # =========================================================================
+
 
 class TestScanRegistry:
     """scan_registry() must return [] on non-Windows platforms."""
@@ -64,6 +67,7 @@ class TestScanRegistry:
 # =========================================================================
 # 2. detect_installed_slicers — mock data (Requirement 1.3, 1.5)
 # =========================================================================
+
 
 class TestDetectInstalledSlicers:
     """detect_installed_slicers() filters out entries with invalid exe_path."""
@@ -97,9 +101,20 @@ class TestDetectInstalledSlicers:
         assert result == []
 
 
+class TestKnownSlicerMatches:
+    """Known registry names map to the configured slicer IDs."""
+
+    def test_anycubic_display_name_matches_anycubic_slicer_next(self):
+        assert _match_slicer_id("Anycubic Slicer Next 1.3.9.4") == (
+            "anycubic_slicer_next",
+            "Anycubic Slicer Next",
+        )
+
+
 # =========================================================================
 # 3. launch_slicer — success / failure scenarios (Requirements 2.2-2.5)
 # =========================================================================
+
 
 class TestLaunchSlicer:
     """launch_slicer() success and failure paths."""
@@ -151,6 +166,7 @@ class TestLaunchSlicer:
 # 4. Pydantic model validation (Requirements 6.1-6.6)
 # =========================================================================
 
+
 class TestPydanticModels:
     """Pydantic schema validation for slicer models."""
 
@@ -185,6 +201,7 @@ class TestPydanticModels:
 # =========================================================================
 # 5. Router endpoint tests (Requirements 3.1, 3.2, 3.6)
 # =========================================================================
+
 
 class TestRouterEndpoints:
     """FastAPI TestClient tests for slicer router."""
@@ -222,12 +239,17 @@ class TestRouterEndpoints:
         mock_slicers = [
             DetectedSlicer(id="bambu_studio", display_name="Bambu Studio", exe_path="C:\\bs.exe"),
         ]
-        with patch("api.routers.slicer.detect_installed_slicers", return_value=mock_slicers), \
-             patch("api.routers.slicer.launch_slicer", return_value=(True, "Opened in Bambu Studio")):
-            resp = client.post("/api/slicer/launch", json={
-                "slicer_id": "bambu_studio",
-                "file_path": str(f),
-            })
+        with (
+            patch("api.routers.slicer.detect_installed_slicers", return_value=mock_slicers),
+            patch("api.routers.slicer.launch_slicer", return_value=(True, "Opened in Bambu Studio")),
+        ):
+            resp = client.post(
+                "/api/slicer/launch",
+                json={
+                    "slicer_id": "bambu_studio",
+                    "file_path": str(f),
+                },
+            )
 
         assert resp.status_code == 200
         assert resp.json()["status"] == "success"
@@ -235,10 +257,13 @@ class TestRouterEndpoints:
     def test_launch_file_not_found(self):
         """POST with non-existent file returns 400. Requirement 2.3"""
         client = _make_client()
-        resp = client.post("/api/slicer/launch", json={
-            "slicer_id": "bambu_studio",
-            "file_path": "/nonexistent/model.3mf",
-        })
+        resp = client.post(
+            "/api/slicer/launch",
+            json={
+                "slicer_id": "bambu_studio",
+                "file_path": "/nonexistent/model.3mf",
+            },
+        )
         assert resp.status_code == 400
         assert resp.json()["status"] == "error"
 
@@ -260,12 +285,17 @@ class TestRouterEndpoints:
         f.write_text("data")
 
         client = _make_client()
-        with patch("api.routers.slicer.detect_installed_slicers", return_value=[]), \
-             patch("api.routers.slicer.launch_slicer", return_value=(False, "Slicer not found: unknown")):
-            resp = client.post("/api/slicer/launch", json={
-                "slicer_id": "unknown",
-                "file_path": str(f),
-            })
+        with (
+            patch("api.routers.slicer.detect_installed_slicers", return_value=[]),
+            patch("api.routers.slicer.launch_slicer", return_value=(False, "Slicer not found: unknown")),
+        ):
+            resp = client.post(
+                "/api/slicer/launch",
+                json={
+                    "slicer_id": "unknown",
+                    "file_path": str(f),
+                },
+            )
 
         assert resp.status_code == 404
         assert resp.json()["status"] == "error"

@@ -2384,6 +2384,14 @@ export const translations: Record<string, Record<"zh" | "en", string>> = {
     zh: "切换切片软件列表",
     en: "Toggle slicer list",
   },
+  slicer_preferred_mismatch: {
+    zh: "当前导出格式为 {expected}，但操作栏启动目标是 {actual}",
+    en: "Current export format targets {expected}, but the action bar is set to {actual}",
+  },
+  slicer_preferred_missing: {
+    zh: "当前导出格式为 {name}，但本机未检测到对应切片软件",
+    en: "Current export format targets {name}, but the matching slicer is not detected on this device",
+  },
 
   // ==================== Crop Modal ====================
   crop_modal_title: {

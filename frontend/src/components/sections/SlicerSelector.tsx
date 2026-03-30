@@ -2,7 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useSlicerStore } from "../../stores/slicerStore";
 import { useConverterStore } from "../../stores/converterStore";
+import { useSettingsStore } from "../../stores/settingsStore";
 import { useI18n } from "../../i18n/context";
+import {
+  getDetectedSlicerIdForSoftware,
+  getSlicerSoftwareDisplayName,
+} from "../../utils/settingsOptionIds";
 
 /** Brand color style for a slicer button. 切片软件品牌配色样式。 */
 export interface SlicerBrandStyle {
@@ -26,6 +31,7 @@ export const SLICER_BRAND_COLORS: Record<string, SlicerBrandStyle> = {
   bambu_studio:  { bg: "bg-green-600",  hover: "hover:bg-green-700",  text: "text-white" },
   orca_slicer:   { bg: "bg-blue-600",   hover: "hover:bg-blue-700",   text: "text-white" },
   elegoo_slicer: { bg: "bg-sky-500",    hover: "hover:bg-sky-600",    text: "text-white" },
+  anycubic_slicer_next: { bg: "bg-red-600", hover: "hover:bg-red-700", text: "text-white" },
   prusa_slicer:  { bg: "bg-orange-500", hover: "hover:bg-orange-600", text: "text-white" },
   cura:          { bg: "bg-blue-400",   hover: "hover:bg-blue-500",   text: "text-white" },
 };
@@ -72,6 +78,35 @@ export function getButtonLabel(
   return threemfDiskPath ? t("slicer_download_3mf") : t("slicer_generate_download");
 }
 
+export function getSlicerLinkHint(
+  preferredSlicerId: string | null,
+  preferredSlicerName: string,
+  preferredInstalled: boolean,
+  selectedSlicerId: string | null,
+  selectedSlicerName: string | null,
+  t: (key: string) => string,
+): string | null {
+  if (!preferredSlicerId) {
+    return null;
+  }
+
+  if (!preferredInstalled) {
+    return t("slicer_preferred_missing").replace("{name}", preferredSlicerName);
+  }
+
+  if (
+    selectedSlicerId &&
+    selectedSlicerId !== preferredSlicerId &&
+    selectedSlicerName
+  ) {
+    return t("slicer_preferred_mismatch")
+      .replace("{expected}", preferredSlicerName)
+      .replace("{actual}", selectedSlicerName);
+  }
+
+  return null;
+}
+
 interface SlicerSelectorProps {
   threemfDiskPath: string | null;
   downloadUrl: string | null;
@@ -97,11 +132,13 @@ export default function SlicerSelector({
   const setSelectedSlicerId = useSlicerStore((s) => s.setSelectedSlicerId);
   const launchSlicer = useSlicerStore((s) => s.launchSlicer);
   const clearMessage = useSlicerStore((s) => s.clearMessage);
+  const slicerSoftware = useSettingsStore((s) => s.slicerSoftware);
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isAutoGenerating, setIsAutoGenerating] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const syncedSlicerSoftwareRef = useRef<string | null>(null);
   const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; width: number } | null>(null);
   const { t } = useI18n();
 
@@ -155,10 +192,57 @@ export default function SlicerSelector({
   }, [isDropdownOpen, updateDropdownPos]);
 
   const hasSlicers = slicers.length > 0;
+  const preferredDetectedSlicerId = getDetectedSlicerIdForSoftware(slicerSoftware);
+  const preferredInstalledSlicer = preferredDetectedSlicerId
+    ? slicers.find((slicer) => slicer.id === preferredDetectedSlicerId) ?? null
+    : null;
+  const orderedSlicers = preferredDetectedSlicerId
+    ? [...slicers].sort((left, right) => {
+        const leftPriority = left.id === preferredDetectedSlicerId ? 0 : 1;
+        const rightPriority = right.id === preferredDetectedSlicerId ? 0 : 1;
+        if (leftPriority !== rightPriority) {
+          return leftPriority - rightPriority;
+        }
+        return left.display_name.localeCompare(right.display_name);
+      })
+    : slicers;
   const selectedSlicer = slicers.find((s) => s.id === selectedSlicerId);
-  const brandStyle = selectedSlicerId
-    ? getSlicerBrandStyle(selectedSlicerId)
+  const brandSlicerId = selectedSlicerId ?? preferredDetectedSlicerId;
+  const brandStyle = brandSlicerId
+    ? getSlicerBrandStyle(brandSlicerId)
     : DEFAULT_BRAND_STYLE;
+  const preferredSlicerName =
+    preferredInstalledSlicer?.display_name ??
+    getSlicerSoftwareDisplayName(slicerSoftware);
+  const slicerLinkHint = getSlicerLinkHint(
+    preferredDetectedSlicerId,
+    preferredSlicerName,
+    preferredInstalledSlicer !== null,
+    selectedSlicerId,
+    selectedSlicer?.display_name ?? null,
+    t,
+  );
+
+  useEffect(() => {
+    if (!preferredInstalledSlicer) {
+      if (syncedSlicerSoftwareRef.current === slicerSoftware) {
+        syncedSlicerSoftwareRef.current = null;
+      }
+      return;
+    }
+    if (syncedSlicerSoftwareRef.current === slicerSoftware) {
+      return;
+    }
+    syncedSlicerSoftwareRef.current = slicerSoftware;
+    if (selectedSlicerId !== preferredInstalledSlicer.id) {
+      setSelectedSlicerId(preferredInstalledSlicer.id);
+    }
+  }, [
+    preferredInstalledSlicer,
+    selectedSlicerId,
+    setSelectedSlicerId,
+    slicerSoftware,
+  ]);
 
   /**
    * Helper to trigger a browser download from a URL.
@@ -291,7 +375,7 @@ export default function SlicerSelector({
               className="z-[9999] rounded-md border border-gray-200 bg-white dark:border-gray-600 dark:bg-gray-800 py-1 shadow-lg"
               role="listbox"
             >
-              {slicers.map((slicer) => {
+              {orderedSlicers.map((slicer) => {
                 const style = getSlicerBrandStyle(slicer.id);
                 const isSelected = slicer.id === selectedSlicerId;
                 return (
@@ -339,7 +423,7 @@ export default function SlicerSelector({
                 type="button"
                 onClick={() => void handleMainClick()}
                 disabled={isDisabled}
-                className="flex items-center gap-2 rounded-md bg-gray-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                className={`flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors ${brandStyle.bg} ${brandStyle.hover} ${brandStyle.text} disabled:opacity-40 disabled:cursor-not-allowed`}
               >
                 {isAutoGenerating && (
                   <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
@@ -356,6 +440,9 @@ export default function SlicerSelector({
 
       {launchMessage && (
         <p className="text-xs text-green-400">{launchMessage}</p>
+      )}
+      {slicerLinkHint && (
+        <p className="text-xs text-amber-600 dark:text-amber-400">{slicerLinkHint}</p>
       )}
       {error && (
         <p className="text-xs text-red-400">{error}</p>
