@@ -19,13 +19,18 @@ from config import (
 )
 from utils.bambu_3mf_writer import load_printer_template, _PRINTER_TEMPLATE_CACHE
 
-
 # ── Required fields every PrinterProfile must have ──
 
 REQUIRED_FIELDS = (
-    "id", "display_name", "brand",
-    "bed_width", "bed_depth", "bed_height",
-    "nozzle_count", "is_dual_head", "template_file",
+    "id",
+    "display_name",
+    "brand",
+    "bed_width",
+    "bed_depth",
+    "bed_height",
+    "nozzle_count",
+    "is_dual_head",
+    "template_file",
 )
 
 
@@ -89,6 +94,9 @@ class TestNormalizeSettingsIdentifiers:
     def test_normalize_slicer_software_id(self) -> None:
         assert normalize_slicer_software_id("orca_slicer") == "OrcaSlicer"
 
+    def test_normalize_anycubic_slicer_software_id(self) -> None:
+        assert normalize_slicer_software_id("anycubic_slicer_next") == "AnycubicSlicerNext"
+
 
 class TestProfileRequiredFields:
     """Every profile has all required fields."""
@@ -117,6 +125,12 @@ class TestLoadPrinterTemplate:
     def test_legacy_slicer_id_resolves_orca_template(self) -> None:
         profile = get_printer_profile("bambu-h2d")
         assert profile.get_template_file("orca_slicer") == "orca_h2d.json"
+
+    def test_anycubic_template_uses_anycubic_slicer_mapping(self) -> None:
+        template = load_printer_template("anycubic-kobra-s1", slicer="AnycubicSlicerNext")
+        assert template["printer_model"] == "Anycubic Kobra S1"
+        assert template["printable_area"] == ["0x0", "250x0", "250x250", "0x250"]
+        assert template["printable_height"] == "250"
 
 
 # ====================================================================

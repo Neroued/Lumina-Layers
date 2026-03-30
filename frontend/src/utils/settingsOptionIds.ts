@@ -16,12 +16,55 @@ const LEGACY_SLICER_ID_MAP: Record<string, string> = {
   elegoo_slicer: "ElegooSlicer",
   "elegoo slicer": "ElegooSlicer",
   elegooslicer: "ElegooSlicer",
+  anycubic: "AnycubicSlicerNext",
+  anycubic_slicer: "AnycubicSlicerNext",
+  anycubic_slicer_next: "AnycubicSlicerNext",
+  "anycubic slicer": "AnycubicSlicerNext",
+  "anycubic slicer next": "AnycubicSlicerNext",
+  anycubicslicer: "AnycubicSlicerNext",
+  anycubicslicernext: "AnycubicSlicerNext",
+  prusa: "PrusaSlicer",
+  prusa_slicer: "PrusaSlicer",
+  prusaslicer: "PrusaSlicer",
+  cura: "Cura",
+  "ultimaker cura": "Cura",
+  "ultimaker-cura": "Cura",
+};
+
+const DETECTED_SLICER_ID_MAP: Record<string, string> = {
+  BambuStudio: "bambu_studio",
+  OrcaSlicer: "orca_slicer",
+  SnapmakerOrca: "snapmaker_orca",
+  ElegooSlicer: "elegoo_slicer",
+  AnycubicSlicerNext: "anycubic_slicer_next",
+  PrusaSlicer: "prusa_slicer",
+  Cura: "cura",
+};
+
+const SLICER_SOFTWARE_DISPLAY_NAME_MAP: Record<string, string> = {
+  BambuStudio: "Bambu Studio",
+  OrcaSlicer: "OrcaSlicer",
+  SnapmakerOrca: "Snapmaker Orca",
+  ElegooSlicer: "ElegooSlicer",
+  AnycubicSlicerNext: "Anycubic Slicer Next",
+  PrusaSlicer: "PrusaSlicer",
+  Cura: "Ultimaker Cura",
 };
 
 export function normalizeSlicerOptionId(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) return "";
   return LEGACY_SLICER_ID_MAP[trimmed.toLowerCase()] ?? trimmed;
+}
+
+export function getDetectedSlicerIdForSoftware(value: string): string | null {
+  const canonicalId = normalizeSlicerOptionId(value);
+  return DETECTED_SLICER_ID_MAP[canonicalId] ?? null;
+}
+
+export function getSlicerSoftwareDisplayName(value: string): string {
+  const canonicalId = normalizeSlicerOptionId(value);
+  return SLICER_SOFTWARE_DISPLAY_NAME_MAP[canonicalId] ?? canonicalId;
 }
 
 export function normalizePrinterOptionId(value: string): string {

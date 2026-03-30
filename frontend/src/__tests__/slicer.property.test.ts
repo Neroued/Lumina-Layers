@@ -372,17 +372,31 @@ describe("Property 3: 参数变更使 threemfDiskPath 失效", () => {
 
 // ========== Property 5: 切片软件偏好恢复与回退 ==========
 
+import { getDetectedSlicerIdForSoftware } from "../utils/settingsOptionIds";
+
 /**
  * Pure function extracted from slicerStore.detectSlicers preference restore logic.
  * Mirrors:
+ *   const slicerSoftware = useSettingsStore.getState().slicerSoftware;
+ *   const preferredConfiguredId = getDetectedSlicerIdForSoftware(slicerSoftware);
+ *   const configuredMatch = preferredConfiguredId ? slicers.find(s => s.id === preferredConfiguredId) : null;
+ *   if (configuredMatch) return configuredMatch.id;
  *   const lastId = useSettingsStore.getState().lastSlicerId;
  *   const restored = slicers.find(s => s.id === lastId);
  *   set({ selectedSlicerId: restored ? restored.id : (slicers[0]?.id ?? null) });
  */
 function resolveSelectedSlicerId(
   slicers: Array<{ id: string }>,
-  lastSlicerId: string | null
+  lastSlicerId: string | null,
+  slicerSoftware: string,
 ): string | null {
+  const preferredConfiguredId = getDetectedSlicerIdForSoftware(slicerSoftware);
+  const configuredMatch = preferredConfiguredId
+    ? slicers.find((s) => s.id === preferredConfiguredId)
+    : undefined;
+  if (configuredMatch) {
+    return configuredMatch.id;
+  }
   const restored = slicers.find((s) => s.id === lastSlicerId);
   return restored ? restored.id : (slicers[0]?.id ?? null);
 }
@@ -399,22 +413,54 @@ function resolveSelectedSlicerId(
 describe("Property 5: 切片软件偏好恢复与回退", () => {
   /** Arbitrary: non-empty slicer id string */
   const slicerIdArb = fc.string({ minLength: 1, maxLength: 30 }).filter((s) => s.trim().length > 0);
+  const slicerSoftwareArb = fc.constantFrom(
+    "BambuStudio",
+    "OrcaSlicer",
+    "SnapmakerOrca",
+    "ElegooSlicer",
+    "AnycubicSlicerNext",
+    "PrusaSlicer",
+    "Cura",
+  );
 
   /** Arbitrary: array of slicer objects with unique ids */
   const slicerListArb = fc
     .uniqueArray(slicerIdArb, { minLength: 0, maxLength: 20, comparator: (a, b) => a === b })
     .map((ids) => ids.map((id) => ({ id })));
 
-  it("when lastSlicerId matches an id in the list, result equals lastSlicerId", () => {
+  it("when the configured slicer exists in the list, result prefers that slicer", () => {
+    fc.assert(
+      fc.property(
+        slicerSoftwareArb,
+        slicerListArb,
+        slicerIdArb,
+        (slicerSoftware, slicers, lastSlicerId) => {
+          const preferredId = getDetectedSlicerIdForSoftware(slicerSoftware);
+          if (!preferredId) return true;
+          const withConfigured = slicers.some((s) => s.id === preferredId)
+            ? slicers
+            : [{ id: preferredId }, ...slicers];
+          const result = resolveSelectedSlicerId(withConfigured, lastSlicerId, slicerSoftware);
+          return result === preferredId;
+        }
+      ),
+      { numRuns: 100 }
+    );
+  });
+
+  it("when configured slicer is absent and lastSlicerId matches, result equals lastSlicerId", () => {
     fc.assert(
       fc.property(
         slicerListArb.filter((arr) => arr.length > 0),
+        slicerSoftwareArb,
         fc.nat(),
-        (slicers, indexSeed) => {
-          // Pick a random slicer from the list as lastSlicerId
-          const idx = indexSeed % slicers.length;
-          const lastSlicerId = slicers[idx].id;
-          const result = resolveSelectedSlicerId(slicers, lastSlicerId);
+        (slicers, slicerSoftware, indexSeed) => {
+          // Prefer the configured slicer when present; otherwise use the restored selection.
+          const preferredId = getDetectedSlicerIdForSoftware(slicerSoftware);
+          const isInList = !!preferredId && slicers.some((s) => s.id === preferredId);
+          const lastSlicerId = slicers[indexSeed % slicers.length].id;
+          if (isInList) return true; // skip — covered by the other test
+          const result = resolveSelectedSlicerId(slicers, lastSlicerId, slicerSoftware);
           return result === lastSlicerId;
         }
       ),
@@ -422,27 +468,16 @@ describe("Property 5: 切片软件偏好恢复与回退", () => {
     );
   });
 
-  it("when lastSlicerId does NOT match any id in the list, result equals first item's id", () => {
+  it("when neither configured nor last slicer match, result equals first item's id (or null if empty)", () => {
     fc.assert(
-      fc.property(
-        slicerListArb.filter((arr) => arr.length > 0),
-        slicerIdArb,
-        (slicers, lastSlicerId) => {
-          // Ensure lastSlicerId is not in the list
-          const isInList = slicers.some((s) => s.id === lastSlicerId);
-          if (isInList) return true; // skip — covered by the other test
-          const result = resolveSelectedSlicerId(slicers, lastSlicerId);
-          return result === slicers[0].id;
+      fc.property(slicerListArb, slicerSoftwareArb, slicerIdArb, (slicers, slicerSoftware, lastSlicerId) => {
+        const preferredId = getDetectedSlicerIdForSoftware(slicerSoftware);
+        const hasConfigured = preferredId ? slicers.some((s) => s.id === preferredId) : false;
+        const hasLast = slicers.some((s) => s.id === lastSlicerId);
+        if (hasConfigured || hasLast) {
+          return true;
         }
-      ),
-      { numRuns: 100 }
-    );
-  });
-
-  it("when lastSlicerId is null, result equals first item's id (or null if empty)", () => {
-    fc.assert(
-      fc.property(slicerListArb, (slicers) => {
-        const result = resolveSelectedSlicerId(slicers, null);
+        const result = resolveSelectedSlicerId(slicers, lastSlicerId, slicerSoftware);
         if (slicers.length === 0) {
           return result === null;
         }
@@ -456,8 +491,9 @@ describe("Property 5: 切片软件偏好恢复与回退", () => {
     fc.assert(
       fc.property(
         fc.option(slicerIdArb, { nil: null }),
-        (lastSlicerId) => {
-          const result = resolveSelectedSlicerId([], lastSlicerId);
+        slicerSoftwareArb,
+        (lastSlicerId, slicerSoftware) => {
+          const result = resolveSelectedSlicerId([], lastSlicerId, slicerSoftware);
           return result === null;
         }
       ),
@@ -470,8 +506,9 @@ describe("Property 5: 切片软件偏好恢复与回退", () => {
       fc.property(
         slicerListArb,
         fc.option(slicerIdArb, { nil: null }),
-        (slicers, lastSlicerId) => {
-          const result = resolveSelectedSlicerId(slicers, lastSlicerId);
+        slicerSoftwareArb,
+        (slicers, lastSlicerId, slicerSoftware) => {
+          const result = resolveSelectedSlicerId(slicers, lastSlicerId, slicerSoftware);
           if (result === null) {
             return slicers.length === 0;
           }
@@ -489,6 +526,7 @@ describe("Property 5: 切片软件偏好恢复与回退", () => {
 import {
   SLICER_BRAND_COLORS,
   getSlicerBrandStyle,
+  getSlicerLinkHint,
 } from "../components/sections/SlicerSelector";
 
 /**
@@ -502,6 +540,7 @@ describe("Property 6: 品牌配色映射完整性", () => {
   const KNOWN_SLICER_IDS = [
     "bambu_studio",
     "orca_slicer",
+    "anycubic_slicer_next",
     "elegoo_slicer",
     "prusa_slicer",
     "cura",
@@ -544,7 +583,7 @@ describe("Property 6: 品牌配色映射完整性", () => {
     );
   });
 
-  it("SLICER_BRAND_COLORS contains exactly the 5 known slicer IDs", () => {
+  it("SLICER_BRAND_COLORS contains exactly the 6 known slicer IDs", () => {
     const keys = Object.keys(SLICER_BRAND_COLORS).sort();
     const expected = [...KNOWN_SLICER_IDS].sort();
     expect(keys).toEqual(expected);
@@ -566,6 +605,46 @@ describe("Property 6: 品牌配色映射完整性", () => {
         }
       ),
       { numRuns: 100 }
+    );
+  });
+
+  it("shows a mismatch hint when selected slicer differs from the configured export slicer", () => {
+    const hint = getSlicerLinkHint(
+      "anycubic_slicer_next",
+      "Anycubic Slicer Next",
+      true,
+      "orca_slicer",
+      "OrcaSlicer",
+      (key) => ({
+        slicer_preferred_mismatch:
+          "Current export format targets {expected}, but the action bar is set to {actual}",
+        slicer_preferred_missing:
+          "Current export format targets {name}, but the matching slicer is not detected on this device",
+      }[key] ?? key),
+    );
+
+    expect(hint).toBe(
+      "Current export format targets Anycubic Slicer Next, but the action bar is set to OrcaSlicer",
+    );
+  });
+
+  it("shows a missing hint when the configured slicer is not detected", () => {
+    const hint = getSlicerLinkHint(
+      "snapmaker_orca",
+      "Snapmaker Orca",
+      false,
+      "orca_slicer",
+      "OrcaSlicer",
+      (key) => ({
+        slicer_preferred_mismatch:
+          "Current export format targets {expected}, but the action bar is set to {actual}",
+        slicer_preferred_missing:
+          "Current export format targets {name}, but the matching slicer is not detected on this device",
+      }[key] ?? key),
+    );
+
+    expect(hint).toBe(
+      "Current export format targets Snapmaker Orca, but the matching slicer is not detected on this device",
     );
   });
 });

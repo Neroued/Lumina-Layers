@@ -20,26 +20,32 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 KNOWN_SLICERS: dict[str, dict] = {
-    "bambu_studio":    {"match": ["bambu studio"],                          "display_name": "Bambu Studio"},
-    "orca_slicer":     {"match": ["orcaslicer"],                            "display_name": "OrcaSlicer"},
-    "snapmaker_orca":  {"match": ["snapmaker_orca", "snapmaker orca"],      "display_name": "Snapmaker Orca"},
-    "elegoo_slicer":   {"match": ["elegooslicer", "elegoo slicer", "elegoo satellit"], "display_name": "ElegooSlicer"},
-    "prusa_slicer":    {"match": ["prusaslicer"],                           "display_name": "PrusaSlicer"},
-    "cura":            {"match": ["ultimaker cura", "ultimaker-cura"],      "display_name": "Ultimaker Cura"},
+    "bambu_studio": {"match": ["bambu studio"], "display_name": "Bambu Studio"},
+    "orca_slicer": {"match": ["orcaslicer"], "display_name": "OrcaSlicer"},
+    "snapmaker_orca": {"match": ["snapmaker_orca", "snapmaker orca"], "display_name": "Snapmaker Orca"},
+    "elegoo_slicer": {"match": ["elegooslicer", "elegoo slicer", "elegoo satellit"], "display_name": "ElegooSlicer"},
+    "anycubic_slicer_next": {
+        "match": ["anycubic slicer next", "anycubicslicernext", "anycubic slicer", "anycubicslicer"],
+        "display_name": "Anycubic Slicer Next",
+    },
+    "prusa_slicer": {"match": ["prusaslicer"], "display_name": "PrusaSlicer"},
+    "cura": {"match": ["ultimaker cura", "ultimaker-cura"], "display_name": "Ultimaker Cura"},
 }
 
 
 @dataclass
 class DetectedSlicer:
     """Detected slicer software information."""
-    id: str               # Identifier, e.g. "bambu_studio"
-    display_name: str      # Display name, e.g. "Bambu Studio"
-    exe_path: str          # Absolute path to executable
+
+    id: str  # Identifier, e.g. "bambu_studio"
+    display_name: str  # Display name, e.g. "Bambu Studio"
+    exe_path: str  # Absolute path to executable
 
 
 # ---------------------------------------------------------------------------
 # Registry scanning (Windows only)
 # ---------------------------------------------------------------------------
+
 
 def _match_slicer_id(display_name: str) -> tuple[str, str] | None:
     """Match a registry DisplayName against KNOWN_SLICERS.
@@ -121,7 +127,7 @@ def scan_registry() -> list[DetectedSlicer]:
     reg_paths = [
         (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
         (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
-        (winreg.HKEY_CURRENT_USER,  r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
     ]
 
     for hive, base_path in reg_paths:
@@ -204,6 +210,7 @@ def scan_registry() -> list[DetectedSlicer]:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def detect_installed_slicers() -> list[DetectedSlicer]:
     """Detect slicer software installed on the system.

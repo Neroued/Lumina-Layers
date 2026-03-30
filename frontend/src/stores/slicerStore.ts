@@ -5,6 +5,7 @@ import {
   launchSlicer as apiLaunchSlicer,
 } from "../api/slicer";
 import { useSettingsStore } from "./settingsStore";
+import { getDetectedSlicerIdForSoftware } from "../utils/settingsOptionIds";
 
 // ========== State Interface ==========
 
@@ -37,6 +38,23 @@ const DEFAULT_STATE: SlicerState = {
   error: null,
 };
 
+export function resolveSelectedSlicerId(
+  slicers: SlicerInfo[],
+  lastSlicerId: string | null,
+  slicerSoftware: string,
+): string | null {
+  const preferredConfiguredId = getDetectedSlicerIdForSoftware(slicerSoftware);
+  const configuredMatch = preferredConfiguredId
+    ? slicers.find((slicer) => slicer.id === preferredConfiguredId)
+    : null;
+  if (configuredMatch) {
+    return configuredMatch.id;
+  }
+
+  const restored = slicers.find((slicer) => slicer.id === lastSlicerId);
+  return restored ? restored.id : (slicers[0]?.id ?? null);
+}
+
 // ========== Store ==========
 
 export const useSlicerStore = create<SlicerState & SlicerActions>(
@@ -49,11 +67,16 @@ export const useSlicerStore = create<SlicerState & SlicerActions>(
         const response = await apiDetectSlicers();
         const slicers = response.slicers;
         const lastId = useSettingsStore.getState().lastSlicerId;
+        const slicerSoftware = useSettingsStore.getState().slicerSoftware;
         const restored = slicers.find((s) => s.id === lastId);
         set({
           slicers,
           isDetecting: false,
-          selectedSlicerId: restored ? restored.id : (slicers[0]?.id ?? null),
+          selectedSlicerId: resolveSelectedSlicerId(
+            slicers,
+            restored ? restored.id : null,
+            slicerSoftware,
+          ),
         });
       } catch (err) {
         set({

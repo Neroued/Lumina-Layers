@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   filterCompatiblePrinters,
+  getDetectedSlicerIdForSoftware,
+  getSlicerSoftwareDisplayName,
   normalizePrinterOptionId,
   normalizeSlicerOptionId,
   resolvePrinterOptionId,
@@ -12,6 +14,7 @@ import type { PrinterInfo, SlicerOption } from "../api/types";
 const SLICERS: SlicerOption[] = [
   { id: "BambuStudio", display_name: "BambuStudio" },
   { id: "OrcaSlicer", display_name: "OrcaSlicer" },
+  { id: "AnycubicSlicerNext", display_name: "Anycubic Slicer Next" },
 ];
 
 const PRINTERS: PrinterInfo[] = [
@@ -37,12 +40,40 @@ const PRINTERS: PrinterInfo[] = [
     is_dual_head: false,
     supported_slicers: ["ElegooSlicer"],
   },
+  {
+    id: "anycubic-kobra-s1",
+    display_name: "Anycubic Kobra S1",
+    brand: "Anycubic",
+    bed_width: 250,
+    bed_depth: 250,
+    bed_height: 250,
+    nozzle_count: 1,
+    is_dual_head: false,
+    supported_slicers: ["AnycubicSlicerNext"],
+  },
 ];
 
 describe("settingsOptionIds", () => {
   it("normalizes legacy slicer ids", () => {
     expect(normalizeSlicerOptionId("orca_slicer")).toBe("OrcaSlicer");
+    expect(normalizeSlicerOptionId("anycubic_slicer_next")).toBe("AnycubicSlicerNext");
+    expect(normalizeSlicerOptionId("prusa_slicer")).toBe("PrusaSlicer");
+    expect(normalizeSlicerOptionId("ultimaker-cura")).toBe("Cura");
     expect(normalizeSlicerOptionId("BambuStudio")).toBe("BambuStudio");
+  });
+
+  it("maps canonical slicer software ids to detected slicer ids", () => {
+    expect(getDetectedSlicerIdForSoftware("AnycubicSlicerNext")).toBe("anycubic_slicer_next");
+    expect(getDetectedSlicerIdForSoftware("anycubic_slicer")).toBe("anycubic_slicer_next");
+    expect(getDetectedSlicerIdForSoftware("OrcaSlicer")).toBe("orca_slicer");
+    expect(getDetectedSlicerIdForSoftware("prusa_slicer")).toBe("prusa_slicer");
+    expect(getDetectedSlicerIdForSoftware("ultimaker cura")).toBe("cura");
+  });
+
+  it("returns readable slicer software display names", () => {
+    expect(getSlicerSoftwareDisplayName("AnycubicSlicerNext")).toBe("Anycubic Slicer Next");
+    expect(getSlicerSoftwareDisplayName("prusa_slicer")).toBe("PrusaSlicer");
+    expect(getSlicerSoftwareDisplayName("ultimaker-cura")).toBe("Ultimaker Cura");
   });
 
   it("normalizes legacy printer ids", () => {
@@ -51,6 +82,7 @@ describe("settingsOptionIds", () => {
 
   it("resolves invalid slicer selection to a canonical option", () => {
     expect(resolveSlicerOptionId("orca_slicer", SLICERS)).toBe("OrcaSlicer");
+    expect(resolveSlicerOptionId("anycubic_slicer", SLICERS)).toBe("AnycubicSlicerNext");
   });
 
   it("resolves invalid printer selection to a compatible option", () => {
@@ -60,5 +92,7 @@ describe("settingsOptionIds", () => {
   it("filters printers by canonical slicer id", () => {
     expect(filterCompatiblePrinters(PRINTERS, "OrcaSlicer")).toHaveLength(1);
     expect(filterCompatiblePrinters(PRINTERS, "OrcaSlicer")[0]?.id).toBe("bambu-h2d");
+    expect(filterCompatiblePrinters(PRINTERS, "AnycubicSlicerNext")).toHaveLength(1);
+    expect(filterCompatiblePrinters(PRINTERS, "AnycubicSlicerNext")[0]?.id).toBe("anycubic-kobra-s1");
   });
 });
