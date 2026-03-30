@@ -138,6 +138,7 @@ class BambuStudio3MFWriter:
         color_mode: str = "4-Color",
         printer_id: str = "bambu-h2d",
         slicer: str = "BambuStudio",
+        watermark: str = "LuminaStudio",
     ):
         """Initialize 3MF writer with printer-specific template support.
         初始化 3MF 写入器，支持机型和切片器专属配置模板。
@@ -148,6 +149,7 @@ class BambuStudio3MFWriter:
             color_mode (str): Color mode ('4-Color', '6-Color', '8-Color', 'BW'). (颜色模式)
             printer_id (str): Printer identifier for template selection, default 'bambu-h2d'. (打印机标识)
             slicer (str): Slicer software identifier, default 'BambuStudio'. (切片器标识)
+            watermark (str): Watermark text embedded in the 3MF ZIP structure. (嵌入 3MF ZIP 结构的水印文本)
         """
         from config import normalize_slicer_software_id
 
@@ -157,6 +159,7 @@ class BambuStudio3MFWriter:
         self.color_mode = color_mode
         self.printer_id = printer_id
         self.slicer = normalize_slicer_software_id(slicer)
+        self.watermark = watermark
 
     def add_mesh(self, mesh: _get_trimesh().Trimesh, name: str, color_rgb: tuple):
         """Add a mesh object to the scene.
@@ -227,6 +230,10 @@ class BambuStudio3MFWriter:
         opts = _get_n3mf().WriteOptions()
         opts.vertex_precision = 6
         opts.compact_xml = True
+        if self.watermark:
+            opts.watermark = _get_n3mf().WatermarkConfig(
+                payload=self.watermark.encode("utf-8"),
+            )
         _get_n3mf().write_to_file(self.output_path, doc, opts)
 
         print(f"[BAMBU_3MF] [OK] Export complete: {self.output_path} ({time.perf_counter() - _exp_t0:.3f}s total)")
@@ -599,6 +606,7 @@ def export_scene_with_bambu_metadata(
     color_mode: str = "4-Color",
     printer_id: str = "bambu-h2d",
     slicer: str = "BambuStudio",
+    watermark: str = "LuminaStudio",
 ):
     """Export a Trimesh scene to BambuStudio/OrcaSlicer-compatible 3MF with metadata.
     将 Trimesh 场景导出为 BambuStudio/OrcaSlicer 兼容的 3MF 文件（含元数据）。
@@ -612,6 +620,7 @@ def export_scene_with_bambu_metadata(
         color_mode (str): Color mode ('4-Color', '6-Color', '8-Color', 'BW'). (颜色模式)
         printer_id (str): Printer identifier for template selection, default 'bambu-h2d'. (打印机标识)
         slicer (str): Slicer software identifier, default 'BambuStudio'. (切片器标识)
+        watermark (str): Watermark text embedded in the 3MF ZIP structure. (嵌入 3MF ZIP 结构的水印文本)
 
     Returns:
         str: Path to the exported 3MF file. (导出的 3MF 文件路径)
@@ -636,7 +645,10 @@ def export_scene_with_bambu_metadata(
         f"[BAMBU_3MF] LUT color_mode: {color_mode}, Actual colors used: {num_used_colors} → 3MF mode: {actual_color_mode}"
     )
 
-    writer = BambuStudio3MFWriter(output_path, settings, actual_color_mode, printer_id=printer_id, slicer=slicer)
+    writer = BambuStudio3MFWriter(
+        output_path, settings, actual_color_mode,
+        printer_id=printer_id, slicer=slicer, watermark=watermark,
+    )
 
     name_to_color: dict[str, tuple] = {}
     print("[BAMBU_3MF] Building color mapping:")
