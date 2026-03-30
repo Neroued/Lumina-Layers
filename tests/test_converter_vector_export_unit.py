@@ -2,7 +2,7 @@
 
 Validates that:
     1. The vector branch calls export_scene_with_bambu_metadata (not scene.export).
-    2. The slot_names passed to the exporter match the scene's geometry keys.
+    2. The slot_names passed to the exporter match the final scene geometry keys.
 """
 
 import sys
@@ -93,7 +93,7 @@ class TestVectorBranchExport:
     @patch("utils.bambu_3mf_writer.export_scene_with_bambu_metadata")
     @patch("core.vector_engine.VectorProcessor")
     def test_slot_names_match_scene_geometry(self, MockVP, mock_bambu_export, tmp_path):
-        """slot_names passed to exporter should equal list(scene.geometry.keys())."""
+        """When backing is merged, slot_names should match the post-merge geometry keys."""
         from config import ModelingMode
 
         svg_file = tmp_path / "test2.svg"
@@ -131,6 +131,50 @@ class TestVectorBranchExport:
         )
 
         _, kwargs = mock_bambu_export.call_args
+        assert kwargs["slot_names"] == ["White", "Cyan"]
+
+    @patch("utils.bambu_3mf_writer.export_scene_with_bambu_metadata")
+    @patch("core.vector_engine.VectorProcessor")
+    def test_slot_names_keep_board_when_separate_backing_enabled(self, MockVP, mock_bambu_export, tmp_path):
+        """When separate_backing=True, Board should remain an exported slot."""
+        from config import ModelingMode
+
+        svg_file = tmp_path / "test3.svg"
+        svg_file.write_text(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50">'
+            '<circle cx="25" cy="25" r="20" fill="#0000ff"/>'
+            '</svg>'
+        )
+
+        fake_scene = trimesh.Scene()
+        for name in ["White", "Cyan", "Board"]:
+            m = trimesh.creation.box(extents=[5, 5, 0.5])
+            m.metadata["name"] = name
+            fake_scene.add_geometry(m, geom_name=name)
+
+        MockVP.return_value = _build_fake_processor(fake_scene)
+
+        from core.converter import convert_image_to_3d
+
+        dummy_lut = str(tmp_path / "dummy3.npy")
+        np.save(dummy_lut, np.zeros(10))
+
+        convert_image_to_3d(
+            image_path=str(svg_file),
+            lut_path=dummy_lut,
+            target_width_mm=30.0,
+            spacer_thick=1.6,
+            structure_mode="Single-sided",
+            auto_bg=False,
+            bg_tol=30,
+            color_mode="4-Color",
+            add_loop=False,
+            loop_width=5, loop_length=20, loop_hole=3, loop_pos="Top",
+            modeling_mode=ModelingMode.VECTOR,
+            separate_backing=True,
+        )
+
+        _, kwargs = mock_bambu_export.call_args
         assert kwargs["slot_names"] == ["White", "Cyan", "Board"]
 
     @patch("utils.bambu_3mf_writer.export_scene_with_bambu_metadata")
@@ -151,7 +195,7 @@ class TestVectorBranchExport:
 
         from core.converter import convert_image_to_3d
 
-        dummy_lut = str(tmp_path / "dummy3.npy")
+        dummy_lut = str(tmp_path / "dummy4.npy")
         np.save(dummy_lut, np.zeros(10))
 
         out_path, glb_path, preview_img, msg, _ = convert_image_to_3d(
