@@ -195,8 +195,10 @@ class BambuStudio3MFWriter:
         print(f"[BAMBU_3MF] Exporting {len(self.objects)} objects to {self.output_path}")
         _exp_t0 = time.perf_counter()
 
-        builder = _get_n3mf().DocumentBuilder()
-        builder.set_unit(_get_n3mf().Unit.Millimeter)
+        n3mf = _get_n3mf()
+
+        builder = n3mf.DocumentBuilder()
+        builder.set_unit(n3mf.Unit.Millimeter)
         builder.set_language("en-US")
 
         builder.enable_production()
@@ -208,13 +210,13 @@ class BambuStudio3MFWriter:
         builder.add_external_model_metadata("BambuStudio:3mfVersion", "1")
 
         materials = [
-            _get_n3mf().BaseMaterial(name, _get_n3mf().Color(rgb[0], rgb[1], rgb[2])) for _, name, rgb in self.objects
+            n3mf.BaseMaterial(name, n3mf.Color(rgb[0], rgb[1], rgb[2])) for _, name, rgb in self.objects
         ]
         mat_group_id = builder.add_base_material_group(materials)
 
         object_ids: list[int] = []
         for idx, (mesh, name, _) in enumerate(self.objects):
-            n3mf_mesh = _get_n3mf().Mesh.from_arrays(
+            n3mf_mesh = n3mf.Mesh.from_arrays(
                 np.ascontiguousarray(mesh.vertices, dtype=np.float64),
                 np.ascontiguousarray(mesh.faces, dtype=np.int64),
             )
@@ -227,14 +229,19 @@ class BambuStudio3MFWriter:
 
         doc = builder.build()
 
-        opts = _get_n3mf().WriteOptions()
+        opts = n3mf.WriteOptions()
         opts.vertex_precision = 6
         opts.compact_xml = True
-        if self.watermark:
-            opts.watermark = _get_n3mf().WatermarkConfig(
-                payload=self.watermark.encode("utf-8"),
+        if self.watermark and hasattr(n3mf, "WatermarkConfig"):
+            opts.watermark = n3mf.WatermarkConfig(payload=self.watermark.encode("utf-8"))
+        elif self.watermark:
+            n3mf_version = getattr(n3mf, "__version__", "unknown")
+            print(
+                "[BAMBU_3MF] Watermark disabled: "
+                f"neroued_3mf {n3mf_version} does not provide WatermarkConfig"
             )
-        _get_n3mf().write_to_file(self.output_path, doc, opts)
+
+        n3mf.write_to_file(self.output_path, doc, opts)
 
         print(f"[BAMBU_3MF] [OK] Export complete: {self.output_path} ({time.perf_counter() - _exp_t0:.3f}s total)")
         return self.output_path

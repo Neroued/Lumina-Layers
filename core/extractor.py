@@ -92,6 +92,21 @@ def _draw_dashed_rect(
             cv2.line(img, (sx, sy), (ex, ey), color, thickness)
 
 
+def _normalize_6color_mode(color_mode: str) -> str:
+    """Normalize six-color variants to unified CMYW recipe mode.
+    将 6 色变体统一归一到 CMYW 配方模式。
+
+    Args:
+        color_mode (str): Input color mode string. (输入颜色模式)
+
+    Returns:
+        str: Normalized color mode string. (归一化后的颜色模式)
+    """
+    if "6-Color" in str(color_mode):
+        return "6-Color (CMYWGK 1296)"
+    return color_mode
+
+
 def _generate_recipes(color_mode: str, total_cells: int, page_choice: str = "Page 1") -> np.ndarray:
     """Generate recipe (stacking) arrays for each cell based on color mode.
     根据颜色模式为每个色块生成配方（堆叠）数组。
@@ -133,14 +148,9 @@ def _generate_recipes(color_mode: str, total_cells: int, page_choice: str = "Pag
 
     if "6-Color" in color_mode:
         try:
-            if "RYBW" in color_mode:
-                from core.calibration import get_top_1296_colors_rybw
+            from core.calibration import get_top_1296_colors
 
-                top_stacks = get_top_1296_colors_rybw()
-            else:
-                from core.calibration import get_top_1296_colors
-
-                top_stacks = get_top_1296_colors()
+            top_stacks = get_top_1296_colors()
             # get_top_1296_colors* 返回底到顶约定，需反转为顶到底（与校色板生成一致）
             stacks = [list(reversed(s)) for s in top_stacks[:total_cells]]
             return np.array(stacks, dtype=np.int32)
@@ -243,20 +253,13 @@ def draw_corner_points(img, points, color_mode: str, page_choice: str | None = N
             (0, 255, 255),  # Yellow (BL)
         ]
     elif "6-Color" in color_mode:
-        if "RYBW" in color_mode:
-            draw_colors = [
-                (255, 255, 255),  # White
-                (60, 20, 220),  # Red (BGR)
-                (240, 100, 0),  # Blue (BGR)
-                (0, 230, 255),  # Yellow (BGR)
-            ]
-        else:
-            draw_colors = [
-                (255, 255, 255),  # White
-                (214, 134, 0),  # Cyan (BGR)
-                (140, 0, 236),  # Magenta (BGR)
-                (42, 238, 244),  # Yellow (BGR)
-            ]
+        labels = ColorSystem.SIX_COLOR["corner_labels"]
+        draw_colors = [
+            (255, 255, 255),  # White
+            (214, 134, 0),  # Cyan (BGR)
+            (140, 0, 236),  # Magenta (BGR)
+            (42, 238, 244),  # Yellow (BGR)
+        ]
     elif "5-Color Extended" in color_mode:
         if page_choice is not None and "2" in str(page_choice):
             labels = ["蓝色 (左上)", "红色 (右上)", "黑色 (右下)", "黄色 (左下)"]
@@ -508,7 +511,13 @@ def run_extraction(img, points, offset_x, offset_y, zoom, barrel, bright, color_
 
     # 保存为 Keyed JSON 格式
     rgb_flat = extracted.reshape(-1, 3)[:total_cells]
-    metadata = LUTManager.infer_default_metadata("lumina_lut", LUT_FILE_PATH, len(rgb_flat), color_mode=color_mode)
+    metadata_mode = _normalize_6color_mode(color_mode)
+    metadata = LUTManager.infer_default_metadata(
+        "lumina_lut",
+        LUT_FILE_PATH,
+        len(rgb_flat),
+        color_mode=metadata_mode,
+    )
     # 根据颜色模式生成配方
     stacks = _generate_recipes(color_mode, total_cells, page_choice)
     LUTManager.save_keyed_json(LUT_FILE_PATH, rgb_flat, stacks, metadata)

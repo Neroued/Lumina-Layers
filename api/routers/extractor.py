@@ -40,6 +40,21 @@ def _image_to_png_bytes(img: object) -> bytes:
     raise TypeError(f"Unsupported image type: {type(img)}")
 
 
+def _normalize_6color_mode(color_mode: str) -> str:
+    """Normalize six-color variants to the unified CMYW mode.
+    将 6 色变体统一归一到 CMYW 模式。
+
+    Args:
+        color_mode (str): Raw color mode from request. (请求中的原始颜色模式)
+
+    Returns:
+        str: Normalized color mode. (归一化后的颜色模式)
+    """
+    if "6-Color" in str(color_mode):
+        return "6-Color (CMYWGK 1296)"
+    return color_mode
+
+
 def _build_default_palette(color_mode: str) -> list[dict]:
     """Build default palette array based on color mode.
     根据颜色模式构建默认调色板数组。
@@ -50,7 +65,8 @@ def _build_default_palette(color_mode: str) -> list[dict]:
     Returns:
         list[dict]: Default palette entries. (默认调色板条目列表)
     """
-    color_conf = ColorSystem.get(color_mode)
+    effective_mode = _normalize_6color_mode(color_mode)
+    color_conf = ColorSystem.get(effective_mode)
     slots = color_conf.get("slots", [])
     preview = color_conf.get("preview", {})
     palette = []
@@ -211,6 +227,8 @@ async def extractor_extract(
             detail=f"corner_points must contain exactly 4 points, got {len(points)}",
         )
 
+    effective_color_mode = _normalize_6color_mode(color_mode)
+
     # Convert UploadFile to ndarray
     try:
         img_arr = await upload_to_ndarray(image)
@@ -227,7 +245,7 @@ async def extractor_extract(
             zoom=zoom,
             barrel=distortion,
             bright=vignette_correction,
-            color_mode=color_mode,
+            color_mode=effective_color_mode,
             page_choice=page,
             auto_wb=auto_wb,
         )
@@ -240,10 +258,10 @@ async def extractor_extract(
     # Create session and store state
     session_id = store.create()
     store.put(session_id, "lut_path", lut_path)
-    store.put(session_id, "color_mode", color_mode)
+    store.put(session_id, "color_mode", effective_color_mode)
 
     # For 8-Color mode: save page-specific temp file
-    if "8-Color" in color_mode and lut_path:
+    if "8-Color" in effective_color_mode and lut_path:
         import sys
 
         if getattr(sys, "frozen", False):
@@ -264,7 +282,7 @@ async def extractor_extract(
             print(f"[8-COLOR] Error saving page {page_idx}: {e}")
 
     # For 5-Color Extended mode: save page-specific temp file
-    if "5-Color" in color_mode and lut_path:
+    if "5-Color" in effective_color_mode and lut_path:
         import sys
 
         if getattr(sys, "frozen", False):
@@ -306,7 +324,7 @@ async def extractor_extract(
         lut_download_url=f"/api/files/{lut_download_id}",
         warp_view_url=f"/api/files/{warp_view_id}" if warp_view_id else "",
         lut_preview_url=f"/api/files/{lut_preview_id}" if lut_preview_id else "",
-        default_palette=_build_default_palette(color_mode),
+        default_palette=_build_default_palette(effective_color_mode),
     )
 
 

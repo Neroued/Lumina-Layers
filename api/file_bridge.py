@@ -6,7 +6,7 @@ from typing import Optional
 import numpy as np
 from fastapi import HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
-from PIL import Image
+from PIL import Image, ImageOps
 
 # HEIC/HEIF support (optional dependency)
 try:
@@ -55,6 +55,13 @@ def _decode_raw_to_pil(data: bytes) -> Image.Image:
     return Image.fromarray(rgb)
 
 
+def _normalize_pil_orientation(img: Image.Image) -> Image.Image:
+    """Normalize PIL image orientation according to EXIF metadata.
+    根据 EXIF 元数据归一化 PIL 图像方向。
+    """
+    return ImageOps.exif_transpose(img)
+
+
 async def upload_to_ndarray(file: UploadFile) -> np.ndarray:
     """将 UploadFile 图像转换为 RGB NumPy ndarray。
 
@@ -62,7 +69,7 @@ async def upload_to_ndarray(file: UploadFile) -> np.ndarray:
         file: FastAPI UploadFile 对象
 
     Returns:
-        np.ndarray: shape (H, W, 3), dtype uint8, RGB 格式
+        np.ndarray: shape (H, W, 3), dtype uint8, RGB 格式（已归一化 EXIF 方向）
 
     Raises:
         ValueError: 文件格式无效或无法解码
@@ -74,6 +81,7 @@ async def upload_to_ndarray(file: UploadFile) -> np.ndarray:
         return np.array(img, dtype=np.uint8)
     try:
         img = Image.open(io.BytesIO(contents))
+        img = _normalize_pil_orientation(img)
         if img.mode != "RGB":
             img = img.convert("RGB")
         return np.array(img, dtype=np.uint8)
@@ -146,6 +154,7 @@ async def ensure_png_tempfile(file: UploadFile) -> str:
             img = _decode_raw_to_pil(data)
         else:
             img = Image.open(raw_path)
+        img = _normalize_pil_orientation(img)
         if img.mode != "RGB":
             img = img.convert("RGB")
         from config import TEMP_DIR
