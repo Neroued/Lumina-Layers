@@ -1179,6 +1179,10 @@ export const translations: Record<string, Record<"zh" | "en", string>> = {
     zh: "图像转换",
     en: "Converter",
   },
+  "tab.lutManagement": {
+    zh: "LUT管理",
+    en: "LUT Management",
+  },
   "tab.calibration": {
     zh: "校准",
     en: "Calibration",
