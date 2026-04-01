@@ -919,19 +919,19 @@ def select_extended_1444_colors(base_1024_stacks):
     return [s["stack"] for s in selected[:target]]
 
 
-def get_top_1444_colors():
+def get_top_5color_extended_page2_stacks():
     """
-    Intelligent color selection algorithm for 5-Color (RYBW+) system.
+    Intelligent color selection algorithm for 5-Color Extended Page 2.
 
     Returns 1444 most representative color combinations from 4096 possible
     combinations (4^5 + 4^5*3) to fill a 38x38 grid.
 
-    This function is public and can be called to reconstruct the stacking order.
+    This function reconstructs the Page 2 stacking order for extraction.
 
     Returns:
         List of 1444 tuples, each representing a 5 or 6-layer color stack
     """
-    print("[5C1444] Simulating 4096 combinations (4^5 + 4^5*3)...")
+    print("[5C_EXT_P2] Simulating 4096 combinations (4^5 + 4^5*3)...")
 
     LAYER_HEIGHT = PrinterConfig.LAYER_HEIGHT
     BACKING = np.array([255, 255, 255])
@@ -971,13 +971,13 @@ def get_top_1444_colors():
             final_rgb = curr.astype(np.uint8)
             candidates_6layer.append({"stack": stack, "layers": 6, "rgb": final_rgb})
 
-    print(f"[5C1444] Total candidates: 5layer={len(candidates_5layer)}, 6layer={len(candidates_6layer)}")
+    print(f"[5C_EXT_P2] Total candidates: 5layer={len(candidates_5layer)}, 6layer={len(candidates_6layer)}")
 
     all_candidates = candidates_5layer + candidates_6layer
 
     selected = []
 
-    print(f"[5C1444] Pre-selecting seed colors...")
+    print(f"[5C_EXT_P2] Pre-selecting seed colors...")
     for i in range(4):
         stack = (i,) * 5
         for c in candidates_5layer:
@@ -985,11 +985,11 @@ def get_top_1444_colors():
                 selected.append(c)
                 break
 
-    print(f"[5C1444] Seed colors: {len(selected)}")
+    print(f"[5C_EXT_P2] Seed colors: {len(selected)}")
 
     target = 1444
 
-    print(f"[5C1444] Round 1: High quality selection (RGB distance > 8)...")
+    print(f"[5C_EXT_P2] Round 1: High quality selection (RGB distance > 8)...")
     for c in all_candidates:
         if len(selected) >= target:
             break
@@ -1005,10 +1005,10 @@ def get_top_1444_colors():
         if is_distinct:
             selected.append(c)
 
-    print(f"[5C1444] Round 1 selected: {len(selected)}")
+    print(f"[5C_EXT_P2] Round 1 selected: {len(selected)}")
 
     if len(selected) < target:
-        print(f"[5C1444] Filling remaining {target - len(selected)} spots...")
+        print(f"[5C_EXT_P2] Filling remaining {target - len(selected)} spots...")
         for c in all_candidates:
             if len(selected) >= target:
                 break
@@ -1016,135 +1016,9 @@ def get_top_1444_colors():
                 continue
             selected.append(c)
 
-    print(f"[5C1444] Final selection: {len(selected)} colors")
+    print(f"[5C_EXT_P2] Final selection: {len(selected)} colors")
 
     return [s["stack"] for s in selected[:target]]
-
-
-def generate_5color1444_board(block_size_mm=5.0, gap_mm=0.8):
-    """
-    Generate 5-Color (RYBW+ 1444) calibration board with 38x38 border layout.
-
-    Features:
-    - 38x38 physical grid (36x36 data + 2 border protection)
-    - 1444 intelligently selected color blocks
-    - Corner alignment markers in outermost ring
-    - Face Down printing optimization
-
-    Args:
-        block_size_mm: Size of each color block in mm
-        gap_mm: Gap between blocks in mm
-
-    Returns:
-        Tuple of (output_path, preview_image, status_message)
-    """
-    print("[5C1444] Generating 5-Color 1444 calibration board (38x38 Layout)...")
-
-    stacks = get_top_1444_colors()
-
-    data_dim = 36
-    padding = 1
-    total_dim = data_dim + 2 * padding
-    block_w = float(block_size_mm)
-    gap = float(gap_mm)
-    margin = 5.0
-
-    board_w = margin * 2 + total_dim * block_w + (total_dim - 1) * gap
-    board_h = board_w
-
-    print(f"[5C1444] Board size: {board_w:.1f} x {board_h:.1f} mm (Grid: {total_dim}x{total_dim})")
-
-    preview_colors = {
-        0: [255, 255, 255, 255],
-        1: [220, 20, 60, 255],
-        2: [255, 230, 0, 255],
-        3: [0, 100, 240, 255],
-    }
-    slot_names = ["White", "Red", "Yellow", "Blue"]
-
-    pixels_per_block = max(1, int(block_w / PrinterConfig.NOZZLE_WIDTH))
-    pixels_gap = max(1, int(gap / PrinterConfig.NOZZLE_WIDTH))
-
-    voxel_w = total_dim * (pixels_per_block + pixels_gap)
-    voxel_h = total_dim * (pixels_per_block + pixels_gap)
-
-    color_layers = 6
-    backing_layers = int(PrinterConfig.BACKING_MM / PrinterConfig.LAYER_HEIGHT)
-    total_layers = color_layers + backing_layers
-
-    full_matrix = np.full((total_layers, voxel_h, voxel_w), 0, dtype=int)
-
-    print(f"[5C1444] Voxel matrix: {total_layers} x {voxel_h} x {voxel_w}")
-
-    for idx, stack in enumerate(stacks):
-        r_data = idx // data_dim
-        c_data = idx % data_dim
-
-        row = r_data + padding
-        col = c_data + padding
-
-        px = col * (pixels_per_block + pixels_gap)
-        py = row * (pixels_per_block + pixels_gap)
-
-        stack_len = len(stack)
-        for z in range(min(stack_len, color_layers)):
-            mat_id = stack[z]
-            if mat_id < 4:
-                full_matrix[z, py : py + pixels_per_block, px : px + pixels_per_block] = mat_id
-
-    # Set corner alignment markers (in outermost ring)
-    # TL: White (0), TR: Red (1), BR: Yellow (2), BL: Blue (3)
-    # Place markers on viewing surface (topmost layer) for visual identification after printing
-    corners = [(0, 0, 0), (0, total_dim - 1, 1), (total_dim - 1, total_dim - 1, 2), (total_dim - 1, 0, 3)]
-
-    viewing_surface_z = total_layers - 1  # Viewing surface is the last printed layer (top)
-    for r, c, mat_id in corners:
-        px = c * (pixels_per_block + pixels_gap)
-        py = r * (pixels_per_block + pixels_gap)
-        full_matrix[viewing_surface_z, py : py + pixels_per_block, px : px + pixels_per_block] = mat_id
-
-    scene = _get_trimesh().Scene()
-
-    for mat_id, rgba in preview_colors.items():
-        mesh = _generate_voxel_mesh(full_matrix, mat_id, voxel_h, voxel_w)
-        if mesh:
-            mesh.visual.face_colors = rgba
-            name = slot_names[mat_id]
-            mesh.metadata["name"] = name
-            scene.add_geometry(mesh, node_name=name, geom_name=name)
-
-    output_path = os.path.join(MODELS_DIR, generate_calibration_filename("5-Color", "Standard"))
-    export_scene_with_bambu_metadata(
-        scene=scene,
-        output_path=output_path,
-        slot_names=slot_names,
-        preview_colors=preview_colors,
-        settings={
-            "layer_height": "0.08",
-            "initial_layer_height": "0.08",
-            "wall_loops": "1",
-            "top_shell_layers": "0",
-            "bottom_shell_layers": "0",
-            "sparse_infill_density": "100%",
-            "sparse_infill_pattern": "zig-zag",
-        },
-        color_mode="RYBW",
-    )
-
-    bottom_layer = full_matrix[0].astype(np.uint8)
-    preview_arr = np.zeros((voxel_h, voxel_w, 3), dtype=np.uint8)
-    for mat_id, rgba in preview_colors.items():
-        preview_arr[bottom_layer == mat_id] = rgba[:3]
-
-    Stats.increment("calibrations")
-
-    print(f"[5C1444] ✅ Calibration board generated: {output_path}")
-
-    return (
-        output_path,
-        Image.fromarray(preview_arr),
-        f"✅ 5-Color (1444) 生成完毕 | 尺寸：{board_w:.1f}mm | 颜色：{', '.join(slot_names)}",
-    )
 
 
 def merge_5color_extended(base_lut_path, extended_lut_path, output_path=None):

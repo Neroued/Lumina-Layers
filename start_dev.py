@@ -3,8 +3,8 @@
 
 设计原则：
   1. 直接启动 node/python，不经过 cmd.exe 中间层 → Job Object 能直接管控
-  2. 启动前暴力清理：杀掉所有监听目标端口的进程
-  3. 退出时同样暴力清理：taskkill /T /F 杀进程树
+  2. 启动前安全清理：仅杀掉本项目的残留进程（通过命令行验证身份）
+  3. 退出时同样清理：taskkill /T /F 杀进程树
   4. 不自动重启，不预检前端端口（Vite 自行顺延）
   5. Ctrl+C / 关窗口 → 干净退出
 
@@ -12,7 +12,8 @@
     python start_dev.py              # 前后端
     python start_dev.py --backend    # 仅后端
     python start_dev.py --frontend   # 仅前端
-    python start_dev.py --kill       # 清理残留后退出
+    python start_dev.py --kill       # 清理本项目残留后退出
+    python start_dev.py --kill --force  # 强制清理所有占用端口的进程（慎用）
 """
 
 import argparse
@@ -131,8 +132,45 @@ def _kill_pid_tree(pid):
         capture_output=True, creationflags=0x08000000,
     )
 
-def _kill_listening(ports):
-    """杀掉所有监听指定端口的进程（进程树一起杀）"""
+def _get_process_cmdline(pid: int) -> str:
+    """获取进程命令行（用于验证身份）"""
+    try:
+        out = subprocess.run(
+            ["wmic", "process", "where", f"ProcessId={pid}",
+             "get", "CommandLine", "/VALUE"],
+            capture_output=True, text=True, creationflags=0x08000000,
+        ).stdout
+        for line in out.splitlines():
+            if line.startswith("CommandLine="):
+                return line[12:]
+    except Exception:
+        pass
+    return ""
+
+def _is_our_process(pid: int) -> bool:
+    """检查进程是否属于本项目
+    
+    通过命令行参数判断进程是否为本项目启动的后端或前端服务。
+    """
+    cmdline = _get_process_cmdline(pid)
+    if not cmdline:
+        return False
+    markers = [
+        "api_server.py",
+        str(ROOT),
+        "Lumina-Layers",
+        str(FRONTEND_DIR),
+    ]
+    return any(m in cmdline for m in markers)
+
+def _kill_listening(ports, force=False):
+    """杀掉所有监听指定端口的进程（进程树一起杀）
+    
+    Args:
+        ports: 要清理的端口列表
+        force: 为 True 时强制杀死所有占用端口的进程（不验证身份）
+               为 False 时仅杀死属于本项目的进程
+    """
     if os.name != "nt":
         return
     try:
@@ -141,6 +179,7 @@ def _kill_listening(ports):
             encoding="gbk", errors="ignore", creationflags=0x08000000,
         ).stdout
         killed = set()
+        skipped = []
         for line in out.splitlines():
             port_str = "|".join(str(p) for p in ports)
             m = re.search(
@@ -149,12 +188,19 @@ def _kill_listening(ports):
             )
             if m:
                 pid = int(m.group(2))
-                if pid not in killed:
+                port = m.group(1)
+                if pid in killed:
+                    continue
+                if force or _is_our_process(pid):
                     _kill_pid_tree(pid)
-                    _sys(f"已终止 PID {pid} (port {m.group(1)})")
+                    _sys(f"已终止 PID {pid} (port {port})")
                     killed.add(pid)
-    except Exception:
-        pass
+                else:
+                    skipped.append((pid, port))
+        for pid, port in skipped:
+            _sys(f"跳过 PID {pid} (port {port}) — 非本项目进程")
+    except Exception as e:
+        _err(f"清理端口时出错: {e}")
 
 def _wait_port_free(port, timeout=10):
     for _ in range(int(timeout / 0.3)):
@@ -265,9 +311,11 @@ class Proc:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--backend", action="store_true")
-    ap.add_argument("--frontend", action="store_true")
-    ap.add_argument("--kill", action="store_true")
+    ap.add_argument("--backend", action="store_true", help="仅启动后端")
+    ap.add_argument("--frontend", action="store_true", help="仅启动前端")
+    ap.add_argument("--kill", action="store_true", help="清理残留进程后退出")
+    ap.add_argument("--force", "-f", action="store_true",
+                    help="强制模式：不验证进程身份，杀掉所有占用端口的进程（慎用）")
     args = ap.parse_args()
 
     # Windows 颜色
@@ -284,10 +332,14 @@ def main():
 
     # ── 仅清理模式 ──
     if args.kill:
-        _sys("清理所有残留进程...")
+        if args.force:
+            _sys("强制清理所有占用端口的进程...")
+        else:
+            _sys("清理本项目残留进程...")
         _kill_listening([BACKEND_PORT, FRONTEND_PORT,
                          FRONTEND_PORT + 1, FRONTEND_PORT + 2,
-                         FRONTEND_PORT + 3, FRONTEND_PORT + 4])
+                         FRONTEND_PORT + 3, FRONTEND_PORT + 4],
+                        force=args.force)
         _ok("完成")
         return
 
