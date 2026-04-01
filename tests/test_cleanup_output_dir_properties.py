@@ -1,6 +1,6 @@
 """Property-based tests for cleanup_output_dir() extension filtering (Property 3).
 
-Feature: about-page-cache-cleanup, Property 3: OUTPUT_DIR 娓呯悊鎵╁睍鍚嶈繃婊?
+Feature: about-page-cache-cleanup, Property 3: OUTPUT_DIR 按扩展名清理过滤
 
 Uses Hypothesis to verify:
 - cleanup_output_dir deletes only files with extensions in {.3mf, .glb, .png, .jpg}
@@ -70,7 +70,7 @@ file_list = st.lists(
 
 
 # ---------------------------------------------------------------------------
-# Property 3: OUTPUT_DIR 娓呯悊鎵╁睍鍚嶈繃婊?
+# Property 3: OUTPUT_DIR 按扩展名清理过滤
 # ---------------------------------------------------------------------------
 
 
@@ -80,7 +80,7 @@ file_list = st.lists(
 def test_cleanup_output_dir_only_deletes_cleanable_extensions(
     files: list[tuple[str, bool]],
 ) -> None:
-    """Feature: about-page-cache-cleanup, Property 3: OUTPUT_DIR 娓呯悊鎵╁睍鍚嶈繃婊?
+    """Feature: about-page-cache-cleanup, Property 3: OUTPUT_DIR 按扩展名清理过滤
 
     For any set of filenames with various extensions, cleanup_output_dir should:
     1. Delete only files whose extension is in CLEANABLE_EXTENSIONS

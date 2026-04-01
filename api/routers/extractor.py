@@ -165,15 +165,15 @@ async def extractor_rotate(
     image: UploadFile = File(..., description="待旋转的图片"),
     registry: FileRegistry = Depends(get_file_registry),
 ):
-    """Rotate an image 90掳 counter-clockwise and return the rotated PNG.
-    """Rotate an image 90° counter-clockwise and return the rotated PNG.
+    """Rotate an image 90 degrees counter-clockwise and return the rotated PNG.
+    将图像逆时针旋转 90 度并返回旋转后的 PNG。
     """
     try:
         img_arr = await upload_to_ndarray(image)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    rotated = rotate_image(img_arr, "Rotate Left 90掳")
+    rotated = rotate_image(img_arr, "Rotate Left 90°")
     if rotated is None:
         raise HTTPException(status_code=500, detail="Image rotation failed")
 
@@ -203,7 +203,7 @@ async def extractor_preview_wb(
     registry: FileRegistry = Depends(get_file_registry),
 ):
     """Apply auto white balance to an image and return the preview PNG.
-    """Apply auto white balance to an image and return the preview PNG.
+    对图像应用自动白平衡并返回预览 PNG。
     """
     try:
         img_arr = await upload_to_ndarray(image)
@@ -245,7 +245,7 @@ async def extractor_extract(
     registry: FileRegistry = Depends(get_file_registry),
 ) -> ExtractResponse:
     """Extract colors from a photographed calibration board.
-    """Extract colors from a photographed calibration board.
+    从拍摄的标定板图像中提取颜色。
     """
     # Parse corner_points from JSON string
     try:
@@ -383,7 +383,7 @@ def extractor_manual_fix(
     registry: FileRegistry = Depends(get_file_registry),
 ) -> ManualFixResponse:
     """Manually override a single LUT cell color value.
-    """Manually override a single LUT cell color value.
+    手动覆盖单个 LUT 格点的颜色值。
     """
     # Resolve lut_path: prefer session lookup, fallback to direct path
     lut_path = request.lut_path
@@ -429,7 +429,7 @@ def extractor_merge_5color_extended(
     registry: FileRegistry = Depends(get_file_registry),
 ) -> ExtractResponse:
     """Merge two 5-Color Extended pages into a single LUT.
-    """Merge two 5-Color Extended pages into a single LUT.
+    将两页 5-Color Extended 合并为单个 LUT。
     """
     import sys
     from config import LUT_FILE_PATH
@@ -490,7 +490,7 @@ def extractor_merge_8color(
     registry: FileRegistry = Depends(get_file_registry),
 ) -> ExtractResponse:
     """Merge two 8-Color pages into a single LUT.
-    """Merge two 8-Color pages into a single LUT.
+    将两页 8-Color 合并为单个 LUT。
     """
     import sys
     from config import LUT_FILE_PATH
@@ -549,7 +549,7 @@ def confirm_palette(
     store: SessionStore = Depends(get_session_store),
 ) -> dict:
     """Accept user-confirmed palette and save to session.
-    """Accept user-confirmed palette and save to session.
+    接受用户确认的调色板并写入会话。
 
     Args:
         request (ConfirmPaletteRequest): Palette confirmation request. (调色板确认请求)
@@ -606,7 +606,7 @@ def confirm_palette(
             LUTManager.save_keyed_json(lut_path, rgb, stacks, existing_metadata)
             metadata = existing_metadata
         except LUT_PERSIST_WARNING_ERRORS as e:
-            persist_warning = f"璋冭壊鏉垮凡纭锛屼絾鎸佷箙鍖栧埌纾佺洏澶辫触: {e}"
+            persist_warning = f"调色板已确认，但持久化到磁盘失败: {e}"
             log.warning(
                 "Failed to persist confirmed palette",
                 extra={
@@ -620,4 +620,4 @@ def confirm_palette(
 
     if persist_warning:
         return {"status": "warning", "message": persist_warning}
-    return {"status": "ok", "message": "璋冭壊鏉垮凡纭"}
+    return {"status": "ok", "message": "调色板已确认"}

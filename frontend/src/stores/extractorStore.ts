@@ -85,11 +85,11 @@ export interface ExtractorState {
   mergeLoading: boolean;
   mergeError: string | null;
 
-  // 5鑹叉墿灞曞弻椤电姸鎬?
+  // 5 色扩展双页状态
   page1Extracted_5c: boolean;
   page2Extracted_5c: boolean;
 
-  // 璋冭壊鏉跨‘璁?
+  // 调色板与元数据（厂商、类型、默认板与确认状态）
   manufacturer: string;
   type: string;
   defaultPalette: ExtractorPaletteEntry[];
