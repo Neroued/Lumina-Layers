@@ -10,6 +10,7 @@ S07 — 多材质 3D 网格生成（支持并行 ThreadPoolExecutor）。
 
 import os
 import time
+import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
@@ -17,6 +18,8 @@ import trimesh
 
 from config import PrinterConfig
 from core.mesh_generators import get_mesher
+
+_log = logging.getLogger(__name__)
 
 
 def _timed_generate_mesh(mesher, full_matrix, mat_id, target_h):
@@ -43,14 +46,14 @@ def run(ctx: dict) -> dict:
         - valid_slot_names (list[str]): 成功生成网格的材料名称列表
         - transform (np.ndarray): 4x4 变换矩阵（像素→mm）
     """
-    full_matrix = ctx['full_matrix']
-    slot_names = ctx['slot_names']
-    preview_colors = ctx['preview_colors']
-    modeling_mode = ctx['modeling_mode']
-    target_h = ctx['target_h']
-    pixel_scale = ctx['pixel_scale']
+    full_matrix = ctx["full_matrix"]
+    slot_names = ctx["slot_names"]
+    preview_colors = ctx["preview_colors"]
+    modeling_mode = ctx["modeling_mode"]
+    target_h = ctx["target_h"]
+    pixel_scale = ctx["pixel_scale"]
 
-    _bench_enabled = ctx.get('_bench_enabled', True)
+    _bench_enabled = ctx.get("_bench_enabled", True)
     _mesh_t0 = time.perf_counter() if _bench_enabled else None
 
     # Build transform matrix: pixel/voxel coords → mm
@@ -61,20 +64,22 @@ def run(ctx: dict) -> dict:
     transform[1, 1] = pixel_scale
     transform[2, 2] = PrinterConfig.LAYER_HEIGHT
 
-    print(f"[S07] Transform: XY={pixel_scale}mm/px, Z={PrinterConfig.LAYER_HEIGHT}mm/layer")
+    _log.info(f"[S07] Transform: XY={pixel_scale}mm/px, Z={PrinterConfig.LAYER_HEIGHT}mm/layer")
 
     mesher = get_mesher(modeling_mode)
-    print(f"[S07] Using mesher: {mesher.__class__.__name__}")
+    _log.info(f"[S07] Using mesher: {mesher.__class__.__name__}")
 
     valid_slot_names = []
     num_materials = len(slot_names)
-    print(f"[S07] Generating meshes for {num_materials} materials...")
+    _log.info(f"[S07] Generating meshes for {num_materials} materials...")
 
     max_workers = min(4, num_materials)
     parallel_enabled = max_workers > 1 and os.getenv("LUMINA_DISABLE_PARALLEL_MESH", "0") != "1"
     mesh_results = {}
     mesh_errors = {}
     mat_timings = {}
+    mesh_compute_elapsed = 0.0
+    mesh_apply_elapsed = 0.0
     if parallel_enabled:
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             future_map = {
@@ -85,45 +90,50 @@ def run(ctx: dict) -> dict:
                 mat_id = future_map[future]
                 try:
                     mesh_results[mat_id], mat_timings[mat_id] = future.result()
-                except Exception as e:
+                    mesh_compute_elapsed += mat_timings[mat_id]
+                except (ValueError, TypeError, RuntimeError, OSError) as e:
                     mesh_errors[mat_id] = e
     else:
         for mat_id in range(num_materials):
             try:
                 mesh_results[mat_id], mat_timings[mat_id] = _timed_generate_mesh(mesher, full_matrix, mat_id, target_h)
-            except Exception as e:
+                mesh_compute_elapsed += mat_timings[mat_id]
+            except (ValueError, TypeError, RuntimeError, OSError) as e:
                 mesh_errors[mat_id] = e
 
+    log_detail = num_materials <= 8
+    preview_color_cache = {idx: preview_colors[idx] for idx in range(num_materials)}
     for mat_id in range(num_materials):
         if mat_id in mesh_errors:
             e = mesh_errors[mat_id]
-            print(f"[S07] Error generating mesh for material {mat_id} ({slot_names[mat_id]}): {e}")
-            print(f"[S07] Continuing with other materials...")
+            _log.warning(f"[S07] Error generating mesh for material {mat_id} ({slot_names[mat_id]}): {e}")
+            _log.info("[S07] Continuing with other materials...")
             continue
         mesh = mesh_results.get(mat_id)
         if mesh:
+            _apply_t0 = time.perf_counter()
             mesh.apply_transform(transform)
-            mesh.visual.face_colors = preview_colors[mat_id]
+            mesh.visual.face_colors = preview_color_cache[mat_id]
             name = slot_names[mat_id]
-            mesh.metadata['name'] = name
-            scene.add_geometry(
-                mesh,
-                node_name=name,
-                geom_name=name
-            )
+            mesh.metadata["name"] = name
+            scene.add_geometry(mesh, node_name=name, geom_name=name)
+            mesh_apply_elapsed += time.perf_counter() - _apply_t0
             valid_slot_names.append(name)
             _mt = mat_timings.get(mat_id, 0.0)
-            print(f"[S07]   {name}: {len(mesh.vertices):,}v {len(mesh.faces):,}f  {_mt:.3f}s")
+            if log_detail:
+                _log.info(f"[S07]   {name}: {len(mesh.vertices):,}v {len(mesh.faces):,}f  {_mt:.3f}s")
 
     if _bench_enabled and _mesh_t0 is not None:
         _mesh_elapsed = time.perf_counter() - _mesh_t0
-        _hifi_timings = ctx.setdefault('_hifi_timings', {})
-        _hifi_timings['mesh_gen_s'] = _mesh_elapsed
-        print(f"[S07] mesh_gen done: {_mesh_elapsed:.3f}s")
+        _hifi_timings = ctx.setdefault("_hifi_timings", {})
+        _hifi_timings["mesh_gen_s"] = _mesh_elapsed
+        _hifi_timings["mesh_compute_s"] = mesh_compute_elapsed
+        _hifi_timings["mesh_apply_transform_s"] = mesh_apply_elapsed
+        _log.info(f"[S07] mesh_gen done: {_mesh_elapsed:.3f}s")
 
-    ctx['scene'] = scene
-    ctx['valid_slot_names'] = valid_slot_names
-    ctx['transform'] = transform
-    ctx['mesher'] = mesher
+    ctx["scene"] = scene
+    ctx["valid_slot_names"] = valid_slot_names
+    ctx["transform"] = transform
+    ctx["mesher"] = mesher
 
     return ctx

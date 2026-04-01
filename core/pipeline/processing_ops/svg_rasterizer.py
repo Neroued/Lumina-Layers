@@ -10,8 +10,11 @@ Extracted from LuminaImageProcessor._load_svg.
 
 import os
 import time
+import logging
 import numpy as np
 import cv2
+
+_log = logging.getLogger(__name__)
 
 # SVG support (optional dependency)
 try:
@@ -71,7 +74,7 @@ def _get_svg_pixel_dims(svg_path: str):
             parts = vb.replace(",", " ").split()
             if len(parts) == 4:
                 return float(parts[2]), float(parts[3])
-    except Exception:
+    except (OSError, ValueError, TypeError):
         pass
     return 0.0, 0.0
 
@@ -104,12 +107,12 @@ def rasterize_svg(svg_path: str, target_width_mm: float, pixels_per_mm: float = 
         cache_key = (svg_abs, round(float(target_width_mm), 4), round(float(pixels_per_mm), 2), svg_mtime)
         cached = _SVG_RASTER_CACHE.get(cache_key)
         if cached is not None:
-            print(f"[SVG] Cache hit: {os.path.basename(svg_abs)} @ {pixels_per_mm}px/mm")
+            _log.info(f"[SVG] Cache hit: {os.path.basename(svg_abs)} @ {pixels_per_mm}px/mm")
             return cached.copy()
-    except Exception:
+    except (OSError, ValueError, TypeError):
         cache_key = None
 
-    print(f"[SVG] Rasterizing: {svg_path}")
+    _log.info(f"[SVG] Rasterizing: {svg_path}")
     _t0_total = time.perf_counter()
 
     # 1. 读取 SVG
@@ -136,7 +139,7 @@ def rasterize_svg(svg_path: str, target_width_mm: float, pixels_per_mm: float = 
         raw_w, raw_h = float(drawing.width), float(drawing.height)
     if raw_w <= 0 or raw_h <= 0:
         raise ValueError(f"SVG has zero-size dimensions: {raw_w}x{raw_h}")
-    print(f"[SVG] Canvas: {raw_w:.1f}x{raw_h:.1f}")
+    _log.info(f"[SVG] Canvas: {raw_w:.1f}x{raw_h:.1f}")
 
     # 2. 缩放到目标像素宽度（强制最低渲染质量保证 Dual-Pass 效果）
     target_width_px = int(target_width_mm * pixels_per_mm)
@@ -185,34 +188,31 @@ def rasterize_svg(svg_path: str, target_width_mm: float, pixels_per_mm: float = 
             y_max = min(h_arr - 1, row_idx[-1] + BORDER)
             x_max = min(w_arr - 1, col_idx[-1] + BORDER)
             img_final = img_final[y_min : y_max + 1, x_min : x_max + 1]
-        print(f"[SVG] Content-aware crop: {img_final.shape[1]}x{img_final.shape[0]} px")
+        _log.info(f"[SVG] Content-aware crop: {img_final.shape[1]}x{img_final.shape[0]} px")
 
         if render_width_px > target_width_px and target_width_px > 0:
             scale_back = target_width_px / render_width_px
             out_w = max(1, round(img_final.shape[1] * scale_back))
             out_h = max(1, round(img_final.shape[0] * scale_back))
             img_final = cv2.resize(img_final, (out_w, out_h), interpolation=cv2.INTER_AREA)
-            print(f"[SVG] Scaled to target: {out_w}x{out_h} px")
+            _log.info(f"[SVG] Scaled to target: {out_w}x{out_h} px")
         _t_postprocess = time.perf_counter() - _t0
 
         _t_total = time.perf_counter() - _t0_total
-        print(
+        _log.info(
             f"[SVG] Timing: parse={_t_parse:.2f}s, "
             f"render_white={_t_render_white:.2f}s, render_black={_t_render_black:.2f}s, "
             f"postprocess={_t_postprocess:.2f}s, total={_t_total:.2f}s"
         )
-        print(f"[SVG] Final resolution: {img_final.shape[1]}x{img_final.shape[0]} px")
+        _log.info(f"[SVG] Final resolution: {img_final.shape[1]}x{img_final.shape[0]} px")
         if cache_key is not None:
             _SVG_RASTER_CACHE[cache_key] = img_final.copy()
             while len(_SVG_RASTER_CACHE) > _SVG_RASTER_CACHE_MAX:
                 _SVG_RASTER_CACHE.pop(next(iter(_SVG_RASTER_CACHE)))
         return img_final
 
-    except Exception as e:
-        print(f"[SVG] Dual-Pass failed: {e}")
-        import traceback
-
-        traceback.print_exc()
+    except (OSError, ValueError, TypeError, RuntimeError) as e:
+        _log.exception(f"[SVG] Dual-Pass failed: {e}")
 
         # 最后的保底：如果双重渲染失败，回退到普通渲染
         pil_img = renderPM.drawToPIL(drawing, bg=None, configPIL={"transparent": True})

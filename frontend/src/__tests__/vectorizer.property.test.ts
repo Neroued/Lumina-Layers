@@ -15,7 +15,7 @@ import * as fc from "fast-check";
 // Mock apiClient before importing buildFileUrl
 vi.mock("../api/client", () => ({
   default: {
-    defaults: { baseURL: "http://localhost:8000/api" },
+    defaults: { baseURL: "/api" },
     post: vi.fn(),
     get: vi.fn(),
   },
@@ -25,7 +25,7 @@ vi.mock("../api/vectorizer", () => ({
   vectorizeImage: vi.fn(),
 }));
 
-vi.mock("../stores/converterStore", () => ({
+vi.mock("../stores/converter", () => ({
   useConverterStore: {
     getState: vi.fn(() => ({ setImageFile: vi.fn() })),
   },
@@ -169,7 +169,7 @@ describe("Property 5: 下载 URL 构建正确性 (Download URL construction)", (
     fc.assert(
       fc.property(relativePathArb, (path) => {
         const url = buildFileUrl(path);
-        expect(url).toBe(`http://localhost:8000/api${path}`);
+        expect(url).toBe(`/api${path}`);
         expect(url.endsWith(path)).toBe(true);
       }),
       { numRuns: 200 },

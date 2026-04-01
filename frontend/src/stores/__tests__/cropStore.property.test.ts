@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import * as fc from 'fast-check';
-import { useConverterStore } from '../converterStore';
+import { useConverterStore } from '../converter';
 
 /**
  * Property-based tests for crop-related store behavior.

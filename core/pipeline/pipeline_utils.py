@@ -12,11 +12,13 @@ Pipeline shared utility functions.
 
 import os
 import math
+import logging
 import numpy as np
 from typing import List, Dict, Tuple, Optional
 
 from config import PrinterConfig, ColorSystem, ModelingMode
 
+log = logging.getLogger(__name__)
 
 # ========== 颜色工具函数 (Color Utility Functions) ==========
 
@@ -52,7 +54,7 @@ def _hex_to_rgb_tuple(hex_color):
         raise ValueError("hex_color must be a string")
 
     h = hex_color.strip().lower()
-    if h.startswith('#'):
+    if h.startswith("#"):
         h = h[1:]
     if len(h) != 6:
         raise ValueError(f"invalid hex color: {hex_color}")
@@ -74,7 +76,7 @@ def calculate_luminance(hex_color):
         float: Luminance value (0-255)
     """
     # Remove '#' if present
-    hex_color = hex_color.lstrip('#')
+    hex_color = hex_color.lstrip("#")
 
     # Convert hex to RGB
     r = int(hex_color[0:2], 16)
@@ -107,8 +109,8 @@ def extract_color_palette(preview_cache: dict) -> List[dict]:
     if preview_cache is None:
         return []
 
-    matched_rgb = preview_cache.get('matched_rgb')
-    mask_solid = preview_cache.get('mask_solid')
+    matched_rgb = preview_cache.get("matched_rgb")
+    mask_solid = preview_cache.get("mask_solid")
 
     if matched_rgb is None or mask_solid is None:
         return []
@@ -129,15 +131,17 @@ def extract_color_palette(preview_cache: dict) -> List[dict]:
     palette = []
     for color, count in zip(unique_colors, counts):
         r, g, b = int(color[0]), int(color[1]), int(color[2])
-        palette.append({
-            'color': (r, g, b),
-            'hex': f'#{r:02x}{g:02x}{b:02x}',
-            'count': int(count),
-            'percentage': round(count / total_solid * 100, 2)
-        })
+        palette.append(
+            {
+                "color": (r, g, b),
+                "hex": f"#{r:02x}{g:02x}{b:02x}",
+                "count": int(count),
+                "percentage": round(count / total_solid * 100, 2),
+            }
+        )
 
     # Sort by count descending
-    palette.sort(key=lambda x: x['count'], reverse=True)
+    palette.sort(key=lambda x: x["count"], reverse=True)
 
     return palette
 
@@ -194,7 +198,7 @@ def generate_auto_height_map(color_list, mode, base_thickness, max_relief_height
         # All colors get the same height (average of base and max)
         avg_height = (base_thickness + max_relief_height) / 2.0
         color_height_map = {color: round(avg_height, 1) for color, _ in color_luminance}
-        print(f"[AUTO HEIGHT] All colors have same luminance, using average height: {avg_height:.1f}mm")
+        log.info(f"[AUTO HEIGHT] All colors have same luminance, using average height: {avg_height:.1f}mm")
         return color_height_map
 
     # Step 3: Calculate available height range
@@ -222,11 +226,15 @@ def generate_auto_height_map(color_list, mode, base_thickness, max_relief_height
         # Round to 0.1mm precision
         color_height_map[color] = round(height, 1)
 
-    print(f"[AUTO HEIGHT] Generated normalized height map for {len(color_list)} colors")
-    print(f"[AUTO HEIGHT] Mode: {mode}")
-    print(f"[AUTO HEIGHT] Luminance range: {y_min:.1f} - {y_max:.1f}")
-    print(f"[AUTO HEIGHT] Height range: {min(color_height_map.values()):.1f}mm - {max(color_height_map.values()):.1f}mm")
-    print(f"[AUTO HEIGHT] Total height span: {max(color_height_map.values()) - min(color_height_map.values()):.1f}mm")
+    log.info(f"[AUTO HEIGHT] Generated normalized height map for {len(color_list)} colors")
+    log.info(f"[AUTO HEIGHT] Mode: {mode}")
+    log.info(f"[AUTO HEIGHT] Luminance range: {y_min:.1f} - {y_max:.1f}")
+    log.info(
+        f"[AUTO HEIGHT] Height range: {min(color_height_map.values()):.1f}mm - {max(color_height_map.values()):.1f}mm"
+    )
+    log.info(
+        f"[AUTO HEIGHT] Total height span: {max(color_height_map.values()) - min(color_height_map.values()):.1f}mm"
+    )
 
     return color_height_map
 
@@ -270,13 +278,13 @@ def extract_lut_available_colors(lut_path: str) -> List[dict]:
         if LUTManager is not None:
             rgb, _stacks, _metadata = LUTManager.load_lut_with_metadata(lut_path)
             measured_colors = rgb.reshape(-1, 3)
-        elif lut_path.endswith('.npz'):
+        elif lut_path.endswith(".npz"):
             data = np.load(lut_path, allow_pickle=False)
-            measured_colors = data['rgb']
+            measured_colors = data["rgb"]
         else:
             lut_grid = np.load(lut_path)
             measured_colors = lut_grid.reshape(-1, 3)
-        print(f"[LUT_COLORS] Loading LUT with {len(measured_colors)} colors from {lut_path}")
+        log.info(f"[LUT_COLORS] Loading LUT with {len(measured_colors)} colors from {lut_path}")
 
         # Get unique colors
         unique_colors = np.unique(measured_colors, axis=0)
@@ -285,19 +293,16 @@ def extract_lut_available_colors(lut_path: str) -> List[dict]:
         colors = []
         for color in unique_colors:
             r, g, b = int(color[0]), int(color[1]), int(color[2])
-            colors.append({
-                'color': (r, g, b),
-                'hex': f'#{r:02x}{g:02x}{b:02x}'
-            })
+            colors.append({"color": (r, g, b), "hex": f"#{r:02x}{g:02x}{b:02x}"})
 
         # Sort by brightness (dark to light) for better UX
-        colors.sort(key=lambda x: sum(x['color']))
+        colors.sort(key=lambda x: sum(x["color"]))
 
-        print(f"[LUT_COLORS] Extracted {len(colors)} unique colors from LUT")
+        log.info(f"[LUT_COLORS] Extracted {len(colors)} unique colors from LUT")
         return colors
 
-    except Exception as e:
-        print(f"[LUT_COLORS] Error extracting colors from LUT: {e}")
+    except (OSError, ValueError, TypeError, KeyError) as e:
+        log.warning(f"[LUT_COLORS] Error extracting colors from LUT: {e}")
         return []
 
 
@@ -320,8 +325,8 @@ def get_lut_color_choices(lut_path: str) -> List[tuple]:
 
     choices = []
     for entry in colors:
-        hex_color = entry['hex']
-        r, g, b = entry['color']
+        hex_color = entry["hex"]
+        r, g, b = entry["color"]
         # Create a display label with RGB values
         label = f"■ {hex_color} (R:{r} G:{g} B:{b})"
         choices.append((label, hex_color))
@@ -349,8 +354,8 @@ def generate_lut_color_dropdown_html(lut_path: str, selected_color: str = None, 
     Returns:
         HTML string showing available colors as a clickable grid
     """
-    # NOTE: HTML generation was previously delegated to ui.palette_extension (Gradio-only).
-    # React frontend renders its own color grid UI via API.
+    # NOTE: HTML generation was previously delegated to legacy UI extension
+    # modules. The web frontend now renders color grid UI via API data.
     colors = extract_lut_available_colors(lut_path)
     if not colors:
         return ""
@@ -373,61 +378,67 @@ def detect_lut_color_mode(lut_path):
         return None
 
     try:
-        if lut_path.endswith('.npz'):
+        if lut_path.endswith(".npz"):
             data = np.load(lut_path)
-            if 'rgb' in data:
-                rgb = data['rgb']
+            if "rgb" in data:
+                rgb = data["rgb"]
                 total_colors = int(rgb.reshape(-1, 3).shape[0])
-                stacks = data['stacks'] if 'stacks' in data else None
+                stacks = data["stacks"] if "stacks" in data else None
                 layer_count = int(stacks.shape[1]) if isinstance(stacks, np.ndarray) and stacks.ndim == 2 else None
                 max_mat = int(np.max(stacks)) if isinstance(stacks, np.ndarray) and stacks.size > 0 else None
-                if total_colors >= 2400 and total_colors < 2600 and layer_count == 6 and (max_mat is None or max_mat <= 4):
-                    print(f"[AUTO_DETECT] Detected 5-Color Extended mode from .npz ({total_colors} colors)")
+                if (
+                    total_colors >= 2400
+                    and total_colors < 2600
+                    and layer_count == 6
+                    and (max_mat is None or max_mat <= 4)
+                ):
+                    log.info(f"[AUTO_DETECT] Detected 5-Color Extended mode from .npz ({total_colors} colors)")
                     return "5-Color Extended"
                 if total_colors >= 2600 and total_colors <= 2800:
-                    print(f"[AUTO_DETECT] Detected 8-Color mode from .npz ({total_colors} colors)")
+                    log.info(f"[AUTO_DETECT] Detected 8-Color mode from .npz ({total_colors} colors)")
                     return "8-Color Max"
                 if total_colors >= 1200 and total_colors < 1400:
-                    print(f"[AUTO_DETECT] Detected 6-Color mode from .npz ({total_colors} colors)")
+                    log.info(f"[AUTO_DETECT] Detected 6-Color mode from .npz ({total_colors} colors)")
                     return "6-Color (CMYWGK 1296)"
                 if total_colors >= 900 and total_colors < 1200:
-                    print(f"[AUTO_DETECT] Detected 4-Color mode from .npz ({total_colors} colors)")
+                    log.info(f"[AUTO_DETECT] Detected 4-Color mode from .npz ({total_colors} colors)")
                     return "4-Color"
                 if total_colors >= 30 and total_colors <= 35:
-                    print(f"[AUTO_DETECT] Detected 2-Color BW mode from .npz ({total_colors} colors)")
+                    log.info(f"[AUTO_DETECT] Detected 2-Color BW mode from .npz ({total_colors} colors)")
                     return "BW (Black & White)"
-            print(f"[AUTO_DETECT] Detected Merged LUT (.npz format)")
+            log.info(f"[AUTO_DETECT] Detected Merged LUT (.npz format)")
             return "Merged"
 
         # .json (Keyed JSON) format
-        if lut_path.endswith('.json'):
+        if lut_path.endswith(".json"):
             from utils.lut_manager import LUTManager
+
             rgb, stacks, _meta = LUTManager.load_lut_with_metadata(lut_path)
             # 优先使用存储的 color_mode
             if _meta and _meta.color_mode:
-                print(f"[AUTO_DETECT] Using stored color_mode from metadata: {_meta.color_mode}")
+                log.info(f"[AUTO_DETECT] Using stored color_mode from metadata: {_meta.color_mode}")
                 return _meta.color_mode
             # 回退到基于数量的推断
             total_colors = len(rgb) if rgb is not None else 0
             layer_count = int(stacks.shape[1]) if isinstance(stacks, np.ndarray) and stacks.ndim == 2 else None
             max_mat = int(np.max(stacks)) if isinstance(stacks, np.ndarray) and stacks.size > 0 else None
-            print(f"[AUTO_DETECT] JSON LUT: {total_colors} colors, layer_count={layer_count}, max_mat={max_mat}")
+            log.info(f"[AUTO_DETECT] JSON LUT: {total_colors} colors, layer_count={layer_count}, max_mat={max_mat}")
             if total_colors >= 2400 and total_colors < 2600 and layer_count == 6 and (max_mat is None or max_mat <= 4):
-                print(f"[AUTO_DETECT] Detected 5-Color Extended mode from .json ({total_colors} colors)")
+                log.info(f"[AUTO_DETECT] Detected 5-Color Extended mode from .json ({total_colors} colors)")
                 return "5-Color Extended"
             if total_colors >= 2600 and total_colors <= 2800:
-                print(f"[AUTO_DETECT] Detected 8-Color mode from .json ({total_colors} colors)")
+                log.info(f"[AUTO_DETECT] Detected 8-Color mode from .json ({total_colors} colors)")
                 return "8-Color Max"
             if total_colors >= 1200 and total_colors < 1400:
-                print(f"[AUTO_DETECT] Detected 6-Color mode from .json ({total_colors} colors)")
+                log.info(f"[AUTO_DETECT] Detected 6-Color mode from .json ({total_colors} colors)")
                 return "6-Color (CMYWGK 1296)"
             if total_colors >= 900 and total_colors < 1200:
-                print(f"[AUTO_DETECT] Detected 4-Color mode from .json ({total_colors} colors)")
+                log.info(f"[AUTO_DETECT] Detected 4-Color mode from .json ({total_colors} colors)")
                 return "4-Color"
             if total_colors >= 30 and total_colors <= 35:
-                print(f"[AUTO_DETECT] Detected 2-Color BW mode from .json ({total_colors} colors)")
+                log.info(f"[AUTO_DETECT] Detected 2-Color BW mode from .json ({total_colors} colors)")
                 return "BW (Black & White)"
-            print(f"[AUTO_DETECT] Non-standard JSON LUT size ({total_colors} colors), detected as Merged")
+            log.info(f"[AUTO_DETECT] Non-standard JSON LUT size ({total_colors} colors), detected as Merged")
             return "Merged"
 
         # Standard .npy format
@@ -439,7 +450,7 @@ def detect_lut_color_mode(lut_path):
             if len(lut_data) % 3 == 0:
                 lut_data = lut_data.reshape(-1, 3)
             else:
-                print(f"[AUTO_DETECT] Invalid LUT format: cannot reshape to (N, 3)")
+                log.info(f"[AUTO_DETECT] Invalid LUT format: cannot reshape to (N, 3)")
                 return None
 
         # 计算颜色数量
@@ -448,42 +459,40 @@ def detect_lut_color_mode(lut_path):
         else:
             total_colors = lut_data.shape[0] * lut_data.shape[1]
 
-        print(f"[AUTO_DETECT] LUT shape: {lut_data.shape}, total colors: {total_colors}")
+        log.info(f"[AUTO_DETECT] LUT shape: {lut_data.shape}, total colors: {total_colors}")
 
         # 2色模式：32色 (2^5 = 32)
         if total_colors >= 30 and total_colors <= 35:
-            print(f"[AUTO_DETECT] Detected 2-Color BW mode (32 colors)")
+            log.info(f"[AUTO_DETECT] Detected 2-Color BW mode (32 colors)")
             return "BW (Black & White)"
 
         # 5-Color Extended模式：~2468色 (1024 base + 1444 extended)
         elif total_colors >= 2400 and total_colors < 2600:
-            print(f"[AUTO_DETECT] Detected 5-Color Extended mode ({total_colors} colors)")
+            log.info(f"[AUTO_DETECT] Detected 5-Color Extended mode ({total_colors} colors)")
             return "5-Color Extended"
 
         # 8色模式：2600-2800色
         elif total_colors >= 2600 and total_colors <= 2800:
-            print(f"[AUTO_DETECT] Detected 8-Color mode ({total_colors} colors)")
+            log.info(f"[AUTO_DETECT] Detected 8-Color mode ({total_colors} colors)")
             return "8-Color Max"
 
         # 6色模式：1200-1400色
         elif total_colors >= 1200 and total_colors < 1400:
-            print(f"[AUTO_DETECT] Detected 6-Color mode ({total_colors} colors)")
+            log.info(f"[AUTO_DETECT] Detected 6-Color mode ({total_colors} colors)")
             return "6-Color (CMYWGK 1296)"
 
         # 4色模式：900-1200色
         elif total_colors >= 900 and total_colors < 1200:
-            print(f"[AUTO_DETECT] Detected 4-Color mode ({total_colors} colors)")
+            log.info(f"[AUTO_DETECT] Detected 4-Color mode ({total_colors} colors)")
             return "4-Color"
 
         else:
             # 非标准尺寸：识别为合并色卡
-            print(f"[AUTO_DETECT] Non-standard LUT size ({total_colors} colors), detected as Merged")
+            log.info(f"[AUTO_DETECT] Non-standard LUT size ({total_colors} colors), detected as Merged")
             return "Merged"
 
-    except Exception as e:
-        print(f"[AUTO_DETECT] Error detecting LUT mode: {e}")
-        import traceback
-        traceback.print_exc()
+    except (OSError, ValueError, TypeError, KeyError) as e:
+        log.exception(f"[AUTO_DETECT] Error detecting LUT mode: {e}")
         return None
 
 
@@ -507,15 +516,15 @@ def detect_image_type(image_path: str | None) -> str | None:
     try:
         ext = os.path.splitext(image_path)[1].lower()
 
-        if ext == '.svg':
-            print(f"[AUTO_DETECT] SVG file detected, recommending SVG Mode")
+        if ext == ".svg":
+            log.info(f"[AUTO_DETECT] SVG file detected, recommending SVG Mode")
             return ModelingMode.VECTOR
         else:
-            print(f"[AUTO_DETECT] Raster image detected ({ext}), keeping current mode")
+            log.info(f"[AUTO_DETECT] Raster image detected ({ext}), keeping current mode")
             return None
 
-    except Exception as e:
-        print(f"[AUTO_DETECT] Error detecting image type: {e}")
+    except (OSError, ValueError, TypeError) as e:
+        log.warning(f"[AUTO_DETECT] Error detecting image type: {e}")
         return None
 
 
@@ -561,6 +570,7 @@ def generate_lut_grid_html(lut_path, lang: str = "zh"):
     """
     from core.i18n import I18n
     import colorsys
+
     colors = extract_lut_available_colors(lut_path)
 
     if not colors:
@@ -573,30 +583,29 @@ def generate_lut_grid_html(lut_path, lang: str = "zh"):
         h, s, v = colorsys.rgb_to_hsv(rf, gf, bf)
         h360 = h * 360
         if s < 0.15 or v < 0.10:
-            return 'neutral'
+            return "neutral"
         if h360 < 15 or h360 >= 345:
-            return 'red'
+            return "red"
         elif h360 < 40:
-            return 'orange'
+            return "orange"
         elif h360 < 70:
-            return 'yellow'
+            return "yellow"
         elif h360 < 160:
-            return 'green'
+            return "green"
         elif h360 < 195:
-            return 'cyan'
+            return "cyan"
         elif h360 < 260:
-            return 'blue'
+            return "blue"
         elif h360 < 345:
-            return 'purple'
-        return 'neutral'
+            return "purple"
+        return "neutral"
 
-    # NOTE: search/hue-filter HTML was previously from ui.palette_extension (Gradio-only).
-    # React frontend renders its own search/filter UI via API.
+    # NOTE: Search/hue-filter UI is rendered by the web frontend via API data.
     _search_bar_html = ""
     _hue_filter_html = ""
 
     # Derive LUT key for favorites persistence
-    _lut_key = os.path.splitext(os.path.basename(lut_path))[0] if lut_path else ''
+    _lut_key = os.path.splitext(os.path.basename(lut_path))[0] if lut_path else ""
 
     html = f"""
     <div class="lut-grid-container">
@@ -618,8 +627,8 @@ def generate_lut_grid_html(lut_path, lang: str = "zh"):
     """
 
     for entry in colors:
-        hex_val = entry['hex']
-        r, g, b = entry['color']
+        hex_val = entry["hex"]
+        r, g, b = entry["color"]
         rgb_val = f"R:{r} G:{g} B:{b}"
         hue_cat = _classify_hue(r, g, b)
 
@@ -665,7 +674,7 @@ def generate_lut_card_grid_html(lut_path, lang: str = "zh"):
     try:
         lut_grid = np.load(lut_path)
         measured_colors = lut_grid.reshape(-1, 3)
-    except Exception as e:
+    except (OSError, ValueError, TypeError) as e:
         return f"<div style='color:orange'>LUT 加载失败: {e}</div>"
 
     total = len(measured_colors)
@@ -678,22 +687,22 @@ def generate_lut_card_grid_html(lut_path, lang: str = "zh"):
         h, s, v = colorsys.rgb_to_hsv(rf, gf, bf)
         h360 = h * 360
         if s < 0.15 or v < 0.10:
-            return 'neutral'
+            return "neutral"
         if h360 < 15 or h360 >= 345:
-            return 'red'
+            return "red"
         elif h360 < 40:
-            return 'orange'
+            return "orange"
         elif h360 < 70:
-            return 'yellow'
+            return "yellow"
         elif h360 < 160:
-            return 'green'
+            return "green"
         elif h360 < 195:
-            return 'cyan'
+            return "cyan"
         elif h360 < 260:
-            return 'blue'
+            return "blue"
         elif h360 < 345:
-            return 'purple'
-        return 'neutral'
+            return "purple"
+        return "neutral"
 
     if total == 2738:
         half = total // 2
@@ -712,14 +721,13 @@ def generate_lut_card_grid_html(lut_path, lang: str = "zh"):
     cell = 18
     gap = 1
 
-    # NOTE: search/hue-filter HTML was previously from ui.palette_extension (Gradio-only).
-    # React frontend renders its own search/filter UI via API.
+    # NOTE: Search/hue-filter UI is rendered by the web frontend via API data.
     html_parts = [
         f'<div style="margin-bottom:8px; font-size:12px; color:#666;">{I18n.get("lut_grid_count", lang).format(count=total)}: <span id="lut-color-visible-count">{total}</span></div>',
     ]
 
     # Derive LUT key for favorites persistence
-    _lut_key = os.path.splitext(os.path.basename(lut_path))[0] if lut_path else ''
+    _lut_key = os.path.splitext(os.path.basename(lut_path))[0] if lut_path else ""
 
     # Grid
     html_parts.append(
@@ -773,21 +781,18 @@ def _recommend_lut_colors_by_rgb(base_rgb, lut_colors, top_k=10):
         if isinstance(c, dict):
             color = c.get("color")
             hex_color = c.get("hex")
-            if color is None and isinstance(hex_color, str) and len(hex_color.strip().lstrip('#')) == 6:
-                h = hex_color.strip().lstrip('#')
+            if color is None and isinstance(hex_color, str) and len(hex_color.strip().lstrip("#")) == 6:
+                h = hex_color.strip().lstrip("#")
                 color = (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
             if color is not None and isinstance(hex_color, str):
                 normalized.append({"color": tuple(int(v) for v in color), "hex": hex_color.lower()})
             continue
 
         if isinstance(c, (tuple, list)) and len(c) >= 2 and isinstance(c[1], str):
-            h = c[1].strip().lstrip('#')
+            h = c[1].strip().lstrip("#")
             if len(h) != 6:
                 continue
-            normalized.append({
-                "color": (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)),
-                "hex": f"#{h.lower()}"
-            })
+            normalized.append({"color": (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)), "hex": f"#{h.lower()}"})
 
     if not normalized:
         return []
@@ -869,8 +874,8 @@ def _resolve_click_selection_hexes(cache, default_hex):
     Returns:
         tuple: (display_hex, internal_hex)
     """
-    cached_q_hex = (cache or {}).get('selected_quantized_hex')
-    cached_m_hex = (cache or {}).get('selected_matched_hex')
+    cached_q_hex = (cache or {}).get("selected_quantized_hex")
+    cached_m_hex = (cache or {}).get("selected_matched_hex")
 
     # Non-string values (e.g. None) must not propagate into hex state.
     fallback_hex = default_hex if isinstance(default_hex, str) else None

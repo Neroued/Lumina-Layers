@@ -10,7 +10,6 @@ from typing import Optional, Dict
 
 from config import ModelingMode
 
-
 # 建模模式 → 文件名标识映射
 MODELING_MODE_TAGS: Dict[ModelingMode, str] = {
     ModelingMode.HIGH_FIDELITY: "HiFi",
@@ -51,12 +50,13 @@ def _sanitize(name: str) -> str:
     return name
 
 
-# Gradio/pywebview 临时文件前缀模式: tmp{random}_ (例如 tmpq7esd8mm_photo, tmpud7d8o06_photo)
+# Legacy uploader/pywebview temporary file prefix pattern: tmp{random}_
+# (e.g. tmpq7esd8mm_photo, tmpud7d8o06_photo)
 _TEMP_PREFIX_RE = re.compile(r"^tmp[a-zA-Z0-9]{4,12}_")
 
 
 def _strip_temp_prefix(name: str) -> str:
-    """去除 Gradio/pywebview 生成的临时文件名前缀。"""
+    """去除上传器/pywebview 生成的临时文件名前缀。"""
     return _TEMP_PREFIX_RE.sub("", name)
 
 
@@ -132,18 +132,10 @@ _VALID_MODE_TAGS = {"HiFi", "Pixel", "Vector"}
 _VALID_COLOR_TAGS = {"4C", "5C", "6C", "8C", "BW", "Merged"}
 
 # Regex patterns for each file type
-_MODEL_RE = re.compile(
-    rf"^(.+)_Lumina_(HiFi|Pixel|Vector)_(4C|5C|6C|8C|BW|Merged)_({_TS_PATTERN})(\.[\w]+)$"
-)
-_PREVIEW_RE = re.compile(
-    rf"^(.+)_Preview_({_TS_PATTERN})(\.[\w]+)$"
-)
-_CALIBRATION_RE = re.compile(
-    rf"^Lumina_Calibration_(.+?)_(4C|5C|6C|8C|BW|Merged)_({_TS_PATTERN})(\.[\w]+)$"
-)
-_BATCH_RE = re.compile(
-    rf"^Lumina_Batch_({_TS_PATTERN})(\.[\w]+)$"
-)
+_MODEL_RE = re.compile(rf"^(.+)_Lumina_(HiFi|Pixel|Vector)_(4C|5C|6C|8C|BW|Merged)_({_TS_PATTERN})(\.[\w]+)$")
+_PREVIEW_RE = re.compile(rf"^(.+)_Preview_({_TS_PATTERN})(\.[\w]+)$")
+_CALIBRATION_RE = re.compile(rf"^Lumina_Calibration_(.+?)_(4C|5C|6C|8C|BW|Merged)_({_TS_PATTERN})(\.[\w]+)$")
+_BATCH_RE = re.compile(rf"^Lumina_Batch_({_TS_PATTERN})(\.[\w]+)$")
 
 
 def parse_filename(filename: str) -> Optional[Dict[str, str]]:

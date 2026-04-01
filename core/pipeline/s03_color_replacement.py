@@ -11,10 +11,13 @@ S03 — 颜色替换（全局替换 + 区域替换 + matched_rgb 覆盖）。
 """
 
 import time
+import logging
 from collections import deque
 import numpy as np
 
 from core.pipeline.pipeline_utils import _hex_to_rgb_tuple
+
+_log = logging.getLogger(__name__)
 
 
 def _normalize_color_replacements_input(color_replacements):
@@ -46,12 +49,24 @@ def _normalize_color_replacements_input(color_replacements):
         for item in color_replacements:
             if not isinstance(item, dict):
                 continue
-            src = (item.get('matched') or item.get('matched_hex')
-                   or item.get('source') or item.get('quantized')
-                   or item.get('quantized_hex')
-                   or item.get('selected_color') or '').strip().lower()
-            dst = (item.get('replacement') or item.get('replacement_hex')
-                   or item.get('replacement_color') or '').strip().lower()
+            src = (
+                (
+                    item.get("matched")
+                    or item.get("matched_hex")
+                    or item.get("source")
+                    or item.get("quantized")
+                    or item.get("quantized_hex")
+                    or item.get("selected_color")
+                    or ""
+                )
+                .strip()
+                .lower()
+            )
+            dst = (
+                (item.get("replacement") or item.get("replacement_hex") or item.get("replacement_color") or "")
+                .strip()
+                .lower()
+            )
             if src and dst:
                 out[src] = dst
         return out
@@ -76,8 +91,9 @@ def _apply_region_replacement(image_rgb, region_mask, replacement_rgb):
     return out
 
 
-def _apply_regions_to_raster_outputs(matched_rgb, material_matrix, mask_solid,
-                                     replacement_regions, lut_index_resolver, ref_stacks):
+def _apply_regions_to_raster_outputs(
+    matched_rgb, material_matrix, mask_solid, replacement_regions, lut_index_resolver, ref_stacks
+):
     """Apply region replacements in order to raster outputs (matched_rgb + material_matrix).
     按 regions 顺序覆盖 raster 输出（matched_rgb + material_matrix）。
 
@@ -95,9 +111,9 @@ def _apply_regions_to_raster_outputs(matched_rgb, material_matrix, mask_solid,
     out_rgb = matched_rgb.copy()
     out_mat = material_matrix.copy()
 
-    for item in (replacement_regions or []):
-        region_mask = item.get('mask')
-        replacement_hex = item.get('replacement')
+    for item in replacement_regions or []:
+        region_mask = item.get("mask")
+        replacement_hex = item.get("replacement")
         if region_mask is None or not replacement_hex:
             continue
 
@@ -166,21 +182,23 @@ def run(ctx: dict) -> dict:
     """
     _t0 = time.perf_counter()
 
-    matched_rgb = ctx['matched_rgb']
-    material_matrix = ctx['material_matrix']
-    mask_solid = ctx['mask_solid']
-    processor = ctx['processor']
-    color_replacements = ctx.get('color_replacements')
-    replacement_regions = ctx.get('replacement_regions')
-    matched_rgb_path = ctx.get('matched_rgb_path')
+    matched_rgb = ctx["matched_rgb"]
+    material_matrix = ctx["material_matrix"]
+    mask_solid = ctx["mask_solid"]
+    processor = ctx["processor"]
+    color_replacements = ctx.get("color_replacements")
+    replacement_regions = ctx.get("replacement_regions")
+    matched_rgb_path = ctx.get("matched_rgb_path")
 
     # ---- Override matched_rgb with pre-computed array if provided ----
     if matched_rgb_path is not None:
         try:
             override_rgb = np.load(matched_rgb_path)
             if override_rgb.shape != matched_rgb.shape:
-                print(f"[S03] Warning: matched_rgb_path shape {override_rgb.shape} "
-                      f"does not match processed shape {matched_rgb.shape}, ignoring override")
+                _log.warning(
+                    f"[S03] matched_rgb_path shape {override_rgb.shape} "
+                    f"does not match processed shape {matched_rgb.shape}, ignoring override"
+                )
             else:
                 # Detect pixels that differ between original and override
                 diff_mask = np.any(matched_rgb != override_rgb, axis=-1) & mask_solid
@@ -193,12 +211,15 @@ def run(ctx: dict) -> dict:
                         _, lut_idx = processor.kdtree.query(repl_lab)
                         new_stacks = processor.ref_stacks[lut_idx[0]]
                         material_matrix[color_mask] = new_stacks
-                    print(f"[S03] matched_rgb override applied: "
-                          f"{np.sum(diff_mask)} pixels updated across {len(unique_colors)} colors")
+                    _log.info(
+                        f"[S03] matched_rgb override applied: "
+                        f"{np.sum(diff_mask)} pixels updated across {len(unique_colors)} colors"
+                    )
                 matched_rgb = override_rgb
-        except Exception as e:
-            print(f"[S03] Warning: Failed to load matched_rgb_path '{matched_rgb_path}': {e}, "
-                  f"using original processed result")
+        except (OSError, ValueError, TypeError) as e:
+            _log.warning(
+                f"[S03] Failed to load matched_rgb_path '{matched_rgb_path}': {e}, " f"using original processed result"
+            )
 
     # ---- Apply global color replacements ----
     effective_color_replacements = _normalize_color_replacements_input(color_replacements)
@@ -208,14 +229,15 @@ def run(ctx: dict) -> dict:
             effective_color_replacements.update(api_format_replacements)
             # Remove API-format items (no mask) from replacement_regions to avoid
             # _apply_regions_to_raster_outputs skipping them silently
-            replacement_regions = [r for r in replacement_regions if r.get('mask') is not None]
+            replacement_regions = [r for r in replacement_regions if r.get("mask") is not None]
 
     if effective_color_replacements:
         from core.color_replacement import ColorReplacementManager
+
         manager = ColorReplacementManager.from_dict(effective_color_replacements)
         old_rgb = matched_rgb.copy()
         matched_rgb = manager.apply_to_image(matched_rgb)
-        print(f"[S03] Applied {len(manager)} color replacements")
+        _log.info(f"[S03] Applied {len(manager)} color replacements")
 
         # Update material_matrix: find the replacement color's LUT entry
         for orig_hex, repl_hex in effective_color_replacements.items():
@@ -230,11 +252,14 @@ def run(ctx: dict) -> dict:
             new_stacks = processor.ref_stacks[lut_idx]
             material_matrix[orig_mask] = new_stacks
             lut_color = processor.lut_rgb[lut_idx]
-            print(f"[S03] material_matrix: {orig_hex} -> LUT#{lut_idx} "
-                  f"rgb({lut_color[0]},{lut_color[1]},{lut_color[2]}) stacks={new_stacks}")
+            _log.info(
+                f"[S03] material_matrix: {orig_hex} -> LUT#{lut_idx} "
+                f"rgb({lut_color[0]},{lut_color[1]},{lut_color[2]}) stacks={new_stacks}"
+            )
 
     # ---- Apply region replacements in-order ----
     if replacement_regions:
+
         def _resolve_lut_index_for_rgb(replacement_rgb):
             repl_lab = processor._rgb_to_lab(np.array([replacement_rgb], dtype=np.uint8))
             _, lut_idx = processor.kdtree.query(repl_lab)
@@ -249,12 +274,12 @@ def run(ctx: dict) -> dict:
             processor.ref_stacks,
         )
 
-    ctx['matched_rgb'] = matched_rgb
-    ctx['material_matrix'] = material_matrix
+    ctx["matched_rgb"] = matched_rgb
+    ctx["material_matrix"] = material_matrix
 
     _elapsed = time.perf_counter() - _t0
-    _hifi_timings = ctx.get('_hifi_timings', {})
-    _hifi_timings['color_replace_s'] = _elapsed
-    ctx['_hifi_timings'] = _hifi_timings
-    print(f"[S03] color_replace done: {_elapsed:.3f}s")
+    _hifi_timings = ctx.get("_hifi_timings", {})
+    _hifi_timings["color_replace_s"] = _elapsed
+    ctx["_hifi_timings"] = _hifi_timings
+    _log.info(f"[S03] color_replace done: {_elapsed:.3f}s")
     return ctx

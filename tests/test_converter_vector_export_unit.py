@@ -14,17 +14,6 @@ from unittest.mock import patch, MagicMock
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
-# Stub heavy third-party modules that core.__init__ transitively imports
-# so we can test the converter without installing them in CI.
-# Use a smarter stub that preserves gr.update() behavior.
-for _mod_name in ("gradio", "gradio.themes"):
-    if _mod_name not in sys.modules:
-        _mock = MagicMock()
-        # Preserve gr.update() returning a real dict so downstream tests work
-        if _mod_name == "gradio":
-            _mock.update = lambda **kwargs: {"__type__": "update", **kwargs}
-        sys.modules[_mod_name] = _mock
-
 import pytest
 import trimesh
 import numpy as np
@@ -44,6 +33,7 @@ def _build_fake_processor(scene):
 # 1. Vector branch uses Bambu metadata export
 # =====================================================================
 
+
 class TestVectorBranchExport:
     """Confirm the vector conversion path goes through the unified
     Bambu metadata exporter rather than the plain trimesh export."""
@@ -58,7 +48,7 @@ class TestVectorBranchExport:
         svg_file.write_text(
             '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">'
             '<rect x="0" y="0" width="100" height="100" fill="#ff0000"/>'
-            '</svg>'
+            "</svg>"
         )
 
         fake_scene = trimesh.Scene()
@@ -84,7 +74,10 @@ class TestVectorBranchExport:
             bg_tol=30,
             color_mode="4-Color",
             add_loop=False,
-            loop_width=5, loop_length=20, loop_hole=3, loop_pos="Top",
+            loop_width=5,
+            loop_length=20,
+            loop_hole=3,
+            loop_pos="Top",
             modeling_mode=ModelingMode.VECTOR,
         )
 
@@ -100,7 +93,7 @@ class TestVectorBranchExport:
         svg_file.write_text(
             '<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50">'
             '<circle cx="25" cy="25" r="20" fill="#0000ff"/>'
-            '</svg>'
+            "</svg>"
         )
 
         fake_scene = trimesh.Scene()
@@ -126,7 +119,10 @@ class TestVectorBranchExport:
             bg_tol=30,
             color_mode="4-Color",
             add_loop=False,
-            loop_width=5, loop_length=20, loop_hole=3, loop_pos="Top",
+            loop_width=5,
+            loop_length=20,
+            loop_hole=3,
+            loop_pos="Top",
             modeling_mode=ModelingMode.VECTOR,
         )
 
@@ -143,7 +139,7 @@ class TestVectorBranchExport:
         svg_file.write_text(
             '<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50">'
             '<circle cx="25" cy="25" r="20" fill="#0000ff"/>'
-            '</svg>'
+            "</svg>"
         )
 
         fake_scene = trimesh.Scene()
@@ -169,7 +165,10 @@ class TestVectorBranchExport:
             bg_tol=30,
             color_mode="4-Color",
             add_loop=False,
-            loop_width=5, loop_length=20, loop_hole=3, loop_pos="Top",
+            loop_width=5,
+            loop_length=20,
+            loop_hole=3,
+            loop_pos="Top",
             modeling_mode=ModelingMode.VECTOR,
             separate_backing=True,
         )
@@ -187,7 +186,7 @@ class TestVectorBranchExport:
         svg_file.write_text(
             '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">'
             '<rect x="0" y="0" width="10" height="10" fill="#ffffff"/>'
-            '</svg>'
+            "</svg>"
         )
 
         empty_scene = trimesh.Scene()
@@ -208,7 +207,10 @@ class TestVectorBranchExport:
             bg_tol=30,
             color_mode="4-Color",
             add_loop=False,
-            loop_width=5, loop_length=20, loop_hole=3, loop_pos="Top",
+            loop_width=5,
+            loop_length=20,
+            loop_hole=3,
+            loop_pos="Top",
             modeling_mode=ModelingMode.VECTOR,
         )
 

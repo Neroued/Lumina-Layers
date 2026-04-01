@@ -1,4 +1,4 @@
-import { useConverterStore } from "../../stores/converterStore";
+import { useConverterStore } from "../../stores/converter";
 import type { PaletteEntry } from "../../api/types";
 import Slider from "../ui/Slider";
 import Button from "../ui/Button";

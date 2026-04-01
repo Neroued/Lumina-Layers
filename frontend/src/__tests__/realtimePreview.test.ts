@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { computeThicknessScale } from "../utils/scaleUtils";
-import { useConverterStore } from "../stores/converterStore";
+import { useConverterStore } from "../stores/converter";
 
 // ========== computeThicknessScale 单元测试 ==========
 

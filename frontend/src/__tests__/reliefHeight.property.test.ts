@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import * as fc from "fast-check";
 import { computeAutoHeightMap } from "../utils/colorUtils";
-import { useConverterStore } from "../stores/converterStore";
+import { useConverterStore } from "../stores/converter";
 import type { PaletteEntry } from "../api/types";
 
 // ========== Generators ==========

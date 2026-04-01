@@ -509,12 +509,23 @@ export const useWidgetStore = create<WidgetStore>()(
       name: "lumina-widget-layout",
       version: 4,
       migrate: (persistedState, version) => {
+        type PersistedWidgetState = {
+          widgets?: Record<WidgetId, WidgetLayoutState>;
+          activeTab?: TabId;
+          colorWorkstationCollapsed?: boolean;
+        };
+
         if (version < 3) {
           return { widgets: { ...DEFAULT_LAYOUT }, activeTab: "converter" };
         }
         if (version === 3) {
-          const state = persistedState as any;
-          const widgets = { ...state.widgets };
+          const state =
+            typeof persistedState === "object" && persistedState !== null
+              ? (persistedState as PersistedWidgetState)
+              : {};
+          const widgets: Record<string, WidgetLayoutState> = {
+            ...((state.widgets ?? {}) as Record<string, WidgetLayoutState>),
+          };
           delete widgets["palette-panel"];
           delete widgets["lut-color-grid"];
           // Recalculate stackOrder for converter widgets on left edge

@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, expect } from "vitest";
 import * as fc from "fast-check";
-import { useConverterStore } from "../stores/converterStore";
-import { isValidImageType } from "../stores/converterStore";
+import { useConverterStore } from "../stores/converter";
+import { isValidImageType } from "../stores/converter";
 
 // ========== Generators ==========
 

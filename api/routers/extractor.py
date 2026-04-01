@@ -1,11 +1,12 @@
-"""Extractor domain API router.
-Extractor 领域 API 路由模块。
+﻿"""Extractor domain API router.
+Extractor 棰嗗煙 API 璺敱妯″潡銆?
 """
 
 from __future__ import annotations
 
 import json
 import os
+import uuid
 from typing import List, Tuple
 
 import numpy as np
@@ -13,26 +14,57 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from PIL import Image
 
 from api.dependencies import get_file_registry, get_session_store
+from api.errors import to_http_exception
 from api.file_bridge import ndarray_to_png_bytes, pil_to_png_bytes, upload_to_ndarray
 from api.file_registry import FileRegistry
 from api.schemas.extractor import ConfirmPaletteRequest, ExtractorManualFixRequest
 from api.schemas.responses import ExtractResponse, ManualFixResponse
 from api.session_store import SessionStore
+from api.structured_logging import bind_session_id, get_logger
 from config import ColorSystem, LUTMetadata, PaletteEntry
 from core.extractor import apply_auto_white_balance, manual_fix_cell, rotate_image, run_extraction
 from utils.lut_manager import LUTManager
 
 router = APIRouter(prefix="/api/extractor", tags=["Extractor"])
+EPHEMERAL_PREVIEW_TTL_SECONDS = 600
+log = get_logger(__name__)
+
+EXTRACTOR_HANDLED_ERRORS = (
+    ValueError,
+    TypeError,
+    KeyError,
+    IndexError,
+    AttributeError,
+    OSError,
+    RuntimeError,
+    json.JSONDecodeError,
+)
+LUT_PERSIST_WARNING_ERRORS = (
+    ValueError,
+    TypeError,
+    KeyError,
+    OSError,
+    RuntimeError,
+    json.JSONDecodeError,
+)
 
 
 def _handle_core_error(e: Exception, context: str) -> None:
-    """将 core 模块异常转换为 HTTP 500 错误。"""
-    print(f"[API] {context} error: {e}")
-    raise HTTPException(status_code=500, detail=f"{context} failed: {str(e)}")
+    """Translate core exceptions to HTTP 500 errors."""
+    log.exception(
+        "Extractor operation failed",
+        extra={
+            "event": "extractor_error",
+            "error_type": type(e).__name__,
+            "error_message": str(e),
+            "context": context,
+        },
+    )
+    raise to_http_exception(e, context)
 
 
 def _image_to_png_bytes(img: object) -> bytes:
-    """将 ndarray 或 PIL Image 转换为 PNG 字节流。"""
+    """Convert ndarray/PIL image to PNG bytes."""
     if isinstance(img, np.ndarray):
         return ndarray_to_png_bytes(img)
     if isinstance(img, Image.Image):
@@ -42,13 +74,13 @@ def _image_to_png_bytes(img: object) -> bytes:
 
 def _normalize_6color_mode(color_mode: str) -> str:
     """Normalize six-color variants to the unified CMYW mode.
-    将 6 色变体统一归一到 CMYW 模式。
+    灏?6 鑹插彉浣撶粺涓€褰掍竴鍒?CMYW 妯″紡銆?
 
     Args:
-        color_mode (str): Raw color mode from request. (请求中的原始颜色模式)
+        color_mode (str): Raw color mode from request. (璇锋眰涓殑鍘熷棰滆壊妯″紡)
 
     Returns:
-        str: Normalized color mode. (归一化后的颜色模式)
+        str: Normalized color mode. (褰掍竴鍖栧悗鐨勯鑹叉ā寮?
     """
     if "6-Color" in str(color_mode):
         return "6-Color (CMYWGK 1296)"
@@ -57,13 +89,13 @@ def _normalize_6color_mode(color_mode: str) -> str:
 
 def _build_default_palette(color_mode: str) -> list[dict]:
     """Build default palette array based on color mode.
-    根据颜色模式构建默认调色板数组。
+    鏍规嵁棰滆壊妯″紡鏋勫缓榛樿璋冭壊鏉挎暟缁勩€?
 
     Args:
-        color_mode (str): Color mode string. (颜色模式字符串)
+        color_mode (str): Color mode string. (棰滆壊妯″紡瀛楃涓?
 
     Returns:
-        list[dict]: Default palette entries. (默认调色板条目列表)
+        list[dict]: Default palette entries. (榛樿璋冭壊鏉挎潯鐩垪琛?
     """
     effective_mode = _normalize_6color_mode(color_mode)
     color_conf = ColorSystem.get(effective_mode)
@@ -94,7 +126,7 @@ def _build_merged_metadata(
     color_count: int,
 ) -> LUTMetadata:
     """Build merged metadata while preserving user-entered fields when available.
-    构建合并后的元数据，尽量保留用户填写过的字段。
+    鏋勫缓鍚堝苟鍚庣殑鍏冩暟鎹紝灏介噺淇濈暀鐢ㄦ埛濉啓杩囩殑瀛楁銆?
     """
     source = primary if primary.palette else secondary
     manufacturer = primary.manufacturer or secondary.manufacturer
@@ -122,9 +154,7 @@ def _build_merged_metadata(
             layer_order=source.layer_order,
         )
 
-    metadata = LUTManager.infer_default_metadata(
-        "lumina_lut", output_path, color_count, color_mode=color_mode
-    )
+    metadata = LUTManager.infer_default_metadata("lumina_lut", output_path, color_count, color_mode=color_mode)
     metadata.manufacturer = manufacturer
     metadata.type = lut_type
     return metadata
@@ -132,31 +162,32 @@ def _build_merged_metadata(
 
 @router.post("/rotate")
 async def extractor_rotate(
-    image: UploadFile = File(..., description="待旋转的图片"),
+    image: UploadFile = File(..., description="寰呮棆杞殑鍥剧墖"),
     registry: FileRegistry = Depends(get_file_registry),
 ):
-    """Rotate an image 90° counter-clockwise and return the rotated PNG.
-    将图片逆时针旋转 90° 并返回旋转后的 PNG。
+    """Rotate an image 90掳 counter-clockwise and return the rotated PNG.
+    灏嗗浘鐗囬€嗘椂閽堟棆杞?90掳 骞惰繑鍥炴棆杞悗鐨?PNG銆?
     """
-    # Clean up previous rotation temp files to prevent memory/disk leak
-    # 清理上一次旋转产生的临时文件，防止内存/磁盘泄漏
-    registry.cleanup_session("extractor-rotate")
-
     try:
         img_arr = await upload_to_ndarray(image)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    rotated = rotate_image(img_arr, "Rotate Left 90°")
+    rotated = rotate_image(img_arr, "Rotate Left 90掳")
     if rotated is None:
         raise HTTPException(status_code=500, detail="Image rotation failed")
 
     rotated_bytes = ndarray_to_png_bytes(rotated)
     # Release intermediate arrays early
-    # 尽早释放中间数组
+    # 灏芥棭閲婃斁涓棿鏁扮粍
     del img_arr
     h, w = rotated.shape[:2]
-    file_id = registry.register_bytes("extractor-rotate", rotated_bytes, "rotated.png")
+    file_id = registry.register_bytes(
+        str(uuid.uuid4()),
+        rotated_bytes,
+        "rotated.png",
+        ttl_seconds=EPHEMERAL_PREVIEW_TTL_SECONDS,
+    )
     del rotated, rotated_bytes
 
     return {
@@ -168,16 +199,12 @@ async def extractor_rotate(
 
 @router.post("/preview-wb")
 async def extractor_preview_wb(
-    image: UploadFile = File(..., description="待处理的图片"),
+    image: UploadFile = File(..., description="寰呭鐞嗙殑鍥剧墖"),
     registry: FileRegistry = Depends(get_file_registry),
 ):
     """Apply auto white balance to an image and return the preview PNG.
-    对图片应用自动白平衡并返回预览 PNG。
+    瀵瑰浘鐗囧簲鐢ㄨ嚜鍔ㄧ櫧骞宠　骞惰繑鍥為瑙?PNG銆?
     """
-    # Clean up previous white-balance temp files to prevent memory/disk leak
-    # 清理上一次白平衡预览产生的临时文件，防止内存/磁盘泄漏
-    registry.cleanup_session("extractor-wb")
-
     try:
         img_arr = await upload_to_ndarray(image)
     except ValueError as e:
@@ -187,7 +214,12 @@ async def extractor_preview_wb(
     del img_arr
     balanced_bytes = ndarray_to_png_bytes(balanced)
     h, w = balanced.shape[:2]
-    file_id = registry.register_bytes("extractor-wb", balanced_bytes, "wb_preview.png")
+    file_id = registry.register_bytes(
+        str(uuid.uuid4()),
+        balanced_bytes,
+        "wb_preview.png",
+        ttl_seconds=EPHEMERAL_PREVIEW_TTL_SECONDS,
+    )
     del balanced, balanced_bytes
 
     return {
@@ -199,21 +231,21 @@ async def extractor_preview_wb(
 
 @router.post("/extract")
 async def extractor_extract(
-    image: UploadFile = File(..., description="校准板照片"),
-    corner_points: str = Form(..., description="4 个角点坐标 JSON 数组 [[x,y],...]"),
-    color_mode: str = Form("4-Color (RYBW)", description="校准颜色模式"),
-    page: str = Form("Page 1", description="8-Color 页码"),
-    offset_x: int = Form(0, description="水平采样偏移"),
-    offset_y: int = Form(0, description="垂直采样偏移"),
-    zoom: float = Form(1.0, description="透视校正缩放"),
-    distortion: float = Form(0.0, description="畸变校正"),
-    vignette_correction: bool = Form(False, description="暗角校正"),
-    auto_wb: bool = Form(False, description="自动白平衡"),
+    image: UploadFile = File(..., description="Calibration board image"),
+    corner_points: str = Form(..., description="4 涓鐐瑰潗鏍?JSON 鏁扮粍 [[x,y],...]"),
+    color_mode: str = Form("4-Color (RYBW)", description="鏍″噯棰滆壊妯″紡"),
+    page: str = Form("Page 1", description="8-Color 椤电爜"),
+    offset_x: int = Form(0, description="姘村钩閲囨牱鍋忕Щ"),
+    offset_y: int = Form(0, description="鍨傜洿閲囨牱鍋忕Щ"),
+    zoom: float = Form(1.0, description="閫忚鏍℃缂╂斁"),
+    distortion: float = Form(0.0, description="鐣稿彉鏍℃"),
+    vignette_correction: bool = Form(False, description="鏆楄鏍℃"),
+    auto_wb: bool = Form(False, description="Enable auto white balance"),
     store: SessionStore = Depends(get_session_store),
     registry: FileRegistry = Depends(get_file_registry),
 ) -> ExtractResponse:
     """Extract colors from a photographed calibration board.
-    从拍摄的校准板照片中提取颜色。
+    浠庢媿鎽勭殑鏍″噯鏉跨収鐗囦腑鎻愬彇棰滆壊銆?
     """
     # Parse corner_points from JSON string
     try:
@@ -249,7 +281,7 @@ async def extractor_extract(
             page_choice=page,
             auto_wb=auto_wb,
         )
-    except Exception as e:
+    except EXTRACTOR_HANDLED_ERRORS as e:
         _handle_core_error(e, "Color extraction")
 
     if lut_path is None:
@@ -278,8 +310,16 @@ async def extractor_extract(
             LUTManager.save_keyed_json(temp_path, rgb, stacks, metadata)
             store.put(session_id, "lut_path", temp_path)
             lut_path = temp_path
-        except Exception as e:
-            print(f"[8-COLOR] Error saving page {page_idx}: {e}")
+        except LUT_PERSIST_WARNING_ERRORS as e:
+            log.warning(
+                "Failed to save 8-color temp LUT page",
+                extra={
+                    "event": "extractor_temp_lut_save_failed",
+                    "page_idx": page_idx,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                },
+            )
 
     # For 5-Color Extended mode: save page-specific temp file
     if "5-Color" in effective_color_mode and lut_path:
@@ -299,8 +339,16 @@ async def extractor_extract(
             LUTManager.save_keyed_json(temp_path, rgb, stacks, metadata)
             store.put(session_id, "lut_path", temp_path)
             lut_path = temp_path
-        except Exception as e:
-            print(f"[5-COLOR-EXT] Error saving page {page_idx}: {e}")
+        except LUT_PERSIST_WARNING_ERRORS as e:
+            log.warning(
+                "Failed to save 5-color-ext temp LUT page",
+                extra={
+                    "event": "extractor_temp_lut_save_failed",
+                    "page_idx": page_idx,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                },
+            )
 
     # Register LUT file (already in Keyed JSON format from run_extraction)
     lut_download_id = registry.register_path(session_id, lut_path)
@@ -335,11 +383,12 @@ def extractor_manual_fix(
     registry: FileRegistry = Depends(get_file_registry),
 ) -> ManualFixResponse:
     """Manually override a single LUT cell color value.
-    手动覆盖单个 LUT 单元格的颜色值。
+    鎵嬪姩瑕嗙洊鍗曚釜 LUT 鍗曞厓鏍肩殑棰滆壊鍊笺€?
     """
     # Resolve lut_path: prefer session lookup, fallback to direct path
     lut_path = request.lut_path
     if request.session_id:
+        bind_session_id(request.session_id)
         session_data = store.get(request.session_id)
         if session_data and "lut_path" in session_data:
             lut_path = session_data["lut_path"]
@@ -350,7 +399,7 @@ def extractor_manual_fix(
             color_input=request.override_color,
             lut_path=lut_path,
         )
-    except Exception as e:
+    except EXTRACTOR_HANDLED_ERRORS as e:
         _handle_core_error(e, "Manual fix")
 
     if preview_result is None:
@@ -358,8 +407,14 @@ def extractor_manual_fix(
 
     # Register updated preview
     preview_bytes = _image_to_png_bytes(preview_result)
-    sid = "extractor-fix"
-    preview_id = registry.register_bytes(sid, preview_bytes, "lut_preview.png")
+    has_valid_session = bool(request.session_id and store.exists(request.session_id))
+    sid_for_registry = request.session_id if has_valid_session else str(uuid.uuid4())
+    preview_id = registry.register_bytes(
+        sid_for_registry,
+        preview_bytes,
+        "lut_preview.png",
+        ttl_seconds=None if has_valid_session else EPHEMERAL_PREVIEW_TTL_SECONDS,
+    )
 
     return ManualFixResponse(
         status="ok",
@@ -374,7 +429,7 @@ def extractor_merge_5color_extended(
     registry: FileRegistry = Depends(get_file_registry),
 ) -> ExtractResponse:
     """Merge two 5-Color Extended pages into a single LUT.
-    合并两页 5 色扩展 LUT 为一个完整 LUT。
+    鍚堝苟涓ら〉 5 鑹叉墿灞?LUT 涓轰竴涓畬鏁?LUT銆?
     """
     import sys
     from config import LUT_FILE_PATH
@@ -406,11 +461,9 @@ def extractor_merge_5color_extended(
         else:
             merged_stacks = np.zeros((len(merged_rgb), 0), dtype=np.int32)
 
-        metadata = _build_merged_metadata(
-            meta1, meta2, "5-Color Extended", LUT_FILE_PATH, len(merged_rgb)
-        )
+        metadata = _build_merged_metadata(meta1, meta2, "5-Color Extended", LUT_FILE_PATH, len(merged_rgb))
         LUTManager.save_keyed_json(LUT_FILE_PATH, merged_rgb, merged_stacks, metadata)
-    except Exception as e:
+    except EXTRACTOR_HANDLED_ERRORS as e:
         _handle_core_error(e, "5-Color Extended merge")
 
     # Create session for merged result
@@ -437,7 +490,7 @@ def extractor_merge_8color(
     registry: FileRegistry = Depends(get_file_registry),
 ) -> ExtractResponse:
     """Merge two 8-Color pages into a single LUT.
-    合并两页 8 色 LUT 为一个完整 LUT。
+    鍚堝苟涓ら〉 8 鑹?LUT 涓轰竴涓畬鏁?LUT銆?
     """
     import sys
     from config import LUT_FILE_PATH
@@ -467,11 +520,9 @@ def extractor_merge_8color(
         else:
             merged_stacks = np.zeros((len(merged_rgb), 0), dtype=np.int32)
 
-        metadata = _build_merged_metadata(
-            meta1, meta2, "8-Color Max", LUT_FILE_PATH, len(merged_rgb)
-        )
+        metadata = _build_merged_metadata(meta1, meta2, "8-Color Max", LUT_FILE_PATH, len(merged_rgb))
         LUTManager.save_keyed_json(LUT_FILE_PATH, merged_rgb, merged_stacks, metadata)
-    except Exception as e:
+    except EXTRACTOR_HANDLED_ERRORS as e:
         _handle_core_error(e, "8-Color merge")
 
     # Create session for merged result
@@ -498,23 +549,24 @@ def confirm_palette(
     store: SessionStore = Depends(get_session_store),
 ) -> dict:
     """Accept user-confirmed palette and save to session.
-    接收用户确认的调色板，保存到 session。
+    鎺ユ敹鐢ㄦ埛纭鐨勮皟鑹叉澘锛屼繚瀛樺埌 session銆?
 
     Args:
-        request (ConfirmPaletteRequest): Palette confirmation request. (调色板确认请求)
-        store (SessionStore): Session store dependency. (会话存储)
+        request (ConfirmPaletteRequest): Palette confirmation request. (璋冭壊鏉跨‘璁よ姹?
+        store (SessionStore): Session store dependency. (浼氳瘽瀛樺偍)
 
     Returns:
-        dict: Confirmation status. (确认状态)
+        dict: Confirmation status. (纭鐘舵€?
 
     Raises:
         HTTPException: 422 if color name is blank, 404 if session not found.
-            (颜色名称为空返回 422，session 不存在返回 404)
+            (棰滆壊鍚嶇О涓虹┖杩斿洖 422锛宻ession 涓嶅瓨鍦ㄨ繑鍥?404)
     """
     for entry in request.palette:
         if not entry.color or not entry.color.strip():
-            raise HTTPException(status_code=422, detail="颜色名称不允许为空")
+            raise HTTPException(status_code=422, detail="Color name cannot be blank")
 
+    bind_session_id(request.session_id)
     session_data = store.get(request.session_id)
     if session_data is None:
         raise HTTPException(status_code=404, detail=f"Session {request.session_id} not found")
@@ -553,12 +605,19 @@ def confirm_palette(
                 stacks = np.zeros((len(rgb), 0), dtype=np.int32)
             LUTManager.save_keyed_json(lut_path, rgb, stacks, existing_metadata)
             metadata = existing_metadata
-        except Exception as e:
-            persist_warning = f"调色板已确认，但持久化到磁盘失败: {e}"
-            print(f"[CONFIRM_PALETTE] Failed to persist palette to {lut_path}: {e}")
+        except LUT_PERSIST_WARNING_ERRORS as e:
+            persist_warning = f"璋冭壊鏉垮凡纭锛屼絾鎸佷箙鍖栧埌纾佺洏澶辫触: {e}"
+            log.warning(
+                "Failed to persist confirmed palette",
+                extra={
+                    "event": "extractor_persist_palette_failed",
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                },
+            )
 
     store.put(request.session_id, "lut_metadata", metadata)
 
     if persist_warning:
         return {"status": "warning", "message": persist_warning}
-    return {"status": "ok", "message": "调色板已确认"}
+    return {"status": "ok", "message": "璋冭壊鏉垮凡纭"}

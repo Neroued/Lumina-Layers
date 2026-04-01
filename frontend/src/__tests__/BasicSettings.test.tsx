@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import BasicSettings from "../components/sections/BasicSettings";
-import { useConverterStore } from "../stores/converterStore";
+import { useConverterStore } from "../stores/converter";
+import {
+  ColorMode as ColorModeEnum,
+  StructureMode as StructureModeEnum,
+  ModelingMode as ModelingModeEnum,
+} from "../api/types";
 
 // Reset store to a clean state before each test
 beforeEach(() => {
@@ -15,12 +20,12 @@ beforeEach(() => {
     isCropping: false,
     lut_name: "",
     lutList: [],
-    color_mode: "4color_rybw" as any,
+    color_mode: ColorModeEnum.FOUR_COLOR_RYBW,
     target_width_mm: 80,
     target_height_mm: 80,
     spacer_thick: 0.64,
-    structure_mode: "top_only" as any,
-    modeling_mode: "high_fidelity" as any,
+    structure_mode: StructureModeEnum.TOP_ONLY,
+    modeling_mode: ModelingModeEnum.HIGH_FIDELITY,
     enable_relief: false,
   });
 });

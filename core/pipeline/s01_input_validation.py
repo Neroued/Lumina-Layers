@@ -4,7 +4,7 @@ S01 — 输入验证、LUT 路径解析与颜色系统配置。
 
 从 convert_image_to_3d 函数开头搬入的逻辑，包括：
 - 输入参数校验（image_path, lut_path）
-- LUT 路径解析（支持字符串路径和 Gradio File 对象）
+- LUT 路径解析（支持字符串路径和 file-like 对象）
 - 颜色系统配置（ColorSystem.get）
 - SVG 矢量模式检测（is_svg_vector 标志）
 - backing_color_id 校验
@@ -12,8 +12,19 @@ S01 — 输入验证、LUT 路径解析与颜色系统配置。
 """
 
 import time
+import logging
 
 from config import ColorSystem, ModelingMode
+
+_log = logging.getLogger(__name__)
+S01_HANDLED_ERRORS = (
+    ValueError,
+    TypeError,
+    KeyError,
+    AttributeError,
+    OSError,
+    RuntimeError,
+)
 
 
 def run(ctx: dict) -> dict:
@@ -22,7 +33,7 @@ def run(ctx: dict) -> dict:
 
     PipelineContext 输入键 / Input keys:
         - image_path (str): 输入图像路径
-        - lut_path (str | object): LUT 文件路径或 Gradio File 对象
+        - lut_path (str | object): LUT 文件路径或 file-like 对象
         - color_mode (str): 颜色模式字符串
         - modeling_mode (ModelingMode): 建模模式枚举
         - backing_color_id (int): 底板材料 ID
@@ -71,16 +82,16 @@ def run(ctx: dict) -> dict:
     separate_backing = ctx.get("separate_backing", False)
     try:
         separate_backing = bool(separate_backing) if separate_backing is not None else False
-    except Exception as e:
-        print(f"[S01] Error reading separate_backing checkbox state: {e}, using default (False)")
+    except S01_HANDLED_ERRORS as e:
+        _log.warning(f"[S01] Error reading separate_backing checkbox state: {e}, using default (False)")
         separate_backing = False
 
     backing_color_id = ctx.get("backing_color_id", 0)
     if separate_backing:
         backing_color_id = -2
-        print(f"[S01] Backing separation enabled: backing will be a separate object (white)")
+        _log.info(f"[S01] Backing separation enabled: backing will be a separate object (white)")
     else:
-        print(
+        _log.info(
             f"[S01] Backing separation disabled: backing merged with first layer (backing_color_id={backing_color_id})"
         )
 
@@ -104,10 +115,10 @@ def run(ctx: dict) -> dict:
             )
             return ctx
 
-    print(f"[S01] Starting conversion...")
-    print(f"[S01] Mode: {modeling_mode.get_display_name()}, Quantize: {ctx.get('quantize_colors', 32)}")
-    print(f"[S01] Filters: blur_kernel={ctx.get('blur_kernel', 0)}, smooth_sigma={ctx.get('smooth_sigma', 10)}")
-    print(f"[S01] LUT: {actual_lut_path}")
+    _log.info(f"[S01] Starting conversion...")
+    _log.info(f"[S01] Mode: {modeling_mode.get_display_name()}, Quantize: {ctx.get('quantize_colors', 32)}")
+    _log.info(f"[S01] Filters: blur_kernel={ctx.get('blur_kernel', 0)}, smooth_sigma={ctx.get('smooth_sigma', 10)}")
+    _log.info(f"[S01] LUT: {actual_lut_path}")
 
     # ---- 颜色系统配置 ----
     color_conf = ColorSystem.get(color_mode)
@@ -120,7 +131,7 @@ def run(ctx: dict) -> dict:
             _, _, lut_metadata = LUTManager.load_lut_with_metadata(actual_lut_path)
             if lut_metadata.palette:
                 slot_names = [e.color for e in lut_metadata.palette]
-                print(f"[S01] Merged LUT: Using palette order: {slot_names}")
+                _log.info(f"[S01] Merged LUT: Using palette order: {slot_names}")
 
                 preview_colors = {}
                 for idx, entry in enumerate(lut_metadata.palette):
@@ -129,12 +140,12 @@ def run(ctx: dict) -> dict:
                     g = int(hex_color[3:5], 16)
                     b = int(hex_color[5:7], 16)
                     preview_colors[idx] = [r, g, b, 255]
-                    print(f"[S01] Material '{entry.color}' -> RGB{[r,g,b]} ({hex_color})")
+                    _log.info(f"[S01] Material '{entry.color}' -> RGB{[r,g,b]} ({hex_color})")
             else:
                 slot_names = color_conf["slots"]
                 preview_colors = color_conf["preview"]
-        except Exception as e:
-            print(f"[S01] Warning: Failed to extract palette from Merged LUT: {e}")
+        except S01_HANDLED_ERRORS as e:
+            _log.warning(f"[S01] Failed to extract palette from Merged LUT: {e}")
             slot_names = color_conf["slots"]
             preview_colors = color_conf["preview"]
     else:
@@ -145,18 +156,18 @@ def run(ctx: dict) -> dict:
     ctx["slot_names"] = slot_names
     ctx["preview_colors"] = preview_colors
 
-    print(f"[S01] Final slot_names: {slot_names}")
-    print(f"[S01] Final preview_colors keys: {list(preview_colors.keys())}")
+    _log.info(f"[S01] Final slot_names: {slot_names}")
+    _log.info(f"[S01] Final preview_colors keys: {list(preview_colors.keys())}")
 
     # ---- backing_color_id 范围校验 ----
     num_materials = len(slot_names)
     if backing_color_id != -2 and (backing_color_id < 0 or backing_color_id >= num_materials):
-        print(f"[S01] Warning: Invalid backing_color_id={backing_color_id}, using default (0)")
+        _log.warning(f"[S01] Invalid backing_color_id={backing_color_id}, using default (0)")
         ctx["backing_color_id"] = 0
 
     _elapsed = time.perf_counter() - _t0
-    _hifi_timings = ctx.get('_hifi_timings', {})
-    _hifi_timings['input_val_s'] = _elapsed
-    ctx['_hifi_timings'] = _hifi_timings
-    print(f"[S01] done: {_elapsed:.3f}s")
+    _hifi_timings = ctx.get("_hifi_timings", {})
+    _hifi_timings["input_val_s"] = _elapsed
+    ctx["_hifi_timings"] = _hifi_timings
+    _log.info(f"[S01] done: {_elapsed:.3f}s")
     return ctx

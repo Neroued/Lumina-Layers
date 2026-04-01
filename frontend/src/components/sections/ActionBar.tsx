@@ -1,46 +1,46 @@
-import { useState } from "react";
-import { createPortal } from "react-dom";
-import { useConverterStore } from "../../stores/converterStore";
-import Button from "../ui/Button";
-import BatchResultSummary from "../ui/BatchResultSummary";
-import ZoomableImage from "../ui/ZoomableImage";
-import BedSizeSelector from "./BedSizeSelector";
-import SlicerSelector from "./SlicerSelector";
-import WikiTooltip from "../ui/WikiTooltip";
-import { useI18n } from "../../i18n/context";
-import { useWorkspaceMode } from "../../hooks/useWorkspaceMode";
+import { useState } from "react"
+import { createPortal } from "react-dom"
+import { useConverterStore } from "../../stores/converter"
+import Button from "../ui/Button"
+import BatchResultSummary from "../ui/BatchResultSummary"
+import ZoomableImage from "../ui/ZoomableImage"
+import BedSizeSelector from "./BedSizeSelector"
+import SlicerSelector from "./SlicerSelector"
+import WikiTooltip from "../ui/WikiTooltip"
+import { useI18n } from "../../i18n/context"
+import { useWorkspaceMode } from "../../hooks/useWorkspaceMode"
 
 export default function ActionBar() {
-  const { t } = useI18n();
-  const workspace = useWorkspaceMode();
-  const [zoomedLayerIdx, setZoomedLayerIdx] = useState<number | null>(null);
-  const imageFile = useConverterStore((s) => s.imageFile);
-  const lut_name = useConverterStore((s) => s.lut_name);
-  const isLoading = useConverterStore((s) => s.isLoading);
-  const isGenerating = useConverterStore((s) => s.isGenerating);
-  const error = useConverterStore((s) => s.error);
-  const previewImageUrl = useConverterStore((s) => s.previewImageUrl);
-  const submitPreview = useConverterStore((s) => s.submitPreview);
-  const submitGenerate = useConverterStore((s) => s.submitGenerate);
-  const submitFullPipeline = useConverterStore((s) => s.submitFullPipeline);
-  const threemfDiskPath = useConverterStore((s) => s.threemfDiskPath);
-  const downloadUrl = useConverterStore((s) => s.downloadUrl);
-  const sessionId = useConverterStore((s) => s.sessionId);
-  const largeFormatEnabled = useConverterStore((s) => s.largeFormatEnabled);
+  const { t } = useI18n()
+  const workspace = useWorkspaceMode()
+  const [zoomedLayerIdx, setZoomedLayerIdx] = useState<number | null>(null)
+  const imageFile = useConverterStore((s) => s.imageFile)
+  const lut_name = useConverterStore((s) => s.lut_name)
+  const isLoading = useConverterStore((s) => s.isLoading)
+  const isGenerating = useConverterStore((s) => s.isGenerating)
+  const error = useConverterStore((s) => s.error)
+  const previewImageUrl = useConverterStore((s) => s.previewImageUrl)
+  const submitPreview = useConverterStore((s) => s.submitPreview)
+  const submitGenerate = useConverterStore((s) => s.submitGenerate)
+  const submitFullPipeline = useConverterStore((s) => s.submitFullPipeline)
+  const threemfDiskPath = useConverterStore((s) => s.threemfDiskPath)
+  const downloadUrl = useConverterStore((s) => s.downloadUrl)
+  const sessionId = useConverterStore((s) => s.sessionId)
+  const largeFormatEnabled = useConverterStore((s) => s.largeFormatEnabled)
 
-  const batchMode = useConverterStore((s) => s.batchMode);
-  const batchFiles = useConverterStore((s) => s.batchFiles);
-  const batchLoading = useConverterStore((s) => s.batchLoading);
-  const batchResult = useConverterStore((s) => s.batchResult);
-  const submitBatch = useConverterStore((s) => s.submitBatch);
+  const batchMode = useConverterStore((s) => s.batchMode)
+  const batchFiles = useConverterStore((s) => s.batchFiles)
+  const batchLoading = useConverterStore((s) => s.batchLoading)
+  const batchResult = useConverterStore((s) => s.batchResult)
+  const submitBatch = useConverterStore((s) => s.submitBatch)
 
-  const fetchLayerImages = useConverterStore((s) => s.fetchLayerImages);
-  const layerImagesLoading = useConverterStore((s) => s.layerImagesLoading);
-  const layerImages = useConverterStore((s) => s.layerImages);
+  const fetchLayerImages = useConverterStore((s) => s.fetchLayerImages)
+  const layerImagesLoading = useConverterStore((s) => s.layerImagesLoading)
+  const layerImages = useConverterStore((s) => s.layerImages)
 
-  const canSubmit = !!imageFile && !!lut_name;
-  const canBatchSubmit = batchFiles.length > 0 && !!lut_name;
-  const hasPreview = !!previewImageUrl && !!sessionId;
+  const canSubmit = !!imageFile && !!lut_name
+  const canBatchSubmit = batchFiles.length > 0 && !!lut_name
+  const hasPreview = !!previewImageUrl && !!sessionId
 
   return (
     <div className="flex flex-col gap-3">
@@ -78,8 +78,8 @@ export default function ActionBar() {
               className="w-full"
             />
             <WikiTooltip
-              title="生成 3D 模型"
-              description="基于当前图像和 LUT 校准数据，生成可打印的全彩 3MF 模型文件。"
+              title={t("action_generate_model_title")}
+              description={t("action_generate_model_desc")}
               wikiUrl="https://github.com/pekingduck/lumina-layers/wiki/Image-Converter"
             >
               <Button
@@ -119,7 +119,6 @@ export default function ActionBar() {
         />
       )}
 
-      {/* 分层缩略图（inline） */}
       {layerImages.length > 0 && (
         <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
           <h4 className="mb-2 text-xs font-medium text-gray-600 dark:text-gray-400">{t("action_layers_title")}</h4>
@@ -138,7 +137,7 @@ export default function ActionBar() {
                     draggable={false}
                   />
                   <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors group-hover:bg-black/20">
-                    <span className="text-sm text-white opacity-0 transition-opacity group-hover:opacity-100">🔍</span>
+                    <span className="text-sm text-white opacity-0 transition-opacity group-hover:opacity-100">{t("action_zoom_icon")}</span>
                   </div>
                 </div>
                 <span className="text-[11px] text-gray-600 dark:text-gray-400">
@@ -150,7 +149,6 @@ export default function ActionBar() {
         </div>
       )}
 
-      {/* 单张图片全屏查看（Portal 渲染到 body） */}
       {zoomedLayerIdx !== null && layerImages[zoomedLayerIdx] && createPortal(
         <div
           className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80"
@@ -166,26 +164,26 @@ export default function ActionBar() {
               </span>
               <div className={`items-center gap-2 ${workspace.isCompact ? "grid grid-cols-[1fr_auto] gap-y-1" : "flex"}`}>
                 <button
-                  className="rounded-lg px-3 py-1 text-sm text-white/80 hover:bg-white/10 disabled:opacity-30"
+                  className="rounded-lg px-3 py-1 text-sm text-white/80 hover:bg-slate-200/15 disabled:opacity-30 dark:hover:bg-slate-700/30"
                   onClick={() => setZoomedLayerIdx(Math.max(0, zoomedLayerIdx - 1))}
                   disabled={zoomedLayerIdx === 0}
                 >
-                  ← {t("action_layer_prev")}
+                  {t("action_layer_prev_arrow")} {t("action_layer_prev")}
                 </button>
                 <span className="text-sm text-white/60">{zoomedLayerIdx + 1} / {layerImages.length}</span>
                 <button
-                  className="rounded-lg px-3 py-1 text-sm text-white/80 hover:bg-white/10 disabled:opacity-30"
+                  className="rounded-lg px-3 py-1 text-sm text-white/80 hover:bg-slate-200/15 disabled:opacity-30 dark:hover:bg-slate-700/30"
                   onClick={() => setZoomedLayerIdx(Math.min(layerImages.length - 1, zoomedLayerIdx + 1))}
                   disabled={zoomedLayerIdx === layerImages.length - 1}
                 >
-                  {t("action_layer_next")} →
+                  {t("action_layer_next")} {t("action_layer_next_arrow")}
                 </button>
                 <button
-                  className="ml-2 rounded-lg p-2 text-white/80 hover:bg-white/10"
+                  className="ml-2 rounded-lg p-2 text-white/80 hover:bg-slate-200/15 dark:hover:bg-slate-700/30"
                   onClick={() => setZoomedLayerIdx(null)}
-                  aria-label="Close"
+                  aria-label={t("action_close_overlay")}
                 >
-                  ✕
+                  {t("action_close_icon")}
                 </button>
               </div>
             </div>
@@ -206,10 +204,11 @@ export default function ActionBar() {
         canSubmit={canSubmit}
         largeFormat={largeFormatEnabled}
         onAutoGenerate={async () => {
-          await submitFullPipeline();
-          return useConverterStore.getState().threemfDiskPath ?? null;
+          await submitFullPipeline()
+          return useConverterStore.getState().threemfDiskPath ?? null
         }}
       />
     </div>
-  );
+  )
 }
+

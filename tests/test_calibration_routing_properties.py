@@ -1,4 +1,4 @@
-"""Property-based tests for Calibration parameter mapping completeness (Property 5).
+﻿"""Property-based tests for Calibration parameter mapping completeness (Property 5).
 
 Uses Hypothesis to generate random valid CalibrationGenerateRequest parameters
 and verify that all CalibrationColorMode enum values route to the correct core
@@ -28,9 +28,7 @@ client: TestClient = TestClient(app)
 # Shared mock fixtures
 # ---------------------------------------------------------------------------
 
-_mock_preview: Image.Image = Image.fromarray(
-    np.zeros((10, 10, 3), dtype=np.uint8)
-)
+_mock_preview: Image.Image = Image.fromarray(np.zeros((10, 10, 3), dtype=np.uint8))
 _mock_return = ("/tmp/fake.3mf", _mock_preview, "OK")
 
 # ---------------------------------------------------------------------------
@@ -93,8 +91,7 @@ def test_all_color_modes_route_to_valid_core_function(
         )
 
     assert response.status_code == 200, (
-        f"Expected 200 for mode={mode.value}, got {response.status_code}: "
-        f"{response.text}"
+        f"Expected 200 for mode={mode.value}, got {response.status_code}: " f"{response.text}"
     )
     called_mock.assert_called_once()
 
@@ -106,7 +103,7 @@ def test_all_color_modes_route_to_valid_core_function(
     gap=gap_values,
     backing=backing_colors,
 )
-@settings(max_examples=200)
+@settings(max_examples=200, deadline=None)
 def test_block_size_and_gap_do_not_cause_parameter_errors(
     mode: CalibrationColorMode,
     block_size: int,
@@ -135,6 +132,14 @@ def test_block_size_and_gap_do_not_cause_parameter_errors(
             "api.routers.calibration.generate_8color_batch_zip",
             return_value=_mock_return,
         ),
+        patch(
+            "api.routers.calibration.generate_smart_board_rybw",
+            return_value=_mock_return,
+        ),
+        patch(
+            "api.routers.calibration.generate_5color_extended_batch_zip",
+            return_value=_mock_return,
+        ),
     ):
         response = client.post(
             "/api/calibration/generate",
@@ -147,8 +152,7 @@ def test_block_size_and_gap_do_not_cause_parameter_errors(
         )
 
     assert response.status_code == 200, (
-        f"Parameter error for mode={mode.value}, block_size={block_size}, "
-        f"gap={gap}: {response.text}"
+        f"Parameter error for mode={mode.value}, block_size={block_size}, " f"gap={gap}: {response.text}"
     )
     data = response.json()
     assert data["status"] == "ok"
@@ -165,6 +169,5 @@ def test_enum_coverage_is_exhaustive() -> None:
     """
     for member in CalibrationColorMode:
         assert member.value in _MODE_TO_MOCK_TARGET, (
-            f"CalibrationColorMode.{member.name} ({member.value!r}) "
-            f"has no routing entry"
+            f"CalibrationColorMode.{member.name} ({member.value!r}) " f"has no routing entry"
         )

@@ -23,18 +23,17 @@ def _worker_init() -> None:
     工作进程初始化器：在 Windows 上强制 UTF-8 编码，并将 stdout 重定向到主进程日志文件。
     """
     if sys.platform == "win32":
-        sys.stdout = io.TextIOWrapper(
-            sys.stdout.buffer, encoding="utf-8", errors="replace"
-        )
-        sys.stderr = io.TextIOWrapper(
-            sys.stderr.buffer, encoding="utf-8", errors="replace"
-        )
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
     log_path = os.environ.get("LUMINA_LOG_PATH")
     if log_path:
         try:
             from api.logger import setup_file_logging
+            from api.structured_logging import configure_structured_logging
+
             setup_file_logging(log_path=log_path)
+            configure_structured_logging()
         except Exception:
             pass
 

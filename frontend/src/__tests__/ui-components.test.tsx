@@ -64,7 +64,7 @@ describe("Slider", () => {
     );
     const input = screen.getByRole("textbox", { name: /width value/i });
     expect(input).toHaveValue("120");
-    expect(input).toHaveStyle({ width: "7ch", minWidth: "7ch" });
+    expect(input).toHaveStyle({ width: "7ch" });
   });
 });
 

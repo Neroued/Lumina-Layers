@@ -257,18 +257,17 @@ describe("Feature: extractor-calibration-tab, Property 8: API 响应字段正确
         // Call submitExtract
         await useExtractorStore.getState().submitExtract();
 
-        // Verify store fields match the response (with base URL prefix)
-        const BASE = "http://localhost:8000";
+        // Verify store fields match the response (relative URL contract)
         const state = useExtractorStore.getState();
         expect(state.session_id).toBe(response.session_id);
         expect(state.lut_download_url).toBe(
-          response.lut_download_url ? `${BASE}${response.lut_download_url}` : null
+          response.lut_download_url ?? null
         );
         expect(state.warp_view_url).toBe(
-          response.warp_view_url ? `${BASE}${response.warp_view_url}` : null
+          response.warp_view_url ?? null
         );
         expect(state.lut_preview_url).toBe(
-          response.lut_preview_url ? `${BASE}${response.lut_preview_url}` : null
+          response.lut_preview_url ?? null
         );
         expect(state.isLoading).toBe(false);
         expect(state.error).toBeNull();

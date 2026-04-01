@@ -24,7 +24,6 @@ from utils.lut_manager import LUTManager
 from api.file_bridge import _guess_media_type
 from utils.stats import Stats
 
-
 # ============================================================
 # 8.1.1 config.LUT_FILE_PATH 后缀测试
 # Validates: Requirements 1.1
@@ -36,16 +35,12 @@ class TestConfigLUTFilePath:
 
     def test_lut_file_path_ends_with_json(self):
         """LUT_FILE_PATH 应以 .json 结尾，而非 .npy。"""
-        assert LUT_FILE_PATH.endswith(".json"), (
-            f"LUT_FILE_PATH 应以 .json 结尾，实际值: {LUT_FILE_PATH}"
-        )
+        assert LUT_FILE_PATH.endswith(".json"), f"LUT_FILE_PATH 应以 .json 结尾，实际值: {LUT_FILE_PATH}"
 
     def test_lut_file_path_contains_lumina_lut(self):
         """LUT_FILE_PATH 文件名应为 lumina_lut.json。"""
         basename = os.path.basename(LUT_FILE_PATH)
-        assert basename == "lumina_lut.json", (
-            f"文件名应为 lumina_lut.json，实际值: {basename}"
-        )
+        assert basename == "lumina_lut.json", f"文件名应为 lumina_lut.json，实际值: {basename}"
 
 
 # ============================================================
@@ -60,30 +55,30 @@ class TestStatsPreserveFiles:
     def test_clear_output_preserve_files_contains_json(self):
         """clear_output() 中的 preserve_files 应包含 'lumina_lut.json'。"""
         source = inspect.getsource(Stats.clear_output)
-        assert '"lumina_lut.json"' in source or "'lumina_lut.json'" in source, (
-            "clear_output() 的 preserve_files 应包含 'lumina_lut.json'"
-        )
+        assert (
+            '"lumina_lut.json"' in source or "'lumina_lut.json'" in source
+        ), "clear_output() 的 preserve_files 应包含 'lumina_lut.json'"
 
     def test_clear_output_preserve_files_not_npy(self):
         """clear_output() 中的 preserve_files 不应包含 'lumina_lut.npy'。"""
         source = inspect.getsource(Stats.clear_output)
-        assert '"lumina_lut.npy"' not in source and "'lumina_lut.npy'" not in source, (
-            "clear_output() 的 preserve_files 不应包含 'lumina_lut.npy'"
-        )
+        assert (
+            '"lumina_lut.npy"' not in source and "'lumina_lut.npy'" not in source
+        ), "clear_output() 的 preserve_files 不应包含 'lumina_lut.npy'"
 
     def test_get_output_size_preserve_files_contains_json(self):
         """get_output_size() 中的 preserve_files 应包含 'lumina_lut.json'。"""
         source = inspect.getsource(Stats.get_output_size)
-        assert '"lumina_lut.json"' in source or "'lumina_lut.json'" in source, (
-            "get_output_size() 的 preserve_files 应包含 'lumina_lut.json'"
-        )
+        assert (
+            '"lumina_lut.json"' in source or "'lumina_lut.json'" in source
+        ), "get_output_size() 的 preserve_files 应包含 'lumina_lut.json'"
 
     def test_get_output_size_preserve_files_not_npy(self):
         """get_output_size() 中的 preserve_files 不应包含 'lumina_lut.npy'。"""
         source = inspect.getsource(Stats.get_output_size)
-        assert '"lumina_lut.npy"' not in source and "'lumina_lut.npy'" not in source, (
-            "get_output_size() 的 preserve_files 不应包含 'lumina_lut.npy'"
-        )
+        assert (
+            '"lumina_lut.npy"' not in source and "'lumina_lut.npy'" not in source
+        ), "get_output_size() 的 preserve_files 不应包含 'lumina_lut.npy'"
 
 
 # ============================================================
@@ -122,12 +117,15 @@ class TestBackwardCompatibleLoading:
 
     def test_load_npy_returns_correct_rgb(self):
         """.npy 文件加载后 RGB 数据应与原始数据一致。"""
-        rgb_original = np.array([
-            [255, 0, 0],
-            [0, 255, 0],
-            [0, 0, 255],
-            [128, 128, 128],
-        ], dtype=np.uint8)
+        rgb_original = np.array(
+            [
+                [255, 0, 0],
+                [0, 255, 0],
+                [0, 0, 255],
+                [128, 128, 128],
+            ],
+            dtype=np.uint8,
+        )
 
         with tempfile.NamedTemporaryFile(suffix=".npy", delete=False) as f:
             tmp_path = f.name
@@ -206,14 +204,12 @@ class TestGetAllLutFiles:
             LUTManager.LUT_PRESET_DIR = tmp_dir
 
             # 创建三种格式的文件
-            np.save(os.path.join(tmp_dir, "lut_a.npy"),
-                    np.zeros((4, 3), dtype=np.uint8))
+            np.save(os.path.join(tmp_dir, "lut_a.npy"), np.zeros((4, 3), dtype=np.uint8))
 
             with open(os.path.join(tmp_dir, "lut_b.json"), "w") as f:
                 json.dump({"name": "b", "palette": [], "entries": []}, f)
 
-            np.savez(os.path.join(tmp_dir, "lut_c.npz"),
-                     rgb=np.zeros((4, 3), dtype=np.uint8))
+            np.savez(os.path.join(tmp_dir, "lut_c.npz"), rgb=np.zeros((4, 3), dtype=np.uint8))
 
             result = LUTManager.get_all_lut_files()
             extensions = {os.path.splitext(v)[1] for v in result.values()}
@@ -247,7 +243,7 @@ class TestUploadNpyAutoConvert:
             npy_path = os.path.join(tmp_dir, "uploaded_lut.npy")
             np.save(npy_path, rgb)
 
-            # 模拟 Gradio 上传文件对象（有 .name 属性）
+            # 模拟 file-like 上传对象（有 .name 属性）
             class FakeUploadedFile:
                 def __init__(self, path):
                     self.name = path
@@ -261,9 +257,7 @@ class TestUploadNpyAutoConvert:
             custom_dir = os.path.join(tmp_dir, "Custom")
             saved_files = os.listdir(custom_dir) if os.path.exists(custom_dir) else []
             json_files = [f for f in saved_files if f.endswith(".json")]
-            assert len(json_files) >= 1, (
-                f"Custom 目录应包含 .json 文件，实际文件: {saved_files}"
-            )
+            assert len(json_files) >= 1, f"Custom 目录应包含 .json 文件，实际文件: {saved_files}"
 
             # 验证保存的 JSON 内容可被正确加载
             json_path = os.path.join(custom_dir, json_files[0])

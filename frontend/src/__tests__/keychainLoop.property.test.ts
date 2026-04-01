@@ -198,7 +198,7 @@ describe("KeychainRing3D — Property-Based Tests", () => {
 
 // ========== Store Clamping Tests ==========
 
-import { useConverterStore } from "../stores/converterStore";
+import { useConverterStore } from "../stores/converter";
 
 describe("converterStore — Property-Based Clamping Tests", () => {
   /**

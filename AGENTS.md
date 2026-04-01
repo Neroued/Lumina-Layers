@@ -18,6 +18,12 @@ Lumina Studio is a Python + React/TypeScript multi-material FDM color workflow b
 - `python -m pytest tests/ -v`
 - `python -m pytest tests/ --hypothesis-show-statistics`
 - `cd frontend && npx vitest --run`
+- `python scripts/run_smoke_tests.py`
+- `python scripts/run_full_tests.py`
+- `python scripts/run_realtime_tests.py --no-lint`
+- `python scripts/profile_stage3.py --also-write-latest`
+- `python scripts/check_perf_regression.py`
+- `python scripts/check_perf_regression.py --use-cold-start`
 - `docker build -t lumina-layers . && docker run -p 7860:7860 lumina-layers`
 
 ## Engineering Rules
@@ -37,6 +43,7 @@ Lumina Studio is a Python + React/TypeScript multi-material FDM color workflow b
 ## Frontend Rules
 - All user-facing strings must come from `frontend/src/i18n/translations.ts`
 - Support both light and dark themes via tokens/Tailwind vars; no raw UI colors like `#fff`, `bg-white`, or `text-black`
+- Keep frontend resource/file URLs as relative paths in state/domain logic; only normalization-focused tests may use absolute localhost inputs
 - Keep components focused on presentation/local interaction; use API clients and Zustand stores for orchestration
 - Preserve `settingsStore` persistence and best-effort backend sync
 
@@ -49,12 +56,18 @@ Lumina Studio is a Python + React/TypeScript multi-material FDM color workflow b
 - Never assume session/cache state exists or is fresh; return deterministic `4xx`/`5xx`, not raw tracebacks
 - Register every temp file for cleanup; preserve original state before destructive cache mutations; prevent stale preview/download caching
 - Use explicit timeouts, distinguish fatal vs non-fatal failures, and degrade optional features such as HEIC/HEIF gracefully
+- Use structured logging fields (`request_id`, `session_id`, `event`, `error_type`) on API/worker paths; do not add business `print(...)` in governed paths
+- Keep broad `except Exception` only at explicit boundary guards; prefer typed/domain exceptions and centralized mapping via `api.errors.to_http_exception()`
+- In `core/*`, do not raise `HTTPException`; raise domain/core errors and map at API boundaries
 - Current supported workflows include calibration, extraction/manual correction, LUT merge/inspection, preview/generation, batch conversion, large-format tiled generation, printer/slicer integration, and BW/4-color/6-color/8-color/5-color-extended modes
 
 ## Tests
 - Backend: `pytest` + Hypothesis; Frontend: Vitest + fast-check
 - File naming: `test_*_unit.py` / `test_*_properties.py` (Python); `*.test.ts(x)` / `*.property.test.ts` (Frontend)
 - Add focused regression tests for new algorithms, bug fixes, cache/session/temp-file cleanup, timeout/fallback paths, invalid uploads/LUTs, and out-of-bounds/background clicks
+- Keep gate layering: `smoke` for fast pre-push checks, `full` for release-level regression, `watch` for local feedback loops
+- Keep performance checks reproducible via `profile_stage3` + `check_perf_regression`; default regression decisions should use warm runs (run2/run3)
+- Maintain governance tests (`tests/test_logging_exception_governance_unit.py`, URL/resource contract guards) when changing logging, exception boundaries, or URL semantics
 
 ## Hygiene & Commits
 - Do not commit secrets, machine-local config, IDE junk, generated caches, or transient artifacts

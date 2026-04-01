@@ -11,6 +11,7 @@ converter.py 从 4500+ 行的巨型文件重构为：
 
 import os
 import time
+import logging
 from collections import deque
 import numpy as np
 import cv2
@@ -103,95 +104,171 @@ try:
 except ImportError:
     LUTManager = None
 
+log = logging.getLogger(__name__)
+
+
+# ========== Backward-Compatibility Geometry Helper ==========
+
+
+def _build_color_contour_mesh(mask, height, total_layers, rgba):
+    """Build a simple extruded mesh for a boolean mask.
+    构建布尔掩码的简化挤出网格（兼容旧导出符号）。
+    This compatibility helper is kept in ``core.converter`` because legacy tests
+    and callers import it from here. Implementation is intentionally minimal:
+    each True pixel is extruded to a box and concatenated into one mesh.
+    该兼容函数保留在 ``core.converter``，用于维持历史导入契约。
+    实现保持最小化：每个 True 像素挤出为盒体并合并为单个 mesh。"""
+    import trimesh
+
+    mask_arr = np.asarray(mask, dtype=bool)
+    if mask_arr.ndim != 2 or not np.any(mask_arr):
+        return None
+
+    h, w = mask_arr.shape
+    z_extent = float(total_layers)
+    boxes = []
+
+    for y, x in np.argwhere(mask_arr):
+        # Keep a deterministic XY mapping while ensuring Z span is [0, total_layers].
+        center_x = float(x) + 0.5
+        center_y = float(h - 1 - y) + 0.5
+        center_z = z_extent / 2.0
+
+        box = trimesh.creation.box(extents=(1.0, 1.0, z_extent))
+        box.apply_translation((center_x, center_y, center_z))
+        box.visual.face_colors = np.array(rgba, dtype=np.uint8)
+        boxes.append(box)
+
+    if not boxes:
+        return None
+
+    merged = trimesh.util.concatenate(boxes)
+    merged.visual.face_colors = np.array(rgba, dtype=np.uint8)
+    return merged
+
 
 # ========== Main Conversion Function (Thin Wrapper) ==========
 
-def convert_image_to_3d(image_path, lut_path, target_width_mm, spacer_thick,
-                         structure_mode, auto_bg, bg_tol, color_mode,
-                         add_loop, loop_width, loop_length, loop_hole, loop_pos,
-                         modeling_mode=ModelingMode.VECTOR, quantize_colors=32,
-                         blur_kernel=0, smooth_sigma=10,
-                         color_replacements=None, replacement_regions=None, backing_color_id=0, separate_backing=False,
-                         enable_relief=False, color_height_map=None,
-                         height_mode: str = "color",
-                         heightmap_path=None, heightmap_max_height=None,
-                         enable_cleanup=True,
-                         enable_outline=False, outline_width=2.0,
-                         enable_cloisonne=False, wire_width_mm=0.4,
-                         wire_height_mm=0.4,
-                         free_color_set=None,
-                         enable_coating=False, coating_height_mm=0.08,
-                         hue_weight: float = 0.0,
-                         chroma_gate: float = 15.0,
-                         matched_rgb_path: Optional[str] = None,
-                         loop_angle: float = 0.0,
-                         loop_offset_x: float = 0.0,
-                         loop_offset_y: float = 0.0,
-                         loop_position_preset: Optional[str] = "top-center",
-                         printer_id: str = 'bambu-h2d',
-                         slicer: str = 'BambuStudio',
-                         relief_global_max_height: Optional[float] = None,
-                         progress=None):
-    """Main conversion function: Convert image to 3D model.
-    主转换函数：将图像转换为 3D 模型。薄包装层，委托给 coordinator。
 
+def convert_image_to_3d(
+    image_path,
+    lut_path,
+    target_width_mm,
+    spacer_thick,
+    structure_mode,
+    auto_bg,
+    bg_tol,
+    color_mode,
+    add_loop,
+    loop_width,
+    loop_length,
+    loop_hole,
+    loop_pos,
+    modeling_mode=ModelingMode.VECTOR,
+    quantize_colors=32,
+    blur_kernel=0,
+    smooth_sigma=10,
+    color_replacements=None,
+    replacement_regions=None,
+    backing_color_id=0,
+    separate_backing=False,
+    enable_relief=False,
+    color_height_map=None,
+    height_mode: str = "color",
+    heightmap_path=None,
+    heightmap_max_height=None,
+    enable_cleanup=True,
+    enable_outline=False,
+    outline_width=2.0,
+    enable_cloisonne=False,
+    wire_width_mm=0.4,
+    wire_height_mm=0.4,
+    free_color_set=None,
+    enable_coating=False,
+    coating_height_mm=0.08,
+    hue_weight: float = 0.0,
+    chroma_gate: float = 15.0,
+    matched_rgb_path: Optional[str] = None,
+    loop_angle: float = 0.0,
+    loop_offset_x: float = 0.0,
+    loop_offset_y: float = 0.0,
+    loop_position_preset: Optional[str] = "top-center",
+    printer_id: str = "bambu-h2d",
+    slicer: str = "BambuStudio",
+    relief_global_max_height: Optional[float] = None,
+    progress=None,
+):
+    """Main conversion function: Convert image to 3D model.
+    主要转换函数：将图像转换为 3D 模型。
     Returns:
         Tuple of (3mf_path, glb_path, preview_image, status_message, recipe_path)
     """
-    ctx = {k: v for k, v in locals().items() if k != 'progress'}
-    ctx['progress'] = progress
-    ctx['need_2d_preview'] = False
+    ctx = {k: v for k, v in locals().items() if k != "progress"}
+    ctx["progress"] = progress
+    # Intentional: the API layer produces its own GLB preview, so skip the
+    # heavy SVG→raster 2D preview inside the vector branch coordinator.
+    ctx["need_2d_preview"] = False
     ctx = run_raster_pipeline(ctx)
-    if ctx.get('error'):
-        return None, None, None, ctx['error'], None
-    return ctx.get('result_tuple', (None, None, None, '[ERROR] No result', None))
+    if ctx.get("error"):
+        return None, None, None, ctx["error"], None
+    return ctx.get("result_tuple", (None, None, None, "[ERROR] No result", None))
 
 
 # ========== Preview Function (Thin Wrapper) ==========
 
-def generate_preview_cached(image_path, lut_path, target_width_mm,
-                            auto_bg, bg_tol, color_mode,
-                            modeling_mode: ModelingMode = ModelingMode.HIGH_FIDELITY,
-                            quantize_colors: int = 64,
-                            backing_color_id: int = 0,
-                            enable_cleanup: bool = True,
-                            is_dark: bool = True,
-                            hue_weight: float = 0.0,
-                            chroma_gate: float = 15.0):
-    """Generate preview and cache data. Thin wrapper, delegates to coordinator.
-    生成预览和缓存数据。薄包装层，委托给 coordinator。
 
+def generate_preview_cached(
+    image_path,
+    lut_path,
+    target_width_mm,
+    auto_bg,
+    bg_tol,
+    color_mode,
+    modeling_mode: ModelingMode = ModelingMode.HIGH_FIDELITY,
+    quantize_colors: int = 64,
+    backing_color_id: int = 0,
+    enable_cleanup: bool = True,
+    is_dark: bool = True,
+    hue_weight: float = 0.0,
+    chroma_gate: float = 15.0,
+):
+    """Generate preview and cache data. Thin wrapper, delegates to coordinator.
+    生成预览图和缓存数据。薄包装函数，委托给 coordinator。
     Returns:
         tuple: (display_image, cache_data, status_message)
     """
     ctx = {k: v for k, v in locals().items()}
     ctx = run_preview_pipeline(ctx)
-    if ctx.get('error'):
-        return None, None, ctx['error']
-    return ctx.get('display_image'), ctx.get('cache'), ctx.get('status_msg', '[OK]')
+    if ctx.get("error"):
+        return None, None, ctx["error"]
+    return ctx.get("display_image"), ctx.get("cache"), ctx.get("status_msg", "[OK]")
 
 
 # ========== Preview Helper Functions ==========
 
 
-def update_preview_with_loop(cache, loop_pos, add_loop,
-                            loop_width, loop_length, loop_hole, loop_angle):
+def update_preview_with_loop(cache, loop_pos, add_loop, loop_width, loop_length, loop_hole, loop_angle):
     """Update preview image with keychain loop."""
     if cache is None:
         return None
-    
-    preview_rgba = cache['preview_rgba'].copy()
-    color_conf = cache['color_conf']
-    target_width_mm = cache.get('target_width_mm')
-    is_dark = cache.get('is_dark', True)
-    
+
+    preview_rgba = cache["preview_rgba"].copy()
+    color_conf = cache["color_conf"]
+    target_width_mm = cache.get("target_width_mm")
+    is_dark = cache.get("is_dark", True)
+
     display = render_preview(
         preview_rgba,
         loop_pos if add_loop else None,
-        loop_width, loop_length, loop_hole, loop_angle,
-        add_loop, color_conf,
-        bed_label=cache.get('bed_label'),
-        target_width_mm=target_width_mm, is_dark=is_dark
+        loop_width,
+        loop_length,
+        loop_hole,
+        loop_angle,
+        add_loop,
+        color_conf,
+        bed_label=cache.get("bed_label"),
+        target_width_mm=target_width_mm,
+        is_dark=is_dark,
     )
     return display
 
@@ -201,34 +278,54 @@ def on_remove_loop():
     return None, False, 0, "Loop removed"
 
 
-def generate_final_model(image_path, lut_path, target_width_mm, spacer_thick,
-                        structure_mode, auto_bg, bg_tol, color_mode,
-                        add_loop, loop_width, loop_length, loop_hole, loop_pos,
-                        modeling_mode=ModelingMode.VECTOR, quantize_colors=64,
-                        color_replacements=None, replacement_regions=None, backing_color_name="White",
-                        separate_backing=False, enable_relief=False, color_height_map=None,
-                        height_mode: str = "color",
-                        heightmap_path=None, heightmap_max_height=None,
-                        enable_cleanup=True,
-                        enable_outline=False, outline_width=2.0,
-                        enable_cloisonne=False, wire_width_mm=0.4,
-                        wire_height_mm=0.4,
-                        free_color_set=None,
-                        enable_coating=False, coating_height_mm=0.08,
-                        hue_weight: float = 0.0,
-                        chroma_gate: float = 15.0,
-                        matched_rgb_path: Optional[str] = None,
-                        loop_angle: float = 0.0,
-                        loop_offset_x: float = 0.0,
-                        loop_offset_y: float = 0.0,
-                        loop_position_preset: Optional[str] = "top-center",
-                        printer_id: str = 'bambu-h2d',
-                        slicer: str = 'BambuStudio',
-                        relief_global_max_height: Optional[float] = None,
-                        progress=None):
+def generate_final_model(
+    image_path,
+    lut_path,
+    target_width_mm,
+    spacer_thick,
+    structure_mode,
+    auto_bg,
+    bg_tol,
+    color_mode,
+    add_loop,
+    loop_width,
+    loop_length,
+    loop_hole,
+    loop_pos,
+    modeling_mode=ModelingMode.VECTOR,
+    quantize_colors=64,
+    color_replacements=None,
+    replacement_regions=None,
+    backing_color_name="White",
+    separate_backing=False,
+    enable_relief=False,
+    color_height_map=None,
+    height_mode: str = "color",
+    heightmap_path=None,
+    heightmap_max_height=None,
+    enable_cleanup=True,
+    enable_outline=False,
+    outline_width=2.0,
+    enable_cloisonne=False,
+    wire_width_mm=0.4,
+    wire_height_mm=0.4,
+    free_color_set=None,
+    enable_coating=False,
+    coating_height_mm=0.08,
+    hue_weight: float = 0.0,
+    chroma_gate: float = 15.0,
+    matched_rgb_path: Optional[str] = None,
+    loop_angle: float = 0.0,
+    loop_offset_x: float = 0.0,
+    loop_offset_y: float = 0.0,
+    loop_position_preset: Optional[str] = "top-center",
+    printer_id: str = "bambu-h2d",
+    slicer: str = "BambuStudio",
+    relief_global_max_height: Optional[float] = None,
+    progress=None,
+):
     """Wrapper function for generating final model.
-    生成最终模型的包装函数。
-    
+    包装函数，用于生成最终模型。
     Directly calls main conversion function with smart defaults:
     - blur_kernel=0 (disable median filter, preserve details)
     - smooth_sigma=10 (gentle bilateral filter, preserve edges)
@@ -236,27 +333,55 @@ def generate_final_model(image_path, lut_path, target_width_mm, spacer_thick,
     # Convert backing color name to ID or use special marker for separate backing
     try:
         separate_backing = bool(separate_backing) if separate_backing is not None else False
-    except Exception as e:
-        print(f"[CONVERTER] Error reading separate_backing parameter: {e}, using default (False)")
+    except (TypeError, ValueError) as exc:
+        log.warning(
+            "Invalid separate_backing value, fallback to False",
+            extra={
+                "event": "core_converter_invalid_separate_backing",
+                "error_type": type(exc).__name__,
+                "error_message": str(exc),
+            },
+        )
         separate_backing = False
-    
+
     if separate_backing:
         backing_color_id = -2  # Special marker for separate backing
-        print(f"[CONVERTER] Backing will be separated as individual object (white)")
+        log.info(
+            "Backing will be separated as individual object",
+            extra={"event": "core_converter_backing_separated"},
+        )
     else:
         color_conf = ColorSystem.get(color_mode)
-        backing_color_id = color_conf['map'].get(backing_color_name, 0)
-        print(f"[CONVERTER] Backing color: {backing_color_name} (ID={backing_color_id})")
-    
+        backing_color_id = color_conf["map"].get(backing_color_name, 0)
+        log.info(
+            "Resolved backing color",
+            extra={
+                "event": "core_converter_backing_color_resolved",
+                "backing_color_name": backing_color_name,
+                "backing_color_id": backing_color_id,
+            },
+        )
+
     # Handle relief mode parameters
     if color_height_map is None:
         color_height_map = {}
-    
+
     return convert_image_to_3d(
-        image_path, lut_path, target_width_mm, spacer_thick,
-        structure_mode, auto_bg, bg_tol, color_mode,
-        add_loop, loop_width, loop_length, loop_hole, loop_pos,
-        modeling_mode, quantize_colors,
+        image_path,
+        lut_path,
+        target_width_mm,
+        spacer_thick,
+        structure_mode,
+        auto_bg,
+        bg_tol,
+        color_mode,
+        add_loop,
+        loop_width,
+        loop_length,
+        loop_hole,
+        loop_pos,
+        modeling_mode,
+        quantize_colors,
         blur_kernel=0,
         smooth_sigma=10,
         color_replacements=color_replacements,
@@ -293,74 +418,104 @@ def generate_final_model(image_path, lut_path, target_width_mm, spacer_thick,
 
 # ========== Color Replacement Functions ==========
 
+
 def update_preview_with_backing_color(cache, backing_color_id: int):
     """
     Update preview image with new backing color without re-processing the entire image.
     """
     if cache is None:
         return None, "[WARNING] Error: Cache cannot be None"
-    
+
     try:
         # Validate backing_color_id
-        color_conf = cache['color_conf']
-        num_materials = len(color_conf['slots'])
+        color_conf = cache["color_conf"]
+        num_materials = len(color_conf["slots"])
         if backing_color_id < 0 or backing_color_id >= num_materials:
-            print(f"[CONVERTER] Warning: Invalid backing_color_id={backing_color_id}, using default (0)")
+            log.warning(
+                "Invalid backing_color_id, fallback to 0",
+                extra={
+                    "event": "core_converter_invalid_backing_color_id",
+                    "backing_color_id": backing_color_id,
+                },
+            )
             backing_color_id = 0
-        
+
         # Get data from cache
-        material_matrix = cache['material_matrix']
-        mask_solid = cache['mask_solid']
-        preview_rgba = cache['preview_rgba'].copy()
-        
+        material_matrix = cache["material_matrix"]
+        mask_solid = cache["mask_solid"]
+        preview_rgba = cache["preview_rgba"].copy()
+
         target_h, target_w = material_matrix.shape[:2]
-        
+
         # Get backing color from color system
-        backing_color_rgba = color_conf['preview'][backing_color_id]
+        backing_color_rgba = color_conf["preview"][backing_color_id]
         backing_color_rgb = backing_color_rgba[:3]
-        
+
         # Check for backing-only pixels: solid pixels where all material layers are -1
         all_layers_transparent = np.all(material_matrix == -1, axis=2)
         backing_only_mask = mask_solid & all_layers_transparent
-        
+
         # Update backing-only areas with new backing color
         if np.any(backing_only_mask):
             preview_rgba[backing_only_mask, :3] = backing_color_rgb
             preview_rgba[backing_only_mask, 3] = 255
-            print(f"[CONVERTER] Updated {np.sum(backing_only_mask)} backing-only pixels with color {color_conf['slots'][backing_color_id]}")
+            log.debug(
+                "Updated backing-only pixels",
+                extra={
+                    "event": "core_converter_backing_preview_updated",
+                    "backing_pixels": int(np.sum(backing_only_mask)),
+                    "backing_color_name": color_conf["slots"][backing_color_id],
+                },
+            )
         else:
-            print(f"[CONVERTER] No backing-only pixels found in preview")
-        
+            log.debug(
+                "No backing-only pixels found in preview",
+                extra={"event": "core_converter_no_backing_pixels"},
+            )
+
         # Update cache with new backing_color_id
-        cache['backing_color_id'] = backing_color_id
-        cache['preview_rgba'] = preview_rgba.copy()
-        
-        return preview_rgba, f"✓ Preview updated with backing color: {color_conf['slots'][backing_color_id]}"
-    
-    except Exception as e:
-        print(f"[CONVERTER] Error updating preview with backing color: {e}")
+        cache["backing_color_id"] = backing_color_id
+        cache["preview_rgba"] = preview_rgba.copy()
+
+        return preview_rgba, f"Preview updated with backing color: {color_conf['slots'][backing_color_id]}"
+
+    except (KeyError, TypeError, ValueError) as exc:
+        log.warning(
+            "Preview update with backing color failed",
+            extra={
+                "event": "core_converter_backing_preview_update_failed",
+                "error_type": type(exc).__name__,
+                "error_message": str(exc),
+            },
+        )
         # Return original preview from cache if available
-        original_preview = cache.get('preview_rgba') if cache else None
-        return original_preview, f"[WARNING] Preview update failed: {str(e)}. Showing original preview."
+        original_preview = cache.get("preview_rgba") if cache else None
+        return original_preview, f"[WARNING] Preview update failed: {str(exc)}. Showing original preview."
 
 
-def update_preview_with_replacements(cache, replacement_regions=None,
-                                     loop_pos=None, add_loop=False,
-                                     loop_width=4, loop_length=8,
-                                     loop_hole=2.5, loop_angle=0,
-                                     lang: str = "zh",
-                                     merge_map: dict = None):
+def update_preview_with_replacements(
+    cache,
+    replacement_regions=None,
+    loop_pos=None,
+    add_loop=False,
+    loop_width=4,
+    loop_length=8,
+    loop_hole=2.5,
+    loop_angle=0,
+    lang: str = "zh",
+    merge_map: dict = None,
+):
     """
     Update preview image with color replacements and optional color merging applied.
     """
     if cache is None:
         return None, None, ""
-    
+
     # Get original matched_rgb (use stored original if available)
-    original_rgb = cache.get('original_matched_rgb', cache['matched_rgb'])
-    mask_solid = cache['mask_solid']
-    color_conf = cache['color_conf']
-    backing_color_id = cache.get('backing_color_id', 0)
+    original_rgb = cache.get("original_matched_rgb", cache["matched_rgb"])
+    mask_solid = cache["mask_solid"]
+    color_conf = cache["color_conf"]
+    backing_color_id = cache.get("backing_color_id", 0)
     target_h, target_w = original_rgb.shape[:2]
     # Start with original RGB
     matched_rgb = original_rgb.copy()
@@ -374,49 +529,53 @@ def update_preview_with_replacements(cache, replacement_regions=None,
         matched_rgb = merger.apply_color_merging(matched_rgb, merge_map)
 
     # Apply region replacements in-order (later items override earlier items)
-    for item in (replacement_regions or []):
-        region_mask = item.get('mask')
-        replacement_hex = item.get('replacement')
+    for item in replacement_regions or []:
+        region_mask = item.get("mask")
+        replacement_hex = item.get("replacement")
         if region_mask is None or not replacement_hex:
             continue
         replacement_rgb = _hex_to_rgb_tuple(replacement_hex)
         effective_mask = region_mask & mask_solid
         if np.any(effective_mask):
             matched_rgb[effective_mask] = np.array(replacement_rgb, dtype=np.uint8)
-    
+
     # Build new preview RGBA
     preview_rgba = np.zeros((target_h, target_w, 4), dtype=np.uint8)
     preview_rgba[mask_solid, :3] = matched_rgb[mask_solid]
     preview_rgba[mask_solid, 3] = 255
-    
+
     # Update cache with new data
     updated_cache = cache.copy()
-    updated_cache['matched_rgb'] = matched_rgb
-    updated_cache['preview_rgba'] = preview_rgba.copy()
-    updated_cache['backing_color_id'] = backing_color_id
-    
+    updated_cache["matched_rgb"] = matched_rgb
+    updated_cache["preview_rgba"] = preview_rgba.copy()
+    updated_cache["backing_color_id"] = backing_color_id
+
     # Store original if not already stored
-    if 'original_matched_rgb' not in updated_cache:
-        updated_cache['original_matched_rgb'] = original_rgb
-    
+    if "original_matched_rgb" not in updated_cache:
+        updated_cache["original_matched_rgb"] = original_rgb
+
     # Re-extract palette with new colors
     color_palette = extract_color_palette(updated_cache)
-    updated_cache['color_palette'] = color_palette
-    
+    updated_cache["color_palette"] = color_palette
+
     # Render display with loop if enabled
     display = render_preview(
         preview_rgba,
         loop_pos if add_loop else None,
-        loop_width, loop_length, loop_hole, loop_angle,
-        add_loop, color_conf,
-        bed_label=cache.get('bed_label'),
-        target_width_mm=cache.get('target_width_mm'),
-        is_dark=cache.get('is_dark', True)
+        loop_width,
+        loop_length,
+        loop_hole,
+        loop_angle,
+        add_loop,
+        color_conf,
+        bed_label=cache.get("bed_label"),
+        target_width_mm=cache.get("target_width_mm"),
+        is_dark=cache.get("is_dark", True),
     )
-    
+
     # Build auto pairs (quantized -> matched) for right table display
     auto_pairs = []
-    q_img = updated_cache.get('quantized_image')
+    q_img = updated_cache.get("quantized_image")
     if q_img is not None:
         h, w = matched_rgb.shape[:2]
         for y in range(h):
@@ -427,48 +586,53 @@ def update_preview_with_replacements(cache, replacement_regions=None,
                 mh = _rgb_to_hex(matched_rgb[y, x])
                 auto_pairs.append({"quantized_hex": qh, "matched_hex": mh})
 
-    # Generate palette HTML for display
-    # NOTE: palette HTML generation was previously delegated to ui.palette_extension
-    # (Gradio-only). Now returns empty string; React frontend renders palette via API.
+    # Generate palette HTML for display.
+    # NOTE: Palette HTML generation used to be delegated to legacy UI extension
+    # modules. It now intentionally returns empty because the web frontend renders
+    # this through API data.
     palette_html = ""
-    
+
     return display, updated_cache, palette_html
 
 
 # ========== Color Highlight Functions ==========
 
-def generate_highlight_preview(cache, highlight_color: str, 
-                               loop_pos=None, add_loop=False,
-                               loop_width=4, loop_length=8, 
-                               loop_hole=2.5, loop_angle=0):
+
+def generate_highlight_preview(
+    cache, highlight_color: str, loop_pos=None, add_loop=False, loop_width=4, loop_length=8, loop_hole=2.5, loop_angle=0
+):
     """
     Generate preview image with a specific color highlighted.
     """
     if cache is None:
         return None, "[ERROR] 请先生成预览 | Generate preview first"
-    
+
     if not highlight_color:
         # No highlight - return normal preview
-        preview_rgba = cache.get('preview_rgba')
+        preview_rgba = cache.get("preview_rgba")
         if preview_rgba is None:
             return None, "[ERROR] 缓存数据无效 | Invalid cache"
-        
-        color_conf = cache['color_conf']
+
+        color_conf = cache["color_conf"]
         display = render_preview(
             preview_rgba,
             loop_pos if add_loop else None,
-            loop_width, loop_length, loop_hole, loop_angle,
-            add_loop, color_conf,
-            bed_label=cache.get('bed_label'),
-            target_width_mm=cache.get('target_width_mm'),
-            is_dark=cache.get('is_dark', True)
+            loop_width,
+            loop_length,
+            loop_hole,
+            loop_angle,
+            add_loop,
+            color_conf,
+            bed_label=cache.get("bed_label"),
+            target_width_mm=cache.get("target_width_mm"),
+            is_dark=cache.get("is_dark", True),
         )
         return display, "[OK] 预览已恢复 | Preview restored"
     # Parse highlight color
     highlight_hex = highlight_color.strip().lower()
-    if not highlight_hex.startswith('#'):
-        highlight_hex = '#' + highlight_hex
-    
+    if not highlight_hex.startswith("#"):
+        highlight_hex = "#" + highlight_hex
+
     # Convert hex to RGB
     try:
         r = int(highlight_hex[1:3], 16)
@@ -477,41 +641,41 @@ def generate_highlight_preview(cache, highlight_color: str,
         highlight_rgb = np.array([r, g, b], dtype=np.uint8)
     except (ValueError, IndexError):
         return None, f"[ERROR] 无效的颜色值 | Invalid color: {highlight_color}"
-    
+
     # Get data from cache
-    matched_rgb = cache.get('matched_rgb')
-    mask_solid = cache.get('mask_solid')
-    color_conf = cache.get('color_conf')
-    
+    matched_rgb = cache.get("matched_rgb")
+    mask_solid = cache.get("mask_solid")
+    color_conf = cache.get("color_conf")
+
     if matched_rgb is None or mask_solid is None:
         return None, "[ERROR] 缓存数据不完整 | Incomplete cache"
-    
+
     target_h, target_w = matched_rgb.shape[:2]
-    
+
     # Create highlight mask - pixels matching the highlight color
     color_match = np.all(matched_rgb == highlight_rgb, axis=2)
 
-    scope = cache.get('selection_scope', 'global')
-    region_mask = cache.get('selected_region_mask')
+    scope = cache.get("selection_scope", "global")
+    region_mask = cache.get("selected_region_mask")
     highlight_mask = _resolve_highlight_mask(
         color_match,
         mask_solid,
         region_mask=region_mask,
         scope=scope,
     )
-    
+
     # Count highlighted pixels
     highlight_count = np.sum(highlight_mask)
     total_solid = np.sum(mask_solid)
-    
+
     if highlight_count == 0:
         return None, f"[WARNING] 未找到颜色 {highlight_hex} | Color not found"
-    
+
     highlight_percentage = round(highlight_count / total_solid * 100, 2)
-    
+
     # Create highlighted preview
     preview_rgba = np.zeros((target_h, target_w, 4), dtype=np.uint8)
-    
+
     # For non-highlighted solid pixels: convert to grayscale and dim
     non_highlight_mask = mask_solid & ~highlight_mask
     if np.any(non_highlight_mask):
@@ -521,71 +685,103 @@ def generate_highlight_preview(cache, highlight_color: str,
         preview_rgba[non_highlight_mask, 1] = dimmed_gray
         preview_rgba[non_highlight_mask, 2] = dimmed_gray
         preview_rgba[non_highlight_mask, 3] = 180
-    
+
     # For highlighted pixels: show original color with full opacity
     preview_rgba[highlight_mask, :3] = matched_rgb[highlight_mask]
     preview_rgba[highlight_mask, 3] = 255
-    
+
     # Add a subtle colored border/glow effect around highlighted regions
     try:
         kernel = np.ones((5, 5), np.uint8)
         dilated = cv2.dilate(highlight_mask.astype(np.uint8), kernel, iterations=2)
         border_mask = (dilated > 0) & ~highlight_mask & mask_solid
-        
+
         if np.any(border_mask):
             preview_rgba[border_mask, 0] = 0
             preview_rgba[border_mask, 1] = 255
             preview_rgba[border_mask, 2] = 255
             preview_rgba[border_mask, 3] = 200
-    except Exception as e:
-        print(f"[HIGHLIGHT] Border effect skipped: {e}")
-    
+    except cv2.error as exc:
+        log.debug(
+            "Highlight border effect skipped due to OpenCV error",
+            extra={
+                "event": "core_converter_highlight_border_skipped",
+                "error_type": type(exc).__name__,
+                "error_message": str(exc),
+            },
+        )
+
     # Render display
     display = render_preview(
         preview_rgba,
         loop_pos if add_loop else None,
-        loop_width, loop_length, loop_hole, loop_angle,
-        add_loop, color_conf,
-        bed_label=cache.get('bed_label'),
-        target_width_mm=cache.get('target_width_mm'),
-        is_dark=cache.get('is_dark', True)
+        loop_width,
+        loop_length,
+        loop_hole,
+        loop_angle,
+        add_loop,
+        color_conf,
+        bed_label=cache.get("bed_label"),
+        target_width_mm=cache.get("target_width_mm"),
+        is_dark=cache.get("is_dark", True),
     )
-    
+
     return display, f"🔍 高亮 {highlight_hex} ({highlight_percentage}%, {highlight_count:,} 像素)"
 
 
-def clear_highlight_preview(cache, loop_pos=None, add_loop=False,
-                            loop_width=4, loop_length=8, 
-                            loop_hole=2.5, loop_angle=0):
+def clear_highlight_preview(
+    cache, loop_pos=None, add_loop=False, loop_width=4, loop_length=8, loop_hole=2.5, loop_angle=0
+):
     """
     Clear highlight and restore normal preview.
     """
-    print(f"[CLEAR_HIGHLIGHT] Called with cache={cache is not None}, loop_pos={loop_pos}, add_loop={add_loop}")
-    
+    log.debug(
+        "Clear highlight requested",
+        extra={
+            "event": "core_converter_clear_highlight_start",
+            "has_cache": bool(cache is not None),
+            "has_loop": bool(add_loop),
+        },
+    )
+
     if cache is None:
-        print("[CLEAR_HIGHLIGHT] Cache is None!")
+        log.warning(
+            "Clear highlight called without cache",
+            extra={"event": "core_converter_clear_highlight_no_cache"},
+        )
         return None, "[ERROR] 请先生成预览 | Generate preview first"
-    
-    preview_rgba = cache.get('preview_rgba')
+
+    preview_rgba = cache.get("preview_rgba")
     if preview_rgba is None:
-        print("[CLEAR_HIGHLIGHT] preview_rgba is None!")
+        log.warning(
+            "Clear highlight called with invalid cache",
+            extra={"event": "core_converter_clear_highlight_invalid_cache"},
+        )
         return None, "[ERROR] 缓存数据无效 | Invalid cache"
-    
-    print(f"[CLEAR_HIGHLIGHT] preview_rgba shape: {preview_rgba.shape}")
-    
-    color_conf = cache['color_conf']
+
+    color_conf = cache["color_conf"]
     display = render_preview(
         preview_rgba,
         loop_pos if add_loop else None,
-        loop_width, loop_length, loop_hole, loop_angle,
-        add_loop, color_conf,
-        bed_label=cache.get('bed_label'),
-        target_width_mm=cache.get('target_width_mm'),
-        is_dark=cache.get('is_dark', True)
+        loop_width,
+        loop_length,
+        loop_hole,
+        loop_angle,
+        add_loop,
+        color_conf,
+        bed_label=cache.get("bed_label"),
+        target_width_mm=cache.get("target_width_mm"),
+        is_dark=cache.get("is_dark", True),
     )
-    
-    print(f"[CLEAR_HIGHLIGHT] display shape: {display.shape if display is not None else None}")
-    
+
+    log.debug(
+        "Clear highlight completed",
+        extra={
+            "event": "core_converter_clear_highlight_done",
+            "display_is_none": bool(display is None),
+        },
+    )
+
     return display, "[OK] 预览已恢复 | Preview restored"
 
 
@@ -613,16 +809,16 @@ def on_preview_click_select_color(
         return None, "未选择", None, "[WARNING] 无效点击"
 
     if bed_label is None:
-        bed_label = cache.get('bed_label', BedManager.DEFAULT_BED)
+        bed_label = cache.get("bed_label", BedManager.DEFAULT_BED)
 
     display_click_x, display_click_y = click_coords
 
-    target_w = cache.get('target_w')
-    target_h = cache.get('target_h')
-    target_width_mm = cache.get('target_width_mm')
+    target_w = cache.get("target_w")
+    target_h = cache.get("target_h")
+    target_width_mm = cache.get("target_width_mm")
 
     if target_w is None or target_h is None:
-        return None, "未选择", None, "[ERROR] 缓存数据不完整"
+        return None, "未选择", None, "[ERROR] Invalid cache data"
 
     bed_w_mm, bed_h_mm = BedManager.get_bed_size(bed_label)
     ppm = BedManager.compute_scale(bed_w_mm, bed_h_mm)
@@ -658,13 +854,13 @@ def on_preview_click_select_color(
     orig_x = int(img_px_x)
     orig_y = int(img_px_y)
 
-    matched_rgb = cache.get('original_matched_rgb', cache.get('matched_rgb'))
-    quantized_image = cache.get('quantized_image')
-    mask_solid = cache.get('mask_solid')
+    matched_rgb = cache.get("original_matched_rgb", cache.get("matched_rgb"))
+    quantized_image = cache.get("quantized_image")
+    mask_solid = cache.get("mask_solid")
 
     if quantized_image is None:
         _ensure_quantized_image_in_cache(cache)
-        quantized_image = cache.get('quantized_image')
+        quantized_image = cache.get("quantized_image")
 
     if matched_rgb is None or mask_solid is None or quantized_image is None:
         return None, "未选择", None, "[ERROR] 缓存无效"
@@ -675,25 +871,30 @@ def on_preview_click_select_color(
         return None, "未选择", None, f"[WARNING] 点击了无效区域 ({orig_x}, {orig_y})"
 
     if not mask_solid[orig_y, orig_x]:
-        return None, "未选择", None, "[WARNING] 点击了背景区域"
+        return None, "未选择", None, "[WARNING] Clicked background area"
 
     q_rgb = tuple(int(v) for v in quantized_image[orig_y, orig_x])
     m_rgb = tuple(int(v) for v in matched_rgb[orig_y, orig_x])
 
     region_mask = _compute_connected_region_mask_4n(quantized_image, mask_solid, orig_x, orig_y)
-    cache['selected_region_mask'] = region_mask
+    cache["selected_region_mask"] = region_mask
     cache.update(_build_selection_meta(q_rgb, m_rgb, scope="region"))
 
-    q_hex = cache['selected_quantized_hex']
-    m_hex = cache['selected_matched_hex']
+    q_hex = cache["selected_quantized_hex"]
+    m_hex = cache["selected_matched_hex"]
 
-    print(f"[CLICK] Coords: ({orig_x}, {orig_y}), Quantized: {q_hex}, Matched: {m_hex}")
-
-    display_img, status_msg = generate_highlight_preview(
-        cache,
-        highlight_color=q_hex,
-        add_loop=False
+    log.debug(
+        "Preview click selected color",
+        extra={
+            "event": "core_converter_preview_click_select_color",
+            "x": orig_x,
+            "y": orig_y,
+            "quantized_hex": q_hex,
+            "matched_hex": m_hex,
+        },
     )
+
+    display_img, status_msg = generate_highlight_preview(cache, highlight_color=q_hex, add_loop=False)
 
     display_text = f"量化色 {q_hex} | 原配准色 {m_hex}"
     if display_img is None:
@@ -708,6 +909,7 @@ def generate_lut_grid_html(lut_path, lang: str = "zh"):
     """
     from core.i18n import I18n
     import colorsys
+
     colors = extract_lut_available_colors(lut_path)
 
     if not colors:
@@ -720,30 +922,29 @@ def generate_lut_grid_html(lut_path, lang: str = "zh"):
         h, s, v = colorsys.rgb_to_hsv(rf, gf, bf)
         h360 = h * 360
         if s < 0.15 or v < 0.10:
-            return 'neutral'
+            return "neutral"
         if h360 < 15 or h360 >= 345:
-            return 'red'
+            return "red"
         elif h360 < 40:
-            return 'orange'
+            return "orange"
         elif h360 < 70:
-            return 'yellow'
+            return "yellow"
         elif h360 < 160:
-            return 'green'
+            return "green"
         elif h360 < 195:
-            return 'cyan'
+            return "cyan"
         elif h360 < 260:
-            return 'blue'
+            return "blue"
         elif h360 < 345:
-            return 'purple'
-        return 'neutral'
+            return "purple"
+        return "neutral"
 
-    # NOTE: search/hue-filter HTML was previously from ui.palette_extension (Gradio-only).
-    # React frontend renders its own search/filter UI via API.
+    # NOTE: Search/hue-filter UI is rendered by the web frontend via API data.
     _search_bar_html = ""
     _hue_filter_html = ""
 
     # Derive LUT key for favorites persistence
-    _lut_key = os.path.splitext(os.path.basename(lut_path))[0] if lut_path else ''
+    _lut_key = os.path.splitext(os.path.basename(lut_path))[0] if lut_path else ""
 
     html = f"""
     <div class="lut-grid-container">
@@ -765,8 +966,8 @@ def generate_lut_grid_html(lut_path, lang: str = "zh"):
     """
 
     for entry in colors:
-        hex_val = entry['hex']
-        r, g, b = entry['color']
+        hex_val = entry["hex"]
+        r, g, b = entry["color"]
         rgb_val = f"R:{r} G:{g} B:{b}"
         hue_cat = _classify_hue(r, g, b)
 
@@ -804,8 +1005,8 @@ def generate_lut_card_grid_html(lut_path, lang: str = "zh"):
     try:
         lut_grid = np.load(lut_path)
         measured_colors = lut_grid.reshape(-1, 3)
-    except Exception as e:
-        return f"<div style='color:orange'>LUT 加载失败: {e}</div>"
+    except (OSError, ValueError) as exc:
+        return f"<div style='color:orange'>LUT 加载失败: {exc}</div>"
 
     total = len(measured_colors)
 
@@ -817,24 +1018,25 @@ def generate_lut_card_grid_html(lut_path, lang: str = "zh"):
         h, s, v = colorsys.rgb_to_hsv(rf, gf, bf)
         h360 = h * 360
         if s < 0.15 or v < 0.10:
-            return 'neutral'
+            return "neutral"
         if h360 < 15 or h360 >= 345:
-            return 'red'
+            return "red"
         elif h360 < 40:
-            return 'orange'
+            return "orange"
         elif h360 < 70:
-            return 'yellow'
+            return "yellow"
         elif h360 < 160:
-            return 'green'
+            return "green"
         elif h360 < 195:
-            return 'cyan'
+            return "cyan"
         elif h360 < 260:
-            return 'blue'
+            return "blue"
         elif h360 < 345:
-            return 'purple'
-        return 'neutral'
+            return "purple"
+        return "neutral"
 
     import math
+
     if total == 2738:
         half = total // 2
         remainder = total - half
@@ -846,20 +1048,19 @@ def generate_lut_card_grid_html(lut_path, lang: str = "zh"):
         ]
     else:
         dim = int(math.ceil(math.sqrt(total)))
-        label = f"{total} 色色卡" if lang == "zh" else f"{total}-color Card"
+        label = f"{total} 色卡" if lang == "zh" else f"{total}-color Card"
         grids = [(measured_colors, dim, label)]
 
     cell = 18
     gap = 1
 
-    # NOTE: search/hue-filter HTML was previously from ui.palette_extension (Gradio-only).
-    # React frontend renders its own search/filter UI via API.
+    # NOTE: Search/hue-filter UI is rendered by the web frontend via API data.
     html_parts = [
         f'<div style="margin-bottom:8px; font-size:12px; color:#666;">{I18n.get("lut_grid_count", lang).format(count=total)}: <span id="lut-color-visible-count">{total}</span></div>',
     ]
 
     # Derive LUT key for favorites persistence
-    _lut_key = os.path.splitext(os.path.basename(lut_path))[0] if lut_path else ''
+    _lut_key = os.path.splitext(os.path.basename(lut_path))[0] if lut_path else ""
 
     # Grid
     html_parts.append(
@@ -892,131 +1093,144 @@ def generate_lut_card_grid_html(lut_path, lang: str = "zh"):
 
 # ========== Auto-detection Functions ==========
 
+
 def detect_lut_color_mode(lut_path):
     """
-    自动检测LUT文件的颜色模式
-    
+    自动检测 LUT 文件的颜色模式。
+
     Args:
-        lut_path: LUT文件路径
-    
+        lut_path: LUT 文件路径
+
     Returns:
         str: 颜色模式 ("BW (Black & White)", "Merged", "6-Color (CMYWGK 1296)", "8-Color Max", etc.)
     """
     if not lut_path or not os.path.exists(lut_path):
         return None
-    
+
     try:
-        if lut_path.endswith('.npz'):
+        if lut_path.endswith(".npz"):
             data = np.load(lut_path)
-            if 'rgb' in data:
-                rgb = data['rgb']
+            if "rgb" in data:
+                rgb = data["rgb"]
                 total_colors = int(rgb.reshape(-1, 3).shape[0])
-                stacks = data['stacks'] if 'stacks' in data else None
+                stacks = data["stacks"] if "stacks" in data else None
                 layer_count = int(stacks.shape[1]) if isinstance(stacks, np.ndarray) and stacks.ndim == 2 else None
                 max_mat = int(np.max(stacks)) if isinstance(stacks, np.ndarray) and stacks.size > 0 else None
-                if total_colors >= 2400 and total_colors < 2600 and layer_count == 6 and (max_mat is None or max_mat <= 4):
-                    print(f"[AUTO_DETECT] Detected 5-Color Extended mode from .npz ({total_colors} colors)")
+                if (
+                    total_colors >= 2400
+                    and total_colors < 2600
+                    and layer_count == 6
+                    and (max_mat is None or max_mat <= 4)
+                ):
+                    log.info(f"[AUTO_DETECT] Detected 5-Color Extended mode from .npz ({total_colors} colors)")
                     return "5-Color Extended"
                 if total_colors >= 2600 and total_colors <= 2800:
-                    print(f"[AUTO_DETECT] Detected 8-Color mode from .npz ({total_colors} colors)")
+                    log.info(f"[AUTO_DETECT] Detected 8-Color mode from .npz ({total_colors} colors)")
                     return "8-Color Max"
                 if total_colors >= 1200 and total_colors < 1400:
-                    print(f"[AUTO_DETECT] Detected 6-Color mode from .npz ({total_colors} colors)")
+                    log.info(f"[AUTO_DETECT] Detected 6-Color mode from .npz ({total_colors} colors)")
                     return "6-Color (CMYWGK 1296)"
                 if total_colors >= 900 and total_colors < 1200:
-                    print(f"[AUTO_DETECT] Detected 4-Color mode from .npz ({total_colors} colors)")
+                    log.info(f"[AUTO_DETECT] Detected 4-Color mode from .npz ({total_colors} colors)")
                     return "4-Color"
                 if total_colors >= 30 and total_colors <= 35:
-                    print(f"[AUTO_DETECT] Detected 2-Color BW mode from .npz ({total_colors} colors)")
+                    log.info(f"[AUTO_DETECT] Detected 2-Color BW mode from .npz ({total_colors} colors)")
                     return "BW (Black & White)"
-            print(f"[AUTO_DETECT] Detected Merged LUT (.npz format)")
+            log.info(f"[AUTO_DETECT] Detected Merged LUT (.npz format)")
             return "Merged"
-        
+
         # .json (Keyed JSON) format
-        if lut_path.endswith('.json'):
+        if lut_path.endswith(".json"):
             from utils.lut_manager import LUTManager
+
             rgb, stacks, _meta = LUTManager.load_lut_with_metadata(lut_path)
             # 优先使用存储的 color_mode
             if _meta and _meta.color_mode:
-                print(f"[AUTO_DETECT] Using stored color_mode from metadata: {_meta.color_mode}")
+                log.info(f"[AUTO_DETECT] Using stored color_mode from metadata: {_meta.color_mode}")
                 return _meta.color_mode
             # 回退到基于数量的推断
             total_colors = len(rgb) if rgb is not None else 0
             layer_count = int(stacks.shape[1]) if isinstance(stacks, np.ndarray) and stacks.ndim == 2 else None
             max_mat = int(np.max(stacks)) if isinstance(stacks, np.ndarray) and stacks.size > 0 else None
-            print(f"[AUTO_DETECT] JSON LUT: {total_colors} colors, layer_count={layer_count}, max_mat={max_mat}")
+            log.info(f"[AUTO_DETECT] JSON LUT: {total_colors} colors, layer_count={layer_count}, max_mat={max_mat}")
             if total_colors >= 2400 and total_colors < 2600 and layer_count == 6 and (max_mat is None or max_mat <= 4):
-                print(f"[AUTO_DETECT] Detected 5-Color Extended mode from .json ({total_colors} colors)")
+                log.info(f"[AUTO_DETECT] Detected 5-Color Extended mode from .json ({total_colors} colors)")
                 return "5-Color Extended"
             if total_colors >= 2600 and total_colors <= 2800:
-                print(f"[AUTO_DETECT] Detected 8-Color mode from .json ({total_colors} colors)")
+                log.info(f"[AUTO_DETECT] Detected 8-Color mode from .json ({total_colors} colors)")
                 return "8-Color Max"
             if total_colors >= 1200 and total_colors < 1400:
-                print(f"[AUTO_DETECT] Detected 6-Color mode from .json ({total_colors} colors)")
+                log.info(f"[AUTO_DETECT] Detected 6-Color mode from .json ({total_colors} colors)")
                 return "6-Color (CMYWGK 1296)"
             if total_colors >= 900 and total_colors < 1200:
-                print(f"[AUTO_DETECT] Detected 4-Color mode from .json ({total_colors} colors)")
+                log.info(f"[AUTO_DETECT] Detected 4-Color mode from .json ({total_colors} colors)")
                 return "4-Color"
             if total_colors >= 30 and total_colors <= 35:
-                print(f"[AUTO_DETECT] Detected 2-Color BW mode from .json ({total_colors} colors)")
+                log.info(f"[AUTO_DETECT] Detected 2-Color BW mode from .json ({total_colors} colors)")
                 return "BW (Black & White)"
-            print(f"[AUTO_DETECT] Non-standard JSON LUT size ({total_colors} colors), detected as Merged")
+            log.info(f"[AUTO_DETECT] Non-standard JSON LUT size ({total_colors} colors), detected as Merged")
             return "Merged"
-        
+
         # Standard .npy format
         lut_data = np.load(lut_path)
-        
-        # 确保是2D数组
+
+        # 确保是 2D 数组
         if lut_data.ndim == 1:
-            # 如果是1D数组，假设是 (N*3,) 格式，重塑为 (N, 3)
+            # 如果是 1D 数组，假设是 (N*3,) 格式，重塑为 (N, 3)
             if len(lut_data) % 3 == 0:
                 lut_data = lut_data.reshape(-1, 3)
             else:
-                print(f"[AUTO_DETECT] Invalid LUT format: cannot reshape to (N, 3)")
+                log.info(f"[AUTO_DETECT] Invalid LUT format: cannot reshape to (N, 3)")
                 return None
-        
+
         # 计算颜色数量
         if lut_data.ndim == 2:
             total_colors = lut_data.shape[0]
         else:
             total_colors = lut_data.shape[0] * lut_data.shape[1]
-        
-        print(f"[AUTO_DETECT] LUT shape: {lut_data.shape}, total colors: {total_colors}")
-        
+
+        log.info(f"[AUTO_DETECT] LUT shape: {lut_data.shape}, total colors: {total_colors}")
+
         # 2色模式：32色 (2^5 = 32)
         if total_colors >= 30 and total_colors <= 35:
-            print(f"[AUTO_DETECT] Detected 2-Color BW mode (32 colors)")
+            log.info(f"[AUTO_DETECT] Detected 2-Color BW mode (32 colors)")
             return "BW (Black & White)"
-        
-        # 5-Color Extended模式：~2468色 (1024 base + 1444 extended)
+
+        # 5-Color Extended 模式：2468 色 (1024 base + 1444 extended)
         elif total_colors >= 2400 and total_colors < 2600:
-            print(f"[AUTO_DETECT] Detected 5-Color Extended mode ({total_colors} colors)")
+            log.info(f"[AUTO_DETECT] Detected 5-Color Extended mode ({total_colors} colors)")
             return "5-Color Extended"
-        
+
         # 8色模式：2600-2800色
         elif total_colors >= 2600 and total_colors <= 2800:
-            print(f"[AUTO_DETECT] Detected 8-Color mode ({total_colors} colors)")
+            log.info(f"[AUTO_DETECT] Detected 8-Color mode ({total_colors} colors)")
             return "8-Color Max"
-        
+
         # 6色模式：1200-1400色
         elif total_colors >= 1200 and total_colors < 1400:
-            print(f"[AUTO_DETECT] Detected 6-Color mode ({total_colors} colors)")
+            log.info(f"[AUTO_DETECT] Detected 6-Color mode ({total_colors} colors)")
             return "6-Color (CMYWGK 1296)"
-        
+
         # 4色模式：900-1200色
         elif total_colors >= 900 and total_colors < 1200:
-            print(f"[AUTO_DETECT] Detected 4-Color mode ({total_colors} colors)")
+            log.info(f"[AUTO_DETECT] Detected 4-Color mode ({total_colors} colors)")
             return "4-Color"
-        
+
         else:
             # 非标准尺寸：识别为合并色卡
-            print(f"[AUTO_DETECT] Non-standard LUT size ({total_colors} colors), detected as Merged")
+            log.info(f"[AUTO_DETECT] Non-standard LUT size ({total_colors} colors), detected as Merged")
             return "Merged"
-            
-    except Exception as e:
-        print(f"[AUTO_DETECT] Error detecting LUT mode: {e}")
-        import traceback
-        traceback.print_exc()
+
+    except (OSError, ValueError, KeyError, TypeError, ImportError) as exc:
+        log.exception(
+            "Failed to detect LUT color mode",
+            extra={
+                "event": "core_converter_detect_lut_color_mode_failed",
+                "error_type": type(exc).__name__,
+                "error_message": str(exc),
+                "lut_path": str(lut_path),
+            },
+        )
         return None
 
 
@@ -1037,13 +1251,21 @@ def detect_image_type(image_path: str | None) -> str | None:
     try:
         ext = os.path.splitext(image_path)[1].lower()
 
-        if ext == '.svg':
-            print(f"[AUTO_DETECT] SVG file detected, recommending SVG Mode")
+        if ext == ".svg":
+            log.info(f"[AUTO_DETECT] SVG file detected, recommending SVG Mode")
             return ModelingMode.VECTOR
         else:
-            print(f"[AUTO_DETECT] Raster image detected ({ext}), keeping current mode")
+            log.info(f"[AUTO_DETECT] Raster image detected ({ext}), keeping current mode")
             return None
 
-    except Exception as e:
-        print(f"[AUTO_DETECT] Error detecting image type: {e}")
+    except (TypeError, ValueError, OSError) as exc:
+        log.warning(
+            "Failed to detect image type",
+            extra={
+                "event": "core_converter_detect_image_type_failed",
+                "error_type": type(exc).__name__,
+                "error_message": str(exc),
+                "image_path": str(image_path),
+            },
+        )
         return None

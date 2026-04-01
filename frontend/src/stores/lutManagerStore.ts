@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { LutInfo, LutInfoResponse, MergeResponse } from "../api/types";
 import { fetchLutInfo, mergeLuts } from "../api/lut";
 import { fetchLutList as apiFetchLutList } from "../api/converter";
-import { useConverterStore } from "./converterStore";
+import { useConverterStore } from "./converter";
 
 // ========== Compatibility Filtering ==========
 

@@ -462,7 +462,7 @@ export function WidgetWorkspace({ children }: WidgetWorkspaceProps) {
         }
       }
     },
-    [containerWidth, toEdgeContentY, computeInsertion, getDockScrollTop, lockDockHorizontalScroll]
+    [containerWidth, widgetWidth, toEdgeContentY, computeInsertion, getDockScrollTop, lockDockHorizontalScroll]
   );
 
   const handleDragEnd = useCallback(
@@ -515,7 +515,7 @@ export function WidgetWorkspace({ children }: WidgetWorkspaceProps) {
       dragSourceRef.current = null;
       insertPreviewRef.current = null;
     },
-    [moveWidget, snapAndReorder, setDragging, recalculateStacks, toEdgeContentY, computeInsertion]
+    [moveWidget, snapAndReorder, setDragging, recalculateStacks, toEdgeContentY, computeInsertion, widgetWidth]
   );
 
   const handleDragCancel = useCallback(

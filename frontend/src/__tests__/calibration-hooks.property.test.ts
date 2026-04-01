@@ -1,7 +1,7 @@
 import { describe, it, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import * as fc from "fast-check";
-import { useConverterStore } from "../stores/converterStore";
+import { useConverterStore } from "../stores/converter";
 import { useCalibrationStore } from "../stores/calibrationStore";
 import { useActiveModelUrl } from "../hooks/useActiveModelUrl";
 

@@ -1,4 +1,4 @@
-"""
+﻿"""
 Property-based tests for LUT Merger engine.
 
 Tests correctness properties defined in the design document for
@@ -14,34 +14,36 @@ import pytest
 
 from core.lut_merger import LUTMerger, _SIZE_TO_MODE, _MODE_PRIORITY
 
-
-# ═══════════════════════════════════════════════════════════════
+# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
 # Strategies
-# ═══════════════════════════════════════════════════════════════
+# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
 
-standard_sizes = st.sampled_from([32, 1024, 1296, 2738])
+standard_sizes = st.sampled_from([32, 1024, 1296, 2468, 2738])
 non_standard_sizes = st.integers(min_value=1, max_value=5000).filter(
-    lambda x: x not in {32, 1024, 1296, 2738} and not (30 <= x <= 36)
+    lambda x: x not in {32, 1024, 1296, 2468, 2738} and not (30 <= x <= 36)
 )
 color_modes = st.sampled_from(["BW", "4-Color", "6-Color", "8-Color"])
 all_modes_with_low = st.sampled_from(["BW", "4-Color"])
 high_modes = st.sampled_from(["6-Color", "8-Color"])
 
+
 # Small RGB arrays for fast testing
 def rgb_array(size):
     return np.random.randint(0, 256, size=(size, 3), dtype=np.uint8)
+
 
 def stack_array(size, max_id=7):
     return np.random.randint(0, max_id + 1, size=(size, 5), dtype=np.int32)
 
 
-# ═══════════════════════════════════════════════════════════════
-# Property 1: 色彩模式检测正确性
-# ═══════════════════════════════════════════════════════════════
+# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+# Property 1: 鑹插僵妯″紡妫€娴嬫纭€?
+# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+
 
 class TestColorModeDetection:
     """
-    **Feature: lut-merge, Property 1: 色彩模式检测正确性**
+    **Feature: lut-merge, Property 1: 鑹插僵妯″紡妫€娴嬫纭€?*
     **Validates: Requirements 2.2**
     """
 
@@ -54,9 +56,7 @@ class TestColorModeDetection:
             np.save(path, rgb_array(size))
             mode, count = LUTMerger.detect_color_mode(path)
             assert count == size
-            assert mode == _SIZE_TO_MODE[size], (
-                f"Expected {_SIZE_TO_MODE[size]} for size {size}, got {mode}"
-            )
+            assert mode == _SIZE_TO_MODE[size], f"Expected {_SIZE_TO_MODE[size]} for size {size}, got {mode}"
 
     @given(size=non_standard_sizes)
     @settings(max_examples=100)
@@ -67,9 +67,19 @@ class TestColorModeDetection:
             np.save(path, rgb_array(size))
             mode, count = LUTMerger.detect_color_mode(path)
             assert count == size
-            assert mode == "Merged", (
-                f"Expected 'Merged' for non-standard size {size}, got {mode}"
-            )
+            assert mode == "Merged", f"Expected 'Merged' for non-standard size {size}, got {mode}"
+
+    def test_2468_compat_mode_can_return_merged(self, monkeypatch):
+        """2468 size can be treated as Merged when compat env switch is enabled."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "test.npy")
+            np.save(path, rgb_array(2468))
+
+            monkeypatch.setenv("LUMINA_LUT_2468_MODE", "merged")
+            mode, count = LUTMerger.detect_color_mode(path)
+
+            assert count == 2468
+            assert mode == "Merged"
 
     def test_npz_detection(self):
         """A .npz file with rgb and stacks keys is detected as 'Merged'."""
@@ -83,13 +93,14 @@ class TestColorModeDetection:
             assert count == 500
 
 
-# ═══════════════════════════════════════════════════════════════
-# Property 2: 兼容性校验正确性
-# ═══════════════════════════════════════════════════════════════
+# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+# Property 2: 鍏煎鎬ф牎楠屾纭€?
+# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+
 
 class TestCompatibilityValidation:
     """
-    **Feature: lut-merge, Property 2: 兼容性校验正确性**
+    **Feature: lut-merge, Property 2: 鍏煎鎬ф牎楠屾纭€?*
     **Validates: Requirements 2.3, 2.4, 2.5**
     """
 
@@ -135,13 +146,14 @@ class TestCompatibilityValidation:
         assert valid
 
 
-# ═══════════════════════════════════════════════════════════════
-# Property 3: 合并拼接完整性
-# ═══════════════════════════════════════════════════════════════
+# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+# Property 3: 鍚堝苟鎷兼帴瀹屾暣鎬?
+# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+
 
 class TestMergeConcatenation:
     """
-    **Feature: lut-merge, Property 3: 合并拼接完整性**
+    **Feature: lut-merge, Property 3: 鍚堝苟鎷兼帴瀹屾暣鎬?*
     **Validates: Requirements 3.2**
     """
 
@@ -186,18 +198,19 @@ class TestMergeConcatenation:
 
         merged_rgb, merged_stacks, stats = LUTMerger.merge_luts(entries, dedup_threshold=0)
 
-        assert stats['total_before'] == total
-        assert stats['total_after'] == total
+        assert stats["total_before"] == total
+        assert stats["total_after"] == total
         assert merged_rgb.shape[0] == total
 
 
-# ═══════════════════════════════════════════════════════════════
-# Property 4: 材料 ID 范围不变量
-# ═══════════════════════════════════════════════════════════════
+# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+# Property 4: 鏉愭枡 ID 鑼冨洿涓嶅彉閲?
+# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+
 
 class TestMaterialIDRange:
     """
-    **Feature: lut-merge, Property 4: 材料 ID 范围不变量**
+    **Feature: lut-merge, Property 4: 鏉愭枡 ID 鑼冨洿涓嶅彉閲?*
     **Validates: Requirements 3.3**
     """
 
@@ -221,18 +234,19 @@ class TestMaterialIDRange:
 
         merged_rgb, merged_stacks, stats = LUTMerger.merge_luts(entries, dedup_threshold=0)
 
-        # BW max=1, 6-Color max=5 → overall max should be 5
+        # BW max=1, 6-Color max=5 鈫?overall max should be 5
         assert merged_stacks.min() >= 0
         assert merged_stacks.max() <= 5
 
 
-# ═══════════════════════════════════════════════════════════════
-# Property 5: 去重后无相近色
-# ═══════════════════════════════════════════════════════════════
+# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+# Property 5: 鍘婚噸鍚庢棤鐩歌繎鑹?
+# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+
 
 class TestDedupNoSimilarColors:
     """
-    **Feature: lut-merge, Property 5: 去重后无相近色**
+    **Feature: lut-merge, Property 5: 鍘婚噸鍚庢棤鐩歌繎鑹?*
     **Validates: Requirements 3.4, 4.2, 4.4**
     """
 
@@ -250,12 +264,12 @@ class TestDedupNoSimilarColors:
 
         merged_rgb, _, stats = LUTMerger.merge_luts(entries, dedup_threshold=0)
 
-        assert stats['exact_dupes'] == 1
-        assert stats['total_after'] == 3  # 4 - 1 duplicate
+        assert stats["exact_dupes"] == 1
+        assert stats["total_after"] == 3  # 4 - 1 duplicate
 
     def test_threshold_dedup_removes_similar(self):
         """With threshold > 0, similar colors (Delta-E < threshold) are removed."""
-        # Two identical reds — guaranteed Delta-E = 0
+        # Two identical reds 鈥?guaranteed Delta-E = 0
         rgb1 = np.array([[255, 0, 0]], dtype=np.uint8)
         rgb2 = np.array([[255, 0, 0]], dtype=np.uint8)
         stacks1 = np.array([[0, 0, 0, 0, 0]], dtype=np.int32)
@@ -269,18 +283,19 @@ class TestDedupNoSimilarColors:
         merged_rgb, _, stats = LUTMerger.merge_luts(entries, dedup_threshold=5.0)
 
         # Exact duplicate removed first, then no similar left
-        assert stats['total_after'] == 1
+        assert stats["total_after"] == 1
         # The 8-Color one should be kept (higher priority)
         assert tuple(merged_rgb[0]) == (255, 0, 0)
 
 
-# ═══════════════════════════════════════════════════════════════
-# Property 6: 去重优先级正确性
-# ═══════════════════════════════════════════════════════════════
+# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+# Property 6: 鍘婚噸浼樺厛绾ф纭€?
+# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+
 
 class TestDedupPriority:
     """
-    **Feature: lut-merge, Property 6: 去重优先级正确性**
+    **Feature: lut-merge, Property 6: 鍘婚噸浼樺厛绾ф纭€?*
     **Validates: Requirements 4.3**
     """
 
@@ -299,18 +314,19 @@ class TestDedupPriority:
 
         merged_rgb, merged_stacks, stats = LUTMerger.merge_luts(entries, dedup_threshold=0)
 
-        assert stats['total_after'] == 1
+        assert stats["total_after"] == 1
         # 8-Color has higher priority, so its stack should be kept
         assert list(merged_stacks[0]) == [0, 1, 2, 3, 4]
 
 
-# ═══════════════════════════════════════════════════════════════
-# Property 9: 合并统计一致性
-# ═══════════════════════════════════════════════════════════════
+# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+# Property 9: 鍚堝苟缁熻涓€鑷存€?
+# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+
 
 class TestMergeStatsConsistency:
     """
-    **Feature: lut-merge, Property 9: 合并统计一致性**
+    **Feature: lut-merge, Property 9: 鍚堝苟缁熻涓€鑷存€?*
     **Validates: Requirements 8.2**
     """
 
@@ -333,18 +349,19 @@ class TestMergeStatsConsistency:
 
         _, _, stats = LUTMerger.merge_luts(entries, dedup_threshold=0)
 
-        assert stats['total_before'] == n1 + n2
-        assert stats['total_before'] >= stats['total_after']
-        assert stats['exact_dupes'] + stats['similar_removed'] == stats['total_before'] - stats['total_after']
+        assert stats["total_before"] == n1 + n2
+        assert stats["total_before"] >= stats["total_after"]
+        assert stats["exact_dupes"] + stats["similar_removed"] == stats["total_before"] - stats["total_after"]
 
 
-# ═══════════════════════════════════════════════════════════════
-# Property 7: 保存/加载往返一致性
-# ═══════════════════════════════════════════════════════════════
+# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+# Property 7: 淇濆瓨/鍔犺浇寰€杩斾竴鑷存€?
+# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+
 
 class TestSaveLoadRoundTrip:
     """
-    **Feature: lut-merge, Property 7: 保存/加载往返一致性**
+    **Feature: lut-merge, Property 7: 淇濆瓨/鍔犺浇寰€杩斾竴鑷存€?*
     **Validates: Requirements 5.2**
     """
 
@@ -359,12 +376,12 @@ class TestSaveLoadRoundTrip:
         path = os.path.join(tmpdir, "test_merged.npz")
         saved_path = LUTMerger.save_merged_lut(rgb, stacks, path)
 
-        assert saved_path.endswith('.npz')
+        assert saved_path.endswith(".npz")
         assert os.path.exists(saved_path)
 
         data = np.load(saved_path)
-        loaded_rgb = data['rgb'].copy()
-        loaded_stacks = data['stacks'].copy()
+        loaded_rgb = data["rgb"].copy()
+        loaded_stacks = data["stacks"].copy()
         data.close()
 
         np.testing.assert_array_equal(loaded_rgb, rgb)
@@ -378,16 +395,17 @@ class TestSaveLoadRoundTrip:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = os.path.join(tmpdir, "test.npy")
             saved_path = LUTMerger.save_merged_lut(rgb, stacks, path)
-            assert saved_path.endswith('.npz')
+            assert saved_path.endswith(".npz")
 
 
-# ═══════════════════════════════════════════════════════════════
-# Property 8: 非标准尺寸检测
-# ═══════════════════════════════════════════════════════════════
+# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+# Property 8: 闈炴爣鍑嗗昂瀵告娴?
+# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+
 
 class TestNonStandardSizeDetection:
     """
-    **Feature: lut-merge, Property 8: 非标准尺寸检测**
+    **Feature: lut-merge, Property 8: 闈炴爣鍑嗗昂瀵告娴?*
     **Validates: Requirements 5.4, 6.2**
     """
 
@@ -414,6 +432,4 @@ class TestNonStandardSizeDetection:
             path = os.path.join(tmpdir, "test.npy")
             np.save(path, rgb_array(size))
             result = detect_lut_color_mode(path)
-            assert result == "Merged", (
-                f"Expected 'Merged' for non-standard size {size}, got {result}"
-            )
+            assert result == "Merged", f"Expected 'Merged' for non-standard size {size}, got {result}"

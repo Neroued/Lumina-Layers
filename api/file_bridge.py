@@ -7,6 +7,10 @@ import numpy as np
 from fastapi import HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from PIL import Image, ImageOps
+from PIL import UnidentifiedImageError
+from api.structured_logging import get_logger
+
+log = get_logger(__name__)
 
 # HEIC/HEIF support (optional dependency)
 try:
@@ -16,7 +20,10 @@ try:
     HAS_HEIF: bool = True
 except ImportError:
     HAS_HEIF: bool = False
-    print("[WARN] [HEIC] pillow-heif not installed. HEIC/HEIF support disabled.")
+    log.warning(
+        "pillow-heif not installed. HEIC/HEIF support disabled.",
+        extra={"event": "optional_dependency_missing", "dependency": "pillow_heif"},
+    )
 
 # RAW support (optional dependency)
 try:
@@ -25,12 +32,24 @@ try:
     HAS_RAW: bool = True
 except ImportError:
     HAS_RAW: bool = False
-    print("[WARN] [RAW] rawpy not installed. Camera RAW support disabled.")
+    log.warning(
+        "rawpy not installed. Camera RAW support disabled.",
+        extra={"event": "optional_dependency_missing", "dependency": "rawpy"},
+    )
 
 HEIC_EXTENSIONS: set[str] = {".heic", ".heif"}
 RAW_EXTENSIONS: set[str] = {
-    ".dng", ".cr2", ".cr3", ".nef", ".arw",
-    ".orf", ".rw2", ".raf", ".pef", ".srw", ".raw",
+    ".dng",
+    ".cr2",
+    ".cr3",
+    ".nef",
+    ".arw",
+    ".orf",
+    ".rw2",
+    ".raf",
+    ".pef",
+    ".srw",
+    ".raw",
 }
 
 
@@ -85,7 +104,7 @@ async def upload_to_ndarray(file: UploadFile) -> np.ndarray:
         if img.mode != "RGB":
             img = img.convert("RGB")
         return np.array(img, dtype=np.uint8)
-    except Exception as e:
+    except (UnidentifiedImageError, OSError, ValueError) as e:
         if ext in HEIC_EXTENSIONS and not HAS_HEIF:
             raise ValueError("HEIC/HEIF 格式需要 pillow-heif 库。请执行: pip install pillow-heif")
         raise ValueError(f"无法解码图像文件: {e}")
@@ -166,7 +185,7 @@ async def ensure_png_tempfile(file: UploadFile) -> str:
         return png_path
     except HTTPException:
         raise
-    except Exception as e:
+    except (UnidentifiedImageError, OSError, ValueError, RuntimeError) as e:
         os.unlink(raw_path)
         fmt = "RAW" if ext in RAW_EXTENSIONS else "HEIC/HEIF"
         raise HTTPException(

@@ -8,10 +8,13 @@ the neroued_vectorizer library.
 
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import ValidationError
 
 from api.dependencies import get_file_registry, get_worker_pool
+from api.errors import to_http_exception
 from api.file_bridge import ensure_png_tempfile
 from api.file_registry import FileRegistry
 from api.schemas.vectorizer import (
@@ -21,8 +24,11 @@ from api.schemas.vectorizer import (
 )
 from api.worker_pool import WorkerPoolManager
 from api.workers.vectorizer_workers import worker_vectorize
+from api.structured_logging import get_logger
 
 router = APIRouter(prefix="/api/vectorize", tags=["Vectorizer"])
+VECTORIZER_OUTPUT_TTL_SECONDS = 1200
+log = get_logger(__name__)
 
 
 @router.get("/defaults")
@@ -75,11 +81,23 @@ async def vectorize_image(
 
     try:
         result = await pool.submit(worker_vectorize, image_path, params_clean)
-    except Exception as e:
-        print(f"[API] Vectorize error: {e}")
-        raise HTTPException(status_code=500, detail=f"Vectorization failed: {e}")
+    except (ValueError, TypeError, KeyError, OSError, RuntimeError) as e:
+        log.exception(
+            "Vectorization failed",
+            extra={
+                "event": "vectorize_failed",
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+            },
+        )
+        raise to_http_exception(e, "Vectorization")
 
-    svg_file_id = registry.register_path("vectorizer", result["svg_path"], "output.svg")
+    svg_file_id = registry.register_path(
+        str(uuid.uuid4()),
+        result["svg_path"],
+        "output.svg",
+        ttl_seconds=VECTORIZER_OUTPUT_TTL_SECONDS,
+    )
 
     return VectorizeResponse(
         status="ok",

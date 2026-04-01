@@ -9,12 +9,15 @@ Extracted from LuminaImageProcessor._load_lut.
 """
 
 import os
+import logging
 import numpy as np
 import cv2
 from scipy.spatial import KDTree
 
 from config import PrinterConfig, ColorSystem, get_asset_path
 from utils.lut_manager import LUTManager
+
+_log = logging.getLogger(__name__)
 
 
 def _rgb_to_lab(rgb_array: np.ndarray) -> np.ndarray:
@@ -58,12 +61,12 @@ def load_lut(lut_path: str, color_mode: str) -> dict:
             - kdtree: scipy.spatial.KDTree 基于 CIELAB 的 KDTree
             - layer_count: int 材料层数
     """
-    layer_count = ColorSystem.get(color_mode).get('layer_count', PrinterConfig.COLOR_LAYERS)
+    layer_count = ColorSystem.get(color_mode).get("layer_count", PrinterConfig.COLOR_LAYERS)
 
     # ── 统一加载入口 ──────────────────────────────────────────────
     try:
         rgb, stacks, metadata = LUTManager.load_lut_with_metadata(lut_path)
-    except Exception as e:
+    except (OSError, ValueError, TypeError, KeyError) as e:
         raise ValueError(f"LUT file corrupted: {e}")
 
     if rgb is None or len(rgb) == 0:
@@ -74,16 +77,18 @@ def load_lut(lut_path: str, color_mode: str) -> dict:
     total_colors = measured_colors.shape[0]
 
     # Determine if stacks data is usable (non-None, non-empty, has columns)
-    has_stacks = (stacks is not None
-                  and isinstance(stacks, np.ndarray)
-                  and stacks.ndim == 2
-                  and stacks.shape[0] > 0
-                  and stacks.shape[1] > 0)
+    has_stacks = (
+        stacks is not None
+        and isinstance(stacks, np.ndarray)
+        and stacks.ndim == 2
+        and stacks.shape[0] > 0
+        and stacks.shape[1] > 0
+    )
 
-    print(f"[IMAGE_PROCESSOR] Loading LUT with {total_colors} points (has_stacks={has_stacks})...")
+    _log.info(f"[IMAGE_PROCESSOR] Loading LUT with {total_colors} points (has_stacks={has_stacks})...")
 
     # ── .npz 合并 LUT：直接使用 rgb + stacks ─────────────────────
-    if lut_path.endswith('.npz'):
+    if lut_path.endswith(".npz"):
         if has_stacks:
             lut_rgb = measured_colors
             ref_stacks = stacks
@@ -91,13 +96,13 @@ def load_lut(lut_path: str, color_mode: str) -> dict:
                 layer_count = int(ref_stacks.shape[1])
             lut_lab = _rgb_to_lab(lut_rgb)
             kdtree = KDTree(lut_lab)
-            print(f"Merged LUT loaded: {len(lut_rgb)} colors (.npz format, Lab KDTree)")
+            _log.info(f"Merged LUT loaded: {len(lut_rgb)} colors (.npz format, Lab KDTree)")
             return {
-                'lut_rgb': lut_rgb,
-                'lut_lab': lut_lab,
-                'ref_stacks': ref_stacks,
-                'kdtree': kdtree,
-                'layer_count': layer_count,
+                "lut_rgb": lut_rgb,
+                "lut_lab": lut_lab,
+                "ref_stacks": ref_stacks,
+                "kdtree": kdtree,
+                "layer_count": layer_count,
             }
         else:
             raise ValueError(f"Merged LUT file missing stacks: {lut_path}")
@@ -108,15 +113,15 @@ def load_lut(lut_path: str, color_mode: str) -> dict:
         ref_stacks = stacks
         if ref_stacks.ndim == 2:
             layer_count = int(ref_stacks.shape[1])
-        print(f"LUT loaded: {len(lut_rgb)} colors (stacks from file, {layer_count} layers)")
+        _log.info(f"LUT loaded: {len(lut_rgb)} colors (stacks from file, {layer_count} layers)")
         lut_lab = _rgb_to_lab(lut_rgb)
         kdtree = KDTree(lut_lab)
         return {
-            'lut_rgb': lut_rgb,
-            'lut_lab': lut_lab,
-            'ref_stacks': ref_stacks,
-            'kdtree': kdtree,
-            'layer_count': layer_count,
+            "lut_rgb": lut_rgb,
+            "lut_lab": lut_lab,
+            "ref_stacks": ref_stacks,
+            "kdtree": kdtree,
+            "layer_count": layer_count,
         }
 
     # ── 回退：stacks 为空（旧 .npy 文件），从索引重建堆叠配方 ──────
@@ -127,7 +132,7 @@ def load_lut(lut_path: str, color_mode: str) -> dict:
 
     # Branch 0: 2-Color BW (32)
     if color_mode == "BW (Black & White)" or color_mode == "BW" or total_colors == 32:
-        print("[IMAGE_PROCESSOR] Detected 2-Color BW mode")
+        _log.info("[IMAGE_PROCESSOR] Detected 2-Color BW mode")
 
         # Generate all 32 combinations (2^5 = 32)
         for i in range(32):
@@ -150,24 +155,26 @@ def load_lut(lut_path: str, color_mode: str) -> dict:
         if isinstance(ref_stacks, np.ndarray) and ref_stacks.ndim == 2:
             layer_count = int(ref_stacks.shape[1])
 
-        print(f"LUT loaded: {len(lut_rgb)} colors (2-Color BW mode)")
+        _log.info(f"LUT loaded: {len(lut_rgb)} colors (2-Color BW mode)")
 
     # Branch 1: 8-Color Max (2738)
     elif "8-Color" in color_mode or total_colors == 2738:
-        print("[IMAGE_PROCESSOR] Detected 8-Color Max mode")
+        _log.info("[IMAGE_PROCESSOR] Detected 8-Color Max mode")
 
         # Load pre-generated 8-color stacks (预计算资产豁免，保持 np.load)
-        stacks_path = get_asset_path('smart_8color_stacks.npy')
+        stacks_path = get_asset_path("smart_8color_stacks.npy")
 
         smart_stacks = np.load(stacks_path).tolist()
 
         # 约定转换：smart_8color_stacks.npy 存储底到顶约定（stack[0]=背面），
         # 转换为顶到底约定（stack[0]=观赏面, stack[4]=背面），与 4 色模式统一
         smart_stacks = [tuple(reversed(s)) for s in smart_stacks]
-        print("[IMAGE_PROCESSOR] Stacks converted from bottom-to-top to top-to-bottom convention (matching 4-color mode).")
+        _log.info(
+            "[IMAGE_PROCESSOR] Stacks converted from bottom-to-top to top-to-bottom convention (matching 4-color mode)."
+        )
 
         if len(smart_stacks) != total_colors:
-            print(f"Warning: Stacks count ({len(smart_stacks)}) != LUT count ({total_colors})")
+            _log.warning(f"Stacks count ({len(smart_stacks)}) != LUT count ({total_colors})")
             min_len = min(len(smart_stacks), total_colors)
             smart_stacks = smart_stacks[:min_len]
             measured_colors = measured_colors[:min_len]
@@ -177,11 +184,11 @@ def load_lut(lut_path: str, color_mode: str) -> dict:
         if isinstance(ref_stacks, np.ndarray) and ref_stacks.ndim == 2:
             layer_count = int(ref_stacks.shape[1])
 
-        print(f"LUT loaded: {len(lut_rgb)} colors (8-Color mode)")
+        _log.info(f"LUT loaded: {len(lut_rgb)} colors (8-Color mode)")
 
     # Branch 2: 6-Color Smart 1296
     elif "6-Color" in color_mode or total_colors == 1296:
-        print("[IMAGE_PROCESSOR] Detected 6-Color Smart 1296 mode")
+        _log.info("[IMAGE_PROCESSOR] Detected 6-Color Smart 1296 mode")
 
         from core.calibration import get_top_1296_colors
 
@@ -189,10 +196,12 @@ def load_lut(lut_path: str, color_mode: str) -> dict:
         # 约定转换：get_top_1296_colors() 返回底到顶约定（stack[0]=背面），
         # 转换为顶到底约定（stack[0]=观赏面, stack[4]=背面），与 4 色模式统一
         smart_stacks = [tuple(reversed(s)) for s in smart_stacks]
-        print("[IMAGE_PROCESSOR] Stacks converted from bottom-to-top to top-to-bottom convention (matching 4-color mode).")
+        _log.info(
+            "[IMAGE_PROCESSOR] Stacks converted from bottom-to-top to top-to-bottom convention (matching 4-color mode)."
+        )
 
         if len(smart_stacks) != total_colors:
-            print(f"Warning: Stacks count ({len(smart_stacks)}) != LUT count ({total_colors})")
+            _log.warning(f"Stacks count ({len(smart_stacks)}) != LUT count ({total_colors})")
             min_len = min(len(smart_stacks), total_colors)
             smart_stacks = smart_stacks[:min_len]
             measured_colors = measured_colors[:min_len]
@@ -202,11 +211,11 @@ def load_lut(lut_path: str, color_mode: str) -> dict:
         if isinstance(ref_stacks, np.ndarray) and ref_stacks.ndim == 2:
             layer_count = int(ref_stacks.shape[1])
 
-        print(f"LUT loaded: {len(lut_rgb)} colors (6-Color mode)")
+        _log.info(f"LUT loaded: {len(lut_rgb)} colors (6-Color mode)")
 
     # Branch 3: 5-Color Extended (2468)
     elif "5-Color Extended" in color_mode or total_colors == 2468:
-        print("[IMAGE_PROCESSOR] Detected 5-Color Extended (2468) mode")
+        _log.info("[IMAGE_PROCESSOR] Detected 5-Color Extended (2468) mode")
 
         # Fallback: generate stacks from index
         # First 1024: base 5-layer (4^5 combinations), pad to 6 layers
@@ -228,7 +237,8 @@ def load_lut(lut_path: str, color_mode: str) -> dict:
         # Generate extended 1444 stacks using select_extended_1444_colors
         if total_colors > 1024:
             from core.calibration import select_extended_1444_colors
-            base_5layer = [tuple(reversed([i//4**j%4 for j in range(5)])) for i in range(1024)]
+
+            base_5layer = [tuple(reversed([i // 4**j % 4 for j in range(5)])) for i in range(1024)]
             extended_stacks = select_extended_1444_colors(base_5layer)
 
             # Add extended stacks (already in correct 6-layer format)
@@ -240,14 +250,14 @@ def load_lut(lut_path: str, color_mode: str) -> dict:
         if isinstance(ref_stacks, np.ndarray) and ref_stacks.ndim == 2:
             layer_count = int(ref_stacks.shape[1])
 
-        print(f"LUT loaded: {len(lut_rgb)} colors (5-Color Extended)")
+        _log.info(f"LUT loaded: {len(lut_rgb)} colors (5-Color Extended)")
 
     # Branch 4: Merged LUT (non-standard size or "Merged" mode)
     elif color_mode == "Merged" or total_colors not in (32, 1024, 1296, 2468, 2738):
-        print(f"[IMAGE_PROCESSOR] Detected non-standard LUT size ({total_colors}), trying companion .npz...")
+        _log.info(f"[IMAGE_PROCESSOR] Detected non-standard LUT size ({total_colors}), trying companion .npz...")
 
         # 尝试查找同名 .npz 文件
-        npz_path = lut_path.rsplit('.', 1)[0] + '.npz'
+        npz_path = lut_path.rsplit(".", 1)[0] + ".npz"
         if os.path.exists(npz_path):
             try:
                 npz_rgb, npz_stacks, npz_meta = LUTManager.load_lut_with_metadata(npz_path)
@@ -257,28 +267,28 @@ def load_lut(lut_path: str, color_mode: str) -> dict:
                     layer_count = int(ref_stacks.shape[1])
                 lut_lab = _rgb_to_lab(lut_rgb)
                 kdtree = KDTree(lut_lab)
-                print(f"Merged LUT loaded from companion .npz: {len(lut_rgb)} colors (Lab KDTree)")
+                _log.info(f"Merged LUT loaded from companion .npz: {len(lut_rgb)} colors (Lab KDTree)")
                 return {
-                    'lut_rgb': lut_rgb,
-                    'lut_lab': lut_lab,
-                    'ref_stacks': ref_stacks,
-                    'kdtree': kdtree,
-                    'layer_count': layer_count,
+                    "lut_rgb": lut_rgb,
+                    "lut_lab": lut_lab,
+                    "ref_stacks": ref_stacks,
+                    "kdtree": kdtree,
+                    "layer_count": layer_count,
                 }
-            except Exception as e:
-                print(f"Failed to load companion .npz: {e}")
+            except (OSError, ValueError, TypeError, KeyError) as e:
+                _log.warning(f"Failed to load companion .npz: {e}")
 
         # 无 .npz 伴随文件，使用 RGB 数据但无堆叠信息
         # 生成占位堆叠（全0）
-        print(f"No companion .npz found, using placeholder stacks")
+        _log.info(f"No companion .npz found, using placeholder stacks")
         lut_rgb = measured_colors
         ref_stacks = np.zeros((total_colors, layer_count), dtype=np.int32)
 
-        print(f"LUT loaded: {len(lut_rgb)} colors (Merged mode, placeholder stacks)")
+        _log.info(f"LUT loaded: {len(lut_rgb)} colors (Merged mode, placeholder stacks)")
 
     # Branch 5: 4-Color Standard (1024)
     else:
-        print("[IMAGE_PROCESSOR] Detected 4-Color Standard mode")
+        _log.info("[IMAGE_PROCESSOR] Detected 4-Color Standard mode")
 
         # Keep original outlier filtering logic (Blue Check)
         base_blue = np.array([30, 100, 200])
@@ -312,16 +322,16 @@ def load_lut(lut_path: str, color_mode: str) -> dict:
         if isinstance(ref_stacks, np.ndarray) and ref_stacks.ndim == 2:
             layer_count = int(ref_stacks.shape[1])
 
-        print(f"LUT loaded: {len(lut_rgb)} colors (filtered {dropped} outliers)")
+        _log.info(f"LUT loaded: {len(lut_rgb)} colors (filtered {dropped} outliers)")
 
     # Build KD-Tree in CIELAB space for perceptually accurate color matching
     lut_lab = _rgb_to_lab(lut_rgb)
     kdtree = KDTree(lut_lab)
 
     return {
-        'lut_rgb': lut_rgb,
-        'lut_lab': lut_lab,
-        'ref_stacks': ref_stacks,
-        'kdtree': kdtree,
-        'layer_count': layer_count,
+        "lut_rgb": lut_rgb,
+        "lut_lab": lut_lab,
+        "ref_stacks": ref_stacks,
+        "kdtree": kdtree,
+        "layer_count": layer_count,
     }

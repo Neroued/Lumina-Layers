@@ -7,7 +7,7 @@ import ModelViewer from "./ModelViewer";
 import InteractiveModelViewer from "./InteractiveModelViewer";
 import BedPlatform from "./BedPlatform";
 import KeychainRing3D from "./KeychainRing3D";
-import { useConverterStore } from "../stores/converterStore";
+import { useConverterStore } from "../stores/converter";
 import { computeScaleFactor } from "../utils/scaleUtils";
 import { useI18n } from "../i18n/context";
 import { useThemeConfig } from "../hooks/useThemeConfig";
@@ -188,7 +188,7 @@ function Scene3D({ modelUrl }: Scene3DProps) {
         {fullscreenSupported && (
           <button
             onClick={toggleFullscreen}
-            className="px-2 py-1 rounded text-xs font-medium bg-white/80 text-gray-700 hover:bg-gray-200 dark:bg-gray-700/80 dark:text-gray-200 dark:hover:bg-gray-600 transition-colors backdrop-blur-sm"
+            className="rounded px-2 py-1 text-xs font-medium bg-slate-100/85 text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700/80 dark:text-gray-200 dark:hover:bg-gray-600 backdrop-blur-sm"
             aria-label={isFullscreen ? t("viewer_exit_fullscreen") : t("viewer_fullscreen")}
             title={isFullscreen ? t("viewer_exit_fullscreen") : t("viewer_fullscreen")}
           >
@@ -197,7 +197,7 @@ function Scene3D({ modelUrl }: Scene3DProps) {
         )}
         <button
           onClick={takeScreenshot}
-          className="px-2 py-1 rounded text-xs font-medium bg-white/80 text-gray-700 hover:bg-gray-200 dark:bg-gray-700/80 dark:text-gray-200 dark:hover:bg-gray-600 transition-colors backdrop-blur-sm"
+          className="rounded px-2 py-1 text-xs font-medium bg-slate-100/85 text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700/80 dark:text-gray-200 dark:hover:bg-gray-600 backdrop-blur-sm"
           aria-label={t("viewer_screenshot")}
           title={t("viewer_screenshot")}
         >
@@ -305,7 +305,7 @@ function Scene3D({ modelUrl }: Scene3DProps) {
               <div className="relative flex items-center justify-center p-4">
                 <div className="relative flex h-20 w-20 items-center justify-center">
                   <div className="absolute inset-0 rgb-loader-ring" />
-                  <div className="h-3 w-3 rounded-full bg-white/90" />
+                  <div className="h-3 w-3 rounded-full bg-slate-100/90 dark:bg-slate-50/90" />
                 </div>
               </div>
               <div className="rounded-full border border-white/10 bg-gray-900/92 px-4 py-2">

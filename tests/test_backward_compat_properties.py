@@ -1,4 +1,4 @@
-"""
+﻿"""
 Property-based tests for backward compatibility.
 向后兼容性属性测试。
 
@@ -11,7 +11,6 @@ import inspect
 import os
 
 import pytest
-
 
 # ===========================================================================
 # Property 4: 公共导入兼容性
@@ -88,18 +87,16 @@ class TestProperty4PublicImportCompatibility:
     def test_function_importable_from_converter(self, func_name: str):
         """函数可通过 from core.converter import 导入。"""
         import core.converter as converter_mod
-        assert hasattr(converter_mod, func_name), (
-            f"core.converter 缺少导出: {func_name}"
-        )
+
+        assert hasattr(converter_mod, func_name), f"core.converter 缺少导出: {func_name}"
 
     @pytest.mark.parametrize("func_name", _PUBLIC_IMPORT_NAMES)
     def test_function_is_callable(self, func_name: str):
         """导入的函数为可调用对象。"""
         import core.converter as converter_mod
+
         obj = getattr(converter_mod, func_name)
-        assert callable(obj), (
-            f"core.converter.{func_name} 不是可调用对象，类型为 {type(obj)}"
-        )
+        assert callable(obj), f"core.converter.{func_name} 不是可调用对象，类型为 {type(obj)}"
 
 
 # ===========================================================================
@@ -107,6 +104,7 @@ class TestProperty4PublicImportCompatibility:
 # Feature: image-pipeline-modularization, Property 5: convert_image_to_3d 返回值格式
 # **Validates: Requirements 8.1**
 # ===========================================================================
+
 
 class TestProperty5ConvertImageTo3dSignature:
     """验证 convert_image_to_3d 函数存在、可调用，且签名包含所有必需参数。
@@ -117,46 +115,75 @@ class TestProperty5ConvertImageTo3dSignature:
     def test_function_exists_and_callable(self):
         """convert_image_to_3d 函数存在且可调用。"""
         from core.converter import convert_image_to_3d
+
         assert callable(convert_image_to_3d)
 
     def test_signature_contains_required_params(self):
         """convert_image_to_3d 签名包含所有必需参数。"""
         from core.converter import convert_image_to_3d
+
         sig = inspect.signature(convert_image_to_3d)
         param_names = list(sig.parameters.keys())
 
         required_params = [
-            "image_path", "lut_path", "target_width_mm", "spacer_thick",
-            "structure_mode", "auto_bg", "bg_tol", "color_mode",
-            "add_loop", "loop_width", "loop_length", "loop_hole", "loop_pos",
+            "image_path",
+            "lut_path",
+            "target_width_mm",
+            "spacer_thick",
+            "structure_mode",
+            "auto_bg",
+            "bg_tol",
+            "color_mode",
+            "add_loop",
+            "loop_width",
+            "loop_length",
+            "loop_hole",
+            "loop_pos",
         ]
         for param in required_params:
-            assert param in param_names, (
-                f"convert_image_to_3d 签名缺少必需参数: {param}"
-            )
+            assert param in param_names, f"convert_image_to_3d 签名缺少必需参数: {param}"
 
     def test_signature_contains_optional_params(self):
         """convert_image_to_3d 签名包含关键可选参数。"""
         from core.converter import convert_image_to_3d
+
         sig = inspect.signature(convert_image_to_3d)
         param_names = list(sig.parameters.keys())
 
         optional_params = [
-            "modeling_mode", "quantize_colors", "blur_kernel", "smooth_sigma",
-            "color_replacements", "replacement_regions", "backing_color_id",
-            "separate_backing", "enable_relief", "color_height_map",
-            "height_mode", "heightmap_path", "heightmap_max_height",
-            "enable_cleanup", "enable_outline", "outline_width",
-            "enable_cloisonne", "wire_width_mm", "wire_height_mm",
-            "free_color_set", "enable_coating", "coating_height_mm",
-            "hue_weight", "chroma_gate", "matched_rgb_path",
-            "loop_angle", "loop_offset_x", "loop_offset_y",
-            "loop_position_preset", "progress",
+            "modeling_mode",
+            "quantize_colors",
+            "blur_kernel",
+            "smooth_sigma",
+            "color_replacements",
+            "replacement_regions",
+            "backing_color_id",
+            "separate_backing",
+            "enable_relief",
+            "color_height_map",
+            "height_mode",
+            "heightmap_path",
+            "heightmap_max_height",
+            "enable_cleanup",
+            "enable_outline",
+            "outline_width",
+            "enable_cloisonne",
+            "wire_width_mm",
+            "wire_height_mm",
+            "free_color_set",
+            "enable_coating",
+            "coating_height_mm",
+            "hue_weight",
+            "chroma_gate",
+            "matched_rgb_path",
+            "loop_angle",
+            "loop_offset_x",
+            "loop_offset_y",
+            "loop_position_preset",
+            "progress",
         ]
         for param in optional_params:
-            assert param in param_names, (
-                f"convert_image_to_3d 签名缺少可选参数: {param}"
-            )
+            assert param in param_names, f"convert_image_to_3d 签名缺少可选参数: {param}"
 
 
 # ===========================================================================
@@ -164,6 +191,7 @@ class TestProperty5ConvertImageTo3dSignature:
 # Feature: image-pipeline-modularization, Property 6: generate_preview_cached 返回值格式
 # **Validates: Requirements 8.2**
 # ===========================================================================
+
 
 class TestProperty6GeneratePreviewCachedSignature:
     """验证 generate_preview_cached 函数存在、可调用，且签名包含所有必需参数。
@@ -174,38 +202,45 @@ class TestProperty6GeneratePreviewCachedSignature:
     def test_function_exists_and_callable(self):
         """generate_preview_cached 函数存在且可调用。"""
         from core.converter import generate_preview_cached
+
         assert callable(generate_preview_cached)
 
     def test_signature_contains_required_params(self):
         """generate_preview_cached 签名包含所有必需参数。"""
         from core.converter import generate_preview_cached
+
         sig = inspect.signature(generate_preview_cached)
         param_names = list(sig.parameters.keys())
 
         required_params = [
-            "image_path", "lut_path", "target_width_mm",
-            "auto_bg", "bg_tol", "color_mode",
+            "image_path",
+            "lut_path",
+            "target_width_mm",
+            "auto_bg",
+            "bg_tol",
+            "color_mode",
         ]
         for param in required_params:
-            assert param in param_names, (
-                f"generate_preview_cached 签名缺少必需参数: {param}"
-            )
+            assert param in param_names, f"generate_preview_cached 签名缺少必需参数: {param}"
 
     def test_signature_contains_optional_params(self):
         """generate_preview_cached 签名包含关键可选参数。"""
         from core.converter import generate_preview_cached
+
         sig = inspect.signature(generate_preview_cached)
         param_names = list(sig.parameters.keys())
 
         optional_params = [
-            "modeling_mode", "quantize_colors", "backing_color_id",
-            "enable_cleanup", "is_dark", "hue_weight", "chroma_gate",
+            "modeling_mode",
+            "quantize_colors",
+            "backing_color_id",
+            "enable_cleanup",
+            "is_dark",
+            "hue_weight",
+            "chroma_gate",
         ]
         for param in optional_params:
-            assert param in param_names, (
-                f"generate_preview_cached 签名缺少可选参数: {param}"
-            )
-
+            assert param in param_names, f"generate_preview_cached 签名缺少可选参数: {param}"
 
 
 # ===========================================================================
@@ -213,6 +248,7 @@ class TestProperty6GeneratePreviewCachedSignature:
 # Feature: image-pipeline-modularization, Property 11: 函数体行数限制
 # **Validates: Requirements 7.5, 11.2**
 # ===========================================================================
+
 
 def _count_function_body_lines(node: ast.FunctionDef) -> int:
     """使用 AST 计算函数体的行数（不含 docstring）。
@@ -225,9 +261,12 @@ def _count_function_body_lines(node: ast.FunctionDef) -> int:
     """
     body = node.body
     # 跳过 docstring（第一个语句如果是字符串常量）
-    if (body and isinstance(body[0], ast.Expr)
-            and isinstance(body[0].value, ast.Constant)
-            and isinstance(body[0].value.value, str)):
+    if (
+        body
+        and isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Constant)
+        and isinstance(body[0].value.value, str)
+    ):
         body = body[1:]
 
     if not body:
@@ -239,7 +278,7 @@ def _count_function_body_lines(node: ast.FunctionDef) -> int:
 
 
 # converter.py 中的 UI 辅助函数（不受 20 行限制）
-_GRADIO_UI_FUNCTIONS = {
+_LEGACY_UI_HELPER_FUNCTIONS = {
     "update_preview_with_loop",
     "on_remove_loop",
     "generate_final_model",
@@ -297,10 +336,7 @@ class TestProperty11FunctionBodyLineLimit:
                 if node.name == func_name:
                     found = True
                     body_lines = _count_function_body_lines(node)
-                    assert body_lines <= 20, (
-                        f"converter.py::{func_name} 函数体为 {body_lines} 行，"
-                        f"超过 20 行限制"
-                    )
+                    assert body_lines <= 20, f"converter.py::{func_name} 函数体为 {body_lines} 行，" f"超过 20 行限制"
                     break
         assert found, f"converter.py 中未找到函数 {func_name}"
 
@@ -316,11 +352,8 @@ class TestProperty11FunctionBodyLineLimit:
                             found = True
                             body_lines = _count_function_body_lines(item)
                             assert body_lines <= 30, (
-                                f"LuminaImageProcessor.{method_name} 方法体为 "
-                                f"{body_lines} 行，超过 30 行限制"
+                                f"LuminaImageProcessor.{method_name} 方法体为 " f"{body_lines} 行，超过 30 行限制"
                             )
                             break
                 break
-        assert found, (
-            f"image_processing.py 中 LuminaImageProcessor 未找到方法 {method_name}"
-        )
+        assert found, f"image_processing.py 中 LuminaImageProcessor 未找到方法 {method_name}"

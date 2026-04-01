@@ -17,6 +17,7 @@ Key changes from v1:
 """
 
 import os
+import logging
 import numpy as np
 import time
 import trimesh
@@ -28,6 +29,20 @@ from shapely.strtree import STRtree
 from shapely.validation import make_valid
 
 from config import PrinterConfig, ColorSystem
+
+_log = logging.getLogger(__name__)
+VECTOR_HANDLED_ERRORS = (
+    ValueError,
+    TypeError,
+    KeyError,
+    IndexError,
+    AttributeError,
+    OSError,
+    RuntimeError,
+    ImportError,
+    ModuleNotFoundError,
+    ArithmeticError,
+)
 
 # Lazy import to avoid circular dependency at module load time
 _LuminaImageProcessor = None
@@ -60,7 +75,7 @@ class VectorProcessor:
 
     def __init__(self, lut_path: str, color_mode: str):
         self.color_mode = color_mode
-        print(f"[VECTOR] Initializing Native Vector Engine ({color_mode})...")
+        _log.info(f"[VECTOR] Initializing Native Vector Engine ({color_mode})...")
 
         ImageProcessor = _get_image_processor_class()
         self.img_processor = ImageProcessor(lut_path, color_mode)
@@ -68,7 +83,7 @@ class VectorProcessor:
         self.last_stage_timings = {}
         self.parse_warnings: list[str] = []
 
-        print(f"[VECTOR] Initialized with {len(self.img_processor.ref_stacks)} LUT colors")
+        _log.info(f"[VECTOR] Initialized with {len(self.img_processor.ref_stacks)} LUT colors")
 
     # ── Public entry point ───────────────────────────────────────────────
 
@@ -95,8 +110,8 @@ class VectorProcessor:
             by material ID.  Geometry names match slot names from the active
             ``ColorSystem`` configuration.
         """
-        print(f"[VECTOR] Processing: {svg_path}")
-        print(f"[VECTOR] Structure mode: {structure_mode}")
+        _log.info(f"[VECTOR] Processing: {svg_path}")
+        _log.info(f"[VECTOR] Structure mode: {structure_mode}")
         stage_timings = {}
         t_total_start = time.perf_counter()
 
@@ -113,7 +128,7 @@ class VectorProcessor:
                 svg_mtime,
             )
             cached_entry = _VECTOR_PARSE_CLIP_CACHE.get(cache_key)
-        except Exception:
+        except VECTOR_HANDLED_ERRORS:
             cache_key = None
 
         if cached_entry is not None:
@@ -124,21 +139,21 @@ class VectorProcessor:
             bbox = cached_entry["bbox"]
             stage_timings["parse_s"] = 0.0
             stage_timings["occlusion_s"] = 0.0
-            print(f"[VECTOR] Parse/clip cache hit: {os.path.basename(svg_path)}")
-            print(f"[VECTOR] Parsed {len(shape_data)} shapes. Scale: {scale_factor:.4f}")
-            print(f"[VECTOR] After occlusion clip: {len(clipped_shapes)} non-overlapping shapes")
+            _log.info(f"[VECTOR] Parse/clip cache hit: {os.path.basename(svg_path)}")
+            _log.info(f"[VECTOR] Parsed {len(shape_data)} shapes. Scale: {scale_factor:.4f}")
+            _log.info(f"[VECTOR] After occlusion clip: {len(clipped_shapes)} non-overlapping shapes")
         else:
             t0 = time.perf_counter()
             shape_data, scale_factor, bbox = self._parse_svg(svg_path, target_width_mm)
             if not shape_data:
                 raise ValueError("No valid filled shapes found in SVG.")
             stage_timings["parse_s"] = time.perf_counter() - t0
-            print(f"[VECTOR] Parsed {len(shape_data)} shapes. Scale: {scale_factor:.4f}")
+            _log.info(f"[VECTOR] Parsed {len(shape_data)} shapes. Scale: {scale_factor:.4f}")
 
             t0 = time.perf_counter()
             clipped_shapes, silhouette = self._clip_occlusion(shape_data, return_silhouette=True)
             stage_timings["occlusion_s"] = time.perf_counter() - t0
-            print(f"[VECTOR] After occlusion clip: {len(clipped_shapes)} non-overlapping shapes")
+            _log.info(f"[VECTOR] After occlusion clip: {len(clipped_shapes)} non-overlapping shapes")
 
             if cache_key is not None:
                 _VECTOR_PARSE_CLIP_CACHE[cache_key] = {
@@ -154,7 +169,7 @@ class VectorProcessor:
         # === Stage 3: Resolve color system config ===
         is_six_color = len(self.img_processor.lut_rgb) == 1296
         if is_six_color:
-            print("[VECTOR] Auto-detected 6-Color LUT. Forcing 6-Color mode.")
+            _log.info("[VECTOR] Auto-detected 6-Color LUT. Forcing 6-Color mode.")
             color_conf = ColorSystem.SIX_COLOR
             self.color_mode = "6-Color"
         else:
@@ -172,13 +187,13 @@ class VectorProcessor:
                 from core.color_replacement import ColorReplacementManager
 
                 replacement_manager = ColorReplacementManager.from_dict(color_replacements)
-            except Exception as e:
-                print(f"[VECTOR] Warning: Failed to load color replacements: {e}")
+            except VECTOR_HANDLED_ERRORS as e:
+                _log.warning(f"[VECTOR] Warning: Failed to load color replacements: {e}")
 
         t0 = time.perf_counter()
         matched_shapes = self._match_colors(clipped_shapes, replacement_manager, num_channels, num_layers=num_layers)
         stage_timings["color_match_s"] = time.perf_counter() - t0
-        print(f"[VECTOR] Matched {len(matched_shapes)} shapes to LUT recipes")
+        _log.info(f"[VECTOR] Matched {len(matched_shapes)} shapes to LUT recipes")
 
         # === Stage 5: Run-length extrude per channel ===
         layer_h = PrinterConfig.LAYER_HEIGHT
@@ -201,7 +216,7 @@ class VectorProcessor:
                 face_up=True,
                 optical_z_base=backing_height,
             )
-            print(f"[VECTOR] 5-Color face-up: {num_layers} optical layers above {backing_height:.2f}mm backing")
+            _log.info(f"[VECTOR] 5-Color face-up: {num_layers} optical layers above {backing_height:.2f}mm backing")
         else:
             meshes_by_slot = self._run_length_extrude(
                 matched_shapes,
@@ -229,7 +244,7 @@ class VectorProcessor:
             backing_z_start = num_layers * layer_h
 
         if thickness_mm > 0 and silhouette is not None and not silhouette.is_empty:
-            print(f"[VECTOR] Generating backing: {backing_layer_count} layers ({thickness_mm}mm)")
+            _log.info(f"[VECTOR] Generating backing: {backing_layer_count} layers ({thickness_mm}mm)")
             backing_meshes = []
             backing_height = backing_layer_count * layer_h
             backing_meshes.extend(
@@ -252,7 +267,7 @@ class VectorProcessor:
         t0 = time.perf_counter()
         is_double_sided = "双面" in structure_mode or "Double" in structure_mode
         if is_double_sided:
-            print("[VECTOR] Adding mirrored color layers (double-sided mode)...")
+            _log.info("[VECTOR] Adding mirrored color layers (double-sided mode)...")
             top_z_start = backing_z_start + backing_layer_count * layer_h
             self._add_double_sided_layers(
                 matched_shapes,
@@ -280,7 +295,7 @@ class VectorProcessor:
             if not mesh_list:
                 continue
 
-            print(f"[VECTOR] Merging {len(mesh_list)} parts for {name}...")
+            _log.info(f"[VECTOR] Merging {len(mesh_list)} parts for {name}...")
             combined = trimesh.util.concatenate(mesh_list) if len(mesh_list) > 1 else mesh_list[0]
             self._fix_coordinates(combined, svg_height_mm)
 
@@ -294,7 +309,7 @@ class VectorProcessor:
         stage_timings["extrude_cache_entries"] = len(extrude_cache)
         self.last_stage_timings = stage_timings
 
-        print(
+        _log.info(
             "[VECTOR] Stage timings (s): "
             f"parse={stage_timings['parse_s']:.3f}, "
             f"clip={stage_timings['occlusion_s']:.3f}, "
@@ -305,8 +320,8 @@ class VectorProcessor:
             f"assemble={stage_timings['assemble_s']:.3f}, "
             f"total={stage_timings['total_s']:.3f}"
         )
-        print(f"[VECTOR] Extrude cache entries: {stage_timings['extrude_cache_entries']}")
-        print(f"[VECTOR] Scene complete: {len(scene.geometry)} objects")
+        _log.info(f"[VECTOR] Extrude cache entries: {stage_timings['extrude_cache_entries']}")
+        _log.info(f"[VECTOR] Scene complete: {len(scene.geometry)} objects")
         return scene
 
     # ── Stage 2: Occlusion clipping (Chroma-style) ───────────────────────
@@ -350,7 +365,7 @@ class VectorProcessor:
             occluders = []
             try:
                 candidate_refs = tree.query(geom)
-            except Exception:
+            except VECTOR_HANDLED_ERRORS:
                 candidate_refs = []
 
             for ref in candidate_refs:
@@ -366,7 +381,7 @@ class VectorProcessor:
                 try:
                     if cand.intersects(geom):
                         occluders.append(cand)
-                except Exception:
+                except VECTOR_HANDLED_ERRORS:
                     continue
 
             if not occluders:
@@ -375,13 +390,13 @@ class VectorProcessor:
                 occ = occluders[0] if len(occluders) == 1 else unary_union(occluders)
                 try:
                     clipped = geom.difference(occ)
-                except Exception:
+                except VECTOR_HANDLED_ERRORS:
                     # First attempt failed — repair both geometries and retry.
                     try:
                         fixed_geom = geom if geom.is_valid else geom.buffer(0)
                         fixed_occ = occ if occ.is_valid else occ.buffer(0)
                         clipped = fixed_geom.difference(fixed_occ)
-                    except Exception:
+                    except VECTOR_HANDLED_ERRORS:
                         # Cannot compute difference — drop shape to avoid
                         # overlapping geometry that breaks the mesh.
                         clipped = None
@@ -402,7 +417,7 @@ class VectorProcessor:
         if return_silhouette:
             try:
                 silhouette = unary_union(geoms)
-            except Exception:
+            except VECTOR_HANDLED_ERRORS:
                 silhouette = None
             return result, silhouette
         return result
@@ -448,7 +463,7 @@ class VectorProcessor:
 
                 hex_c = f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
                 if recipe_log_mode == "full":
-                    print(f"  {hex_c} -> recipe {recipe}")
+                    _log.info(f"  {hex_c} -> recipe {recipe}")
                 elif recipe_log_mode == "summary" and len(sample_logs) < 8:
                     sample_logs.append(f"{hex_c} -> {recipe}")
 
@@ -461,9 +476,9 @@ class VectorProcessor:
             )
 
         if recipe_log_mode == "summary":
-            print(f"[VECTOR] Recipe cache summary: unique_colors={len(color_cache)}, shapes={len(clipped_shapes)}")
+            _log.info(f"[VECTOR] Recipe cache summary: unique_colors={len(color_cache)}, shapes={len(clipped_shapes)}")
             if sample_logs:
-                print(f"[VECTOR] Recipe samples: {'; '.join(sample_logs)}")
+                _log.info(f"[VECTOR] Recipe samples: {'; '.join(sample_logs)}")
 
         return matched
 
@@ -614,7 +629,7 @@ class VectorProcessor:
         """
         try:
             svg = SVG.parse(svg_path)
-        except Exception as e:
+        except VECTOR_HANDLED_ERRORS as e:
             raise ValueError(f"Failed to parse SVG: {e}")
 
         def _sample_path_to_polygon(path_obj):
@@ -623,7 +638,7 @@ class VectorProcessor:
 
             try:
                 segments = list(path_obj.segments())
-            except Exception:
+            except VECTOR_HANDLED_ERRORS:
                 segments = None
 
             if segments and len(segments) > 1:
@@ -661,12 +676,16 @@ class VectorProcessor:
                     dy = seg.end.y - seg.start.y
                     seg_info.append((seg, (dx * dx + dy * dy) ** 0.5, "line"))
                 elif isinstance(seg, CubicBezier):
-                    dx_c = (abs(seg.start.x - seg.control1.x)
-                            + abs(seg.control1.x - seg.control2.x)
-                            + abs(seg.control2.x - seg.end.x))
-                    dy_c = (abs(seg.start.y - seg.control1.y)
-                            + abs(seg.control1.y - seg.control2.y)
-                            + abs(seg.control2.y - seg.end.y))
+                    dx_c = (
+                        abs(seg.start.x - seg.control1.x)
+                        + abs(seg.control1.x - seg.control2.x)
+                        + abs(seg.control2.x - seg.end.x)
+                    )
+                    dy_c = (
+                        abs(seg.start.y - seg.control1.y)
+                        + abs(seg.control1.y - seg.control2.y)
+                        + abs(seg.control2.y - seg.end.y)
+                    )
                     dx_d = seg.end.x - seg.start.x
                     dy_d = seg.end.y - seg.start.y
                     chord = (dx_d * dx_d + dy_d * dy_d) ** 0.5
@@ -683,7 +702,7 @@ class VectorProcessor:
                 else:
                     try:
                         sl = seg.length()
-                    except Exception:
+                    except VECTOR_HANDLED_ERRORS:
                         sl = 0
                     if sl > 0:
                         seg_info.append((seg, sl, "other"))
@@ -704,8 +723,18 @@ class VectorProcessor:
                     n = max(2, int(round(budget * sl / total_len)))
                     t = np.linspace(0, 1, n, endpoint=False)
                     t1 = 1.0 - t
-                    xs = t1**3 * seg.start.x + 3 * t1**2 * t * seg.control1.x + 3 * t1 * t**2 * seg.control2.x + t**3 * seg.end.x
-                    ys = t1**3 * seg.start.y + 3 * t1**2 * t * seg.control1.y + 3 * t1 * t**2 * seg.control2.y + t**3 * seg.end.y
+                    xs = (
+                        t1**3 * seg.start.x
+                        + 3 * t1**2 * t * seg.control1.x
+                        + 3 * t1 * t**2 * seg.control2.x
+                        + t**3 * seg.end.x
+                    )
+                    ys = (
+                        t1**3 * seg.start.y
+                        + 3 * t1**2 * t * seg.control1.y
+                        + 3 * t1 * t**2 * seg.control2.y
+                        + t**3 * seg.end.y
+                    )
                     coords.extend(zip(xs.tolist(), ys.tolist()))
                 elif kind == "quad":
                     n = max(2, int(round(budget * sl / total_len)))
@@ -726,7 +755,7 @@ class VectorProcessor:
             """Fallback: uniform t-parameter sampling across the whole path."""
             try:
                 path_len = path_obj.length()
-            except Exception:
+            except VECTOR_HANDLED_ERRORS:
                 return []
             if path_len == 0:
                 return []
@@ -740,7 +769,7 @@ class VectorProcessor:
         stroke_only_count = 0
         skipped_gradient_count = 0
         skipped_polygon_count = 0
-        print("[VECTOR] Parsing SVG geometry...")
+        _log.info("[VECTOR] Parsing SVG geometry...")
 
         for element in svg.elements():
             if not isinstance(element, (Path, Shape)):
@@ -762,7 +791,7 @@ class VectorProcessor:
             if isinstance(element, Shape) and not isinstance(element, Path):
                 try:
                     element = Path(element)
-                except Exception:
+                except VECTOR_HANDLED_ERRORS:
                     continue
 
             rgb = None
@@ -778,15 +807,15 @@ class VectorProcessor:
                 except (AttributeError, TypeError, ValueError):
                     rgb = None
             if rgb is None:
-                fill_val = getattr(element.fill, 'value', None) if element.fill else None
-                eid = getattr(element, 'id', None) or f"element#{skipped_gradient_count}"
-                print(f"[VECTOR] WARNING: Skipping '{eid}' — unresolvable fill: {fill_val}")
+                fill_val = getattr(element.fill, "value", None) if element.fill else None
+                eid = getattr(element, "id", None) or f"element#{skipped_gradient_count}"
+                _log.info(f"[VECTOR] WARNING: Skipping '{eid}' — unresolvable fill: {fill_val}")
                 skipped_gradient_count += 1
                 continue
 
             try:
                 subpaths = list(element.as_subpaths())
-            except Exception:
+            except VECTOR_HANDLED_ERRORS:
                 subpaths = []
 
             subpath_polys = []
@@ -794,7 +823,7 @@ class VectorProcessor:
                 try:
                     sub_path = subpath if isinstance(subpath, Path) else Path(subpath)
                     poly = _sample_path_to_polygon(sub_path)
-                except Exception:
+                except VECTOR_HANDLED_ERRORS:
                     continue
                 if poly is None:
                     continue
@@ -807,7 +836,7 @@ class VectorProcessor:
                 for sp in subpath_polys[1:]:
                     try:
                         combined = combined.symmetric_difference(sp)
-                    except Exception:
+                    except VECTOR_HANDLED_ERRORS:
                         pass
                 if combined is not None and not combined.is_empty:
                     if not combined.is_valid:
@@ -821,7 +850,7 @@ class VectorProcessor:
             if result_poly is None:
                 try:
                     result_poly = _sample_path_to_polygon(element)
-                except Exception:
+                except VECTOR_HANDLED_ERRORS:
                     pass
 
             if result_poly is None:
@@ -834,20 +863,20 @@ class VectorProcessor:
                     result_poly = result_poly.buffer(sw / 2.0, cap_style="round", join_style="round")
                     if result_poly.is_empty:
                         continue
-                except Exception:
+                except VECTOR_HANDLED_ERRORS:
                     continue
 
             raw_shapes.append({"poly": result_poly, "color": rgb})
 
         if skipped_types:
-            print(f"[VECTOR] Skipped non-path elements: {skipped_types}")
+            _log.info(f"[VECTOR] Skipped non-path elements: {skipped_types}")
         if stroke_only_count > 0:
-            print(f"[VECTOR] Converted {stroke_only_count} stroke-only elements to filled polygons")
+            _log.info(f"[VECTOR] Converted {stroke_only_count} stroke-only elements to filled polygons")
         if skipped_gradient_count > 0:
-            print(f"[VECTOR] Skipped {skipped_gradient_count} elements with gradient/unresolvable fills")
+            _log.info(f"[VECTOR] Skipped {skipped_gradient_count} elements with gradient/unresolvable fills")
         if skipped_polygon_count > 0:
-            print(f"[VECTOR] Skipped {skipped_polygon_count} elements (invalid polygon after sampling)")
-        print(f"[VECTOR] Successfully parsed {len(raw_shapes)} shapes from SVG")
+            _log.info(f"[VECTOR] Skipped {skipped_polygon_count} elements (invalid polygon after sampling)")
+        _log.info(f"[VECTOR] Successfully parsed {len(raw_shapes)} shapes from SVG")
 
         parse_warnings = []
         if skipped_gradient_count > 0:
@@ -856,9 +885,7 @@ class VectorProcessor:
                 f"(FDM printing requires solid colors)"
             )
         if skipped_polygon_count > 0:
-            parse_warnings.append(
-                f"{skipped_polygon_count} elements produced invalid geometry and were skipped"
-            )
+            parse_warnings.append(f"{skipped_polygon_count} elements produced invalid geometry and were skipped")
         self.parse_warnings = parse_warnings
         if not raw_shapes:
             raise ValueError("No valid shapes found in SVG")
@@ -887,14 +914,14 @@ class VectorProcessor:
                     gy0 = min(gy0, vb_y)
                     gx1 = max(gx1, vb_x + vb_w)
                     gy1 = max(gy1, vb_y + vb_h)
-                    print(f"[VECTOR] SVG viewBox: ({vb_x}, {vb_y}, {vb_w}, {vb_h})")
-        except Exception:
+                    _log.info(f"[VECTOR] SVG viewBox: ({vb_x}, {vb_y}, {vb_w}, {vb_h})")
+        except VECTOR_HANDLED_ERRORS:
             pass
 
         real_w = gx1 - gx0
         real_h = gy1 - gy0
 
-        print(f"[VECTOR] Global bounds: x={gx0:.1f}, y={gy0:.1f}, w={real_w:.1f}, h={real_h:.1f}")
+        _log.info(f"[VECTOR] Global bounds: x={gx0:.1f}, y={gy0:.1f}, w={real_w:.1f}, h={real_h:.1f}")
         if real_w == 0:
             raise ValueError("Invalid geometry width (0)")
 
@@ -908,7 +935,7 @@ class VectorProcessor:
             if simplify_tol_svg > 0.0:
                 try:
                     shifted = shifted.simplify(simplify_tol_svg, preserve_topology=True)
-                except Exception:
+                except VECTOR_HANDLED_ERRORS:
                     pass
 
             if not shifted.is_valid:
@@ -958,8 +985,8 @@ class VectorProcessor:
                 m.apply_scale([1.0, 1.0, float(height)])
                 m.apply_translation([0, 0, z_offset])
                 meshes.append(m)
-            except Exception as e:
-                print(f"[VECTOR] Warning: Failed to extrude polygon: {e}")
+            except VECTOR_HANDLED_ERRORS as e:
+                _log.warning(f"[VECTOR] Warning: Failed to extrude polygon: {e}")
                 continue
 
         return meshes

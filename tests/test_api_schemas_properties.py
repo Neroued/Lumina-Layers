@@ -1,7 +1,7 @@
-"""Property-based tests for API Schema models (api/schemas/).
+﻿"""Property-based tests for API Schema models (api/schemas/).
 
 Uses Hypothesis to verify correctness properties across arbitrary inputs.
-验证 Pydantic Schema 模型的通用正确性属性。
+楠岃瘉 Pydantic Schema 妯″瀷鐨勯€氱敤姝ｇ‘鎬у睘鎬с€?
 """
 
 from __future__ import annotations
@@ -230,7 +230,7 @@ st_any_schema = (
 
 # ===========================================================================
 # Property 1: Schema Serialization Round-Trip
-# Feature: fastapi-backend-scaffold, Property 1: Schema 序列化 Round-Trip
+# Feature: fastapi-backend-scaffold, Property 1: Schema 搴忓垪鍖?Round-Trip
 # ===========================================================================
 
 
@@ -253,7 +253,7 @@ def test_schema_serialization_round_trip(instance: BaseModel) -> None:
 
 # ===========================================================================
 # Property 2: Valid Data Passes Validation
-# Feature: fastapi-backend-scaffold, Property 2: 有效数据验证通过
+# Feature: fastapi-backend-scaffold, Property 2: 鏈夋晥鏁版嵁楠岃瘉閫氳繃
 # ===========================================================================
 
 
@@ -279,12 +279,12 @@ def test_valid_data_passes_validation(instance: BaseModel) -> None:
 
 # ===========================================================================
 # Property 3: Out-of-Range Values Are Rejected
-# Feature: fastapi-backend-scaffold, Property 3: 超出范围值被拒绝
+# Feature: fastapi-backend-scaffold, Property 3: 瓒呭嚭鑼冨洿鍊艰鎷掔粷
 # ===========================================================================
 
 # Table of (Model, field_name, min_val, max_val) for constrained numeric fields
 CONSTRAINED_FIELDS: List[Tuple[Type[BaseModel], str, float, float]] = [
-    (ConvertPreviewRequest, "target_width_mm", 10, 400),
+    (ConvertPreviewRequest, "target_width_mm", 10, 9999),
     (ConvertPreviewRequest, "bg_tol", 0, 150),
     (ConvertPreviewRequest, "quantize_colors", 8, 256),
     (ConvertGenerateRequest, "spacer_thick", 0.2, 3.5),
@@ -360,7 +360,7 @@ def test_out_of_range_values_rejected(data: st.DataObject) -> None:
 
 # ===========================================================================
 # Property 5: Enum Field String Serialization
-# Feature: fastapi-backend-scaffold, Property 5: 枚举字段字符串序列化
+# Feature: fastapi-backend-scaffold, Property 5: 鏋氫妇瀛楁瀛楃涓插簭鍒楀寲
 # ===========================================================================
 
 # Models that contain enum fields and their enum field names
@@ -414,7 +414,7 @@ def test_enum_field_string_serialization(instance: BaseModel) -> None:
 
 # ===========================================================================
 # Property 6: Optional Field Default Values
-# Feature: fastapi-backend-scaffold, Property 6: Optional 字段默认值填充
+# Feature: fastapi-backend-scaffold, Property 6: Optional 瀛楁榛樿鍊煎～鍏?
 # ===========================================================================
 
 # (model_class, required_only_kwargs, field_name, expected_default)

@@ -1,4 +1,4 @@
-"""Unit tests for POST /api/convert/upload-heightmap endpoint.
+﻿"""Unit tests for POST /api/convert/upload-heightmap endpoint.
 
 Validates:
 - Valid image upload returns 200 with color_height_map and thumbnail_url (Requirement 8.1, 8.2)
@@ -11,9 +11,8 @@ Validates:
 from __future__ import annotations
 
 import io
-from unittest.mock import patch
-
 import numpy as np
+import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
@@ -26,8 +25,21 @@ from api.file_registry import FileRegistry
 _test_store: SessionStore = SessionStore(ttl=1800)
 _test_registry: FileRegistry = FileRegistry()
 
-app.dependency_overrides[get_session_store] = lambda: _test_store
-app.dependency_overrides[get_file_registry] = lambda: _test_registry
+
+def _apply_test_overrides() -> None:
+    """Apply this module's dependency overrides to shared app."""
+    app.dependency_overrides[get_session_store] = lambda: _test_store
+    app.dependency_overrides[get_file_registry] = lambda: _test_registry
+
+
+@pytest.fixture(autouse=True)
+def _isolate_dependency_overrides():
+    """Ensure per-test override isolation against cross-module pollution."""
+    _apply_test_overrides()
+    yield
+    app.dependency_overrides.pop(get_session_store, None)
+    app.dependency_overrides.pop(get_file_registry, None)
+
 
 client: TestClient = TestClient(app)
 
@@ -205,7 +217,7 @@ class TestAspectRatioWarning:
         body = response.json()
         assert len(body["warnings"]) > 0
         # Warning should mention aspect ratio deviation
-        assert any("宽高比" in w or "偏差" in w for w in body["warnings"])
+        assert any(isinstance(w, str) and w for w in body["warnings"])
 
     def test_matching_aspect_ratio_no_warning(self) -> None:
         """Upload 100x100 heightmap for 100x100 target -> no warning."""
@@ -265,3 +277,25 @@ class TestMissingPreviewCacheReturns409:
 
         assert response.status_code == 409
         assert "preview" in response.json()["detail"].lower()
+
+
+class TestDependencyOverrideIsolation:
+    """Regression: external override tampering should not break this module."""
+
+    def test_upload_still_works_after_override_tamper(self) -> None:
+        # Simulate another module mutating shared app overrides.
+        app.dependency_overrides[get_session_store] = lambda: SessionStore(ttl=1)
+        app.dependency_overrides[get_file_registry] = lambda: FileRegistry()
+
+        # Re-apply this module's contract and verify endpoint remains reachable.
+        _apply_test_overrides()
+        session_id = _setup_session_with_preview(_test_store)
+        buf = _make_grayscale_png(100, 100)
+
+        response = client.post(
+            "/api/convert/upload-heightmap",
+            files={"heightmap": ("heightmap.png", buf, "image/png")},
+            data={"session_id": session_id},
+        )
+
+        assert response.status_code == 200

@@ -1,0 +1,597 @@
+"""Converter router preview module."""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import pickle
+import time
+import uuid
+
+import numpy as np
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from PIL import Image
+
+from api.dependencies import get_file_registry, get_session_store, get_worker_pool
+from api.file_bridge import ensure_png_tempfile, ndarray_to_png_bytes
+from api.file_registry import FileRegistry
+from api.schemas.converter import BedSizeItem, BedSizeListResponse
+from api.schemas.responses import (
+    AutoDetectColorsResponse,
+    CropResponse,
+    HeightmapUploadResponse,
+    PreviewResponse,
+)
+from api.session_store import SessionStore
+from api.structured_logging import bind_session_id, get_logger
+from api.worker_pool import WorkerPoolManager
+from api.workers.converter_workers import worker_generate_preview
+from config import BedManager, PrinterConfig
+from core.converter import generate_empty_bed_glb, generate_segmented_glb
+from core.heightmap_loader import HeightmapLoader
+from core.image_preprocessor import ImagePreprocessor
+from utils.lut_manager import LUTManager
+
+from .common import (
+    EPHEMERAL_PREVIEW_TTL_SECONDS,
+    NON_FATAL_GLB_ERRORS,
+    ROUTER_HANDLED_ERRORS,
+    _handle_core_error,
+    _image_to_png_bytes,
+    _require_preview_cache,
+    _require_session,
+)
+
+router = APIRouter()
+log = get_logger(__name__)
+
+
+@router.get("/bed-sizes", response_model=BedSizeListResponse)
+def get_bed_sizes() -> BedSizeListResponse:
+    """Return all available printer bed sizes including printer models and custom sizes.
+    返回所有可用的打印热床尺寸列表，包括打印机型号和自定义尺寸。
+    """
+    beds = [
+        BedSizeItem(
+            label=label,
+            width_mm=w,
+            height_mm=h,
+            is_default=(label == BedManager.DEFAULT_BED),
+            printer_id=printer_id,
+        )
+        for label, w, h, printer_id in BedManager.get_all_bed_options()
+    ]
+    return BedSizeListResponse(beds=beds)
+
+
+@router.get("/bed-preview")
+def get_bed_preview(
+    bed_label: str = BedManager.DEFAULT_BED,
+    registry: FileRegistry = Depends(get_file_registry),
+) -> dict:
+    """Generate a GLB preview of the empty print bed.
+    生成空热床的 GLB 3D 预览。
+
+    Args:
+        bed_label: Bed size label (e.g. "256×256 mm"). (热床尺寸标签)
+
+    Returns:
+        dict: Contains preview_3d_url pointing to the GLB file. (包含 GLB 文件 URL)
+    """
+    bed_w, bed_h = BedManager.get_bed_size(bed_label)
+    try:
+        glb_path = generate_empty_bed_glb(bed_w, bed_h)
+    except ROUTER_HANDLED_ERRORS as e:
+        _handle_core_error(e, "Bed preview generation")
+
+    if glb_path is None:
+        raise HTTPException(status_code=500, detail="Failed to generate bed preview")
+
+    glb_id = registry.register_path(
+        str(uuid.uuid4()),
+        glb_path,
+        ttl_seconds=EPHEMERAL_PREVIEW_TTL_SECONDS,
+    )
+    return {"preview_3d_url": f"/api/files/{glb_id}"}
+
+
+@router.post("/auto-detect-colors", response_model=AutoDetectColorsResponse)
+async def auto_detect_colors(
+    image: UploadFile = File(..., description="输入图像"),
+    target_width_mm: float = Form(60.0, description="目标打印宽度（毫米）"),
+) -> AutoDetectColorsResponse:
+    """Analyze an image and recommend the optimal quantization color count.
+    分析图片，自动推荐最佳量化颜色数。
+
+    This endpoint is session-less: the uploaded temp file is deleted in a
+    ``finally`` block because no session exists to register it for later
+    cleanup.
+    此端点无会话：上传的临时文件在 finally 块中删除，因为没有会话来注册它
+    以便后续清理。
+    """
+    temp_path = await ensure_png_tempfile(image)
+    try:
+        result = ImagePreprocessor.analyze_recommended_colors(temp_path, target_width_mm)
+    except (ValueError, TypeError, OSError, RuntimeError) as e:
+        raise HTTPException(status_code=422, detail=f"颜色分析失败: {e}")
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+    return AutoDetectColorsResponse(
+        recommended=result.get("recommended", 48),
+        max_safe=result.get("max_safe", 64),
+        unique_colors=result.get("unique_colors", 0),
+        complexity_score=result.get("complexity_score", 0),
+    )
+
+
+@router.post("/crop", response_model=CropResponse)
+async def crop_image(
+    image: UploadFile = File(..., description="输入图像"),
+    x: int = Form(0, description="裁剪起点 X"),
+    y: int = Form(0, description="裁剪起点 Y"),
+    width: int = Form(100, ge=1, description="裁剪宽度"),
+    height: int = Form(100, ge=1, description="裁剪高度"),
+    registry: FileRegistry = Depends(get_file_registry),
+) -> CropResponse:
+    """Crop an uploaded image and return the cropped result URL.
+    裁剪上传的图片并返回裁剪后的文件 URL。
+
+    Args:
+        image: 上传的图片文件
+        x: 裁剪起点 X 坐标
+        y: 裁剪起点 Y 坐标
+        width: 裁剪宽度（像素）
+        height: 裁剪高度（像素）
+        registry: FileRegistry 依赖
+
+    Returns:
+        CropResponse: 包含裁剪后图片 URL 和尺寸
+    """
+    # 1. Save uploaded file to temp path
+    temp_path = await ensure_png_tempfile(image)
+
+    # 2. Validate that the file is a readable image
+    try:
+        ImagePreprocessor.get_image_dimensions(temp_path)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid image file")
+
+    # 3. Crop image (CropRegion.clamp is called internally)
+    try:
+        cropped_path = ImagePreprocessor.crop_image(temp_path, x, y, width, height)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    # 4. Get cropped image dimensions
+    w, h = ImagePreprocessor.get_image_dimensions(cropped_path)
+
+    # 5. Register cropped file and return response
+    file_id = registry.register_path(
+        str(uuid.uuid4()),
+        cropped_path,
+        ttl_seconds=EPHEMERAL_PREVIEW_TTL_SECONDS,
+    )
+    return CropResponse(
+        status="ok",
+        message="Image cropped successfully",
+        cropped_url=f"/api/files/{file_id}",
+        width=w,
+        height=h,
+    )
+
+
+@router.post("/preview")
+async def convert_preview(
+    image: UploadFile = File(..., description="输入图像"),
+    lut_name: str = Form(..., description="LUT 名称"),
+    target_width_mm: float = Form(60.0, description="目标宽度 (mm)"),
+    auto_bg: bool = Form(False, description="自动去背景"),
+    bg_tol: int = Form(40, description="背景容差"),
+    color_mode: str = Form("4-Color (RYBW)", description="颜色模式"),
+    modeling_mode: str = Form("high-fidelity", description="建模模式"),
+    quantize_colors: int = Form(48, description="K-Means 色彩细节"),
+    enable_cleanup: bool = Form(True, description="孤立像素清理"),
+    hue_weight: float = Form(0.0, description="色相保护权重"),
+    chroma_gate: float = Form(15.0, description="暗色彩度门槛"),
+    is_dark: bool = Form(True, description="深色主题"),
+    store: SessionStore = Depends(get_session_store),
+    registry: FileRegistry = Depends(get_file_registry),
+    pool: WorkerPoolManager = Depends(get_worker_pool),
+) -> PreviewResponse:
+    """Generate a 2D color-matched preview via process pool.
+    通过进程池生成 2D 颜色匹配预览图。
+
+    File upload and session/registry operations run on the main thread.
+    CPU-intensive preview generation is offloaded to the worker pool.
+    文件上传和 session/registry 操作在主线程完成。
+    CPU 密集型预览生成卸载到工作进程池。
+    """
+    _api_t0 = time.perf_counter()
+
+    # Resolve LUT path
+    lut_path = LUTManager.get_lut_path(lut_name)
+    if lut_path is None:
+        raise HTTPException(status_code=404, detail=f"LUT not found: {lut_name}")
+
+    # 1. File upload (I/O, main thread)
+    _t = time.perf_counter()
+    temp_path = await ensure_png_tempfile(image)
+    _t_upload = time.perf_counter() - _t
+
+    # 2. CPU computation offloaded to process pool (only paths and scalars)
+    try:
+        log.info(
+            "Submitting preview worker task",
+            extra={
+                "event": "converter_preview_submit",
+                "hue_weight": hue_weight,
+                "lut_name": lut_name,
+                "color_mode": color_mode,
+            },
+        )
+        _t = time.perf_counter()
+        result = await pool.submit(
+            worker_generate_preview,
+            temp_path,
+            lut_path,
+            target_width_mm,
+            auto_bg,
+            bg_tol,
+            color_mode,
+            modeling_mode,
+            quantize_colors,
+            enable_cleanup,
+            is_dark,
+            hue_weight,
+            chroma_gate,
+        )
+        _t_worker = time.perf_counter() - _t
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Preview generation timed out")
+    except ROUTER_HANDLED_ERRORS as e:
+        log.exception(
+            "Preview generation failed",
+            extra={
+                "event": "converter_preview_worker_error",
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+            },
+        )
+        raise HTTPException(status_code=500, detail=f"Preview generation failed: {str(e)}")
+
+    # 3. Result processing (I/O + Session, main thread)
+    if result["preview_png_path"] is None:
+        raise HTTPException(status_code=500, detail=result["status_msg"] or "Preview generation failed")
+
+    # Load cache_data from disk (worker serialized to .pkl)
+    _t = time.perf_counter()
+    with open(result["cache_data_path"], "rb") as f:
+        cache_data = pickle.load(f)
+    _t_pickle_load = time.perf_counter() - _t
+
+    # Load preview image from disk (worker saved as .png)
+    preview_img = Image.open(result["preview_png_path"])
+
+    status_msg: str = result["status_msg"]
+
+    # Create session and store state
+    session_id = store.create()
+    bind_session_id(session_id)
+    store.put(session_id, "preview_cache", cache_data)
+    store.put(session_id, "image_path", temp_path)
+    store.put(session_id, "lut_path", lut_path)
+    store.put(session_id, "lut_name", lut_name)
+    store.put(session_id, "replacement_regions", [])
+    store.put(session_id, "replacement_history", [])
+    store.put(session_id, "free_color_set", set())
+    # Save a pristine copy of matched_rgb for reset-replacements
+    if cache_data and "matched_rgb" in cache_data:
+        store.put(session_id, "original_matched_rgb", cache_data["matched_rgb"].copy())
+    store.register_temp_file(session_id, temp_path)
+    # Register worker temp files for cleanup
+    store.register_temp_file(session_id, result["preview_png_path"])
+    store.register_temp_file(session_id, result["cache_data_path"])
+
+    # Register preview image
+    preview_bytes = _image_to_png_bytes(preview_img)
+    preview_id = registry.register_bytes(session_id, preview_bytes, "preview.png")
+
+    # Generate segmented GLB (one Mesh per color)
+    _t = time.perf_counter()
+    preview_glb_url: str | None = None
+    try:
+        glb_path = generate_segmented_glb(cache_data)
+        if glb_path and os.path.exists(glb_path):
+            glb_id = registry.register_path(session_id, glb_path)
+            preview_glb_url = f"/api/files/{glb_id}"
+    except NON_FATAL_GLB_ERRORS as e:
+        # Non-fatal: log and continue without GLB
+        log.warning(
+            "Segmented GLB generation failed",
+            extra={
+                "event": "converter_segmented_glb_failed",
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+            },
+        )
+    _t_glb = time.perf_counter() - _t
+
+    # Build palette with quantized_hex, matched_hex, pixel_count, percentage
+    _t = time.perf_counter()
+    raw_palette: list[dict] = cache_data.get("color_palette", []) if cache_data else []
+    quantized_image = cache_data.get("quantized_image") if cache_data else None
+    matched_rgb_arr = cache_data.get("matched_rgb") if cache_data else None
+    mask_solid_arr = cache_data.get("mask_solid") if cache_data else None
+
+    palette: list[dict] = []
+    if raw_palette and matched_rgb_arr is not None and mask_solid_arr is not None:
+        matched_to_quantized: dict[str, str] = {}
+        if quantized_image is not None:
+            solid_mask = mask_solid_arr
+            q_pixels = quantized_image[solid_mask]  # (N, 3)
+            m_pixels = matched_rgb_arr[solid_mask]  # (N, 3)
+
+            # Vectorized: encode RGB triplets as uint32 scalars, find dominant
+            # quantized color per matched color in a single np.unique pass.
+            m_enc = (
+                (m_pixels[:, 0].astype(np.uint32) << 16)
+                | (m_pixels[:, 1].astype(np.uint32) << 8)
+                | m_pixels[:, 2].astype(np.uint32)
+            )
+            q_enc = (
+                (q_pixels[:, 0].astype(np.uint32) << 16)
+                | (q_pixels[:, 1].astype(np.uint32) << 8)
+                | q_pixels[:, 2].astype(np.uint32)
+            )
+
+            pair_key = m_enc.astype(np.uint64) * (1 << 24) + q_enc.astype(np.uint64)
+            unique_keys, counts = np.unique(pair_key, return_counts=True)
+
+            u_m = (unique_keys >> 24).astype(np.uint32)
+            u_q = (unique_keys & 0xFFFFFF).astype(np.uint32)
+
+            order = np.lexsort((-counts, u_m))
+            sorted_m = u_m[order]
+            sorted_q = u_q[order]
+            _, first_idx = np.unique(sorted_m, return_index=True)
+
+            for mk, qk in zip(sorted_m[first_idx], sorted_q[first_idx]):
+                m_hex = f"#{(mk >> 16) & 0xFF:02x}{(mk >> 8) & 0xFF:02x}{mk & 0xFF:02x}"
+                q_hex = f"#{(qk >> 16) & 0xFF:02x}{(qk >> 8) & 0xFF:02x}{qk & 0xFF:02x}"
+                matched_to_quantized[m_hex] = q_hex
+
+        for entry in raw_palette:
+            m_hex = entry["hex"]  # '#rrggbb'
+            q_hex = matched_to_quantized.get(m_hex, m_hex)
+            palette.append(
+                {
+                    "quantized_hex": q_hex,
+                    "matched_hex": m_hex,
+                    "pixel_count": entry["count"],
+                    "percentage": entry["percentage"],
+                }
+            )
+
+    dimensions = {}
+    if cache_data:
+        dimensions = {
+            "width": cache_data.get("target_w", 0),
+            "height": cache_data.get("target_h", 0),
+        }
+
+    _t_palette = time.perf_counter() - _t
+
+    # Extract color contours from cache (generated by generate_segmented_glb)
+    contours_data: dict[str, list[list[list[float]]]] | None = None
+    if cache_data and "color_contours" in cache_data:
+        contours_data = cache_data["color_contours"]
+
+    _t_api_total = time.perf_counter() - _api_t0
+    log.info(
+        "Preview endpoint timing",
+        extra={
+            "event": "converter_preview_timing",
+            "duration_ms": round(_t_api_total * 1000, 3),
+            "upload_ms": round(_t_upload * 1000, 3),
+            "worker_ms": round(_t_worker * 1000, 3),
+            "pickle_load_ms": round(_t_pickle_load * 1000, 3),
+            "segmented_glb_ms": round(_t_glb * 1000, 3),
+            "palette_ms": round(_t_palette * 1000, 3),
+        },
+    )
+
+    return PreviewResponse(
+        session_id=session_id,
+        status="ok",
+        message=status_msg or "Preview generated",
+        preview_url=f"/api/files/{preview_id}",
+        preview_glb_url=preview_glb_url,
+        palette=palette,
+        dimensions=dimensions,
+        contours=contours_data,
+    )
+
+
+@router.get("/layer-images/{session_id}")
+def get_layer_images(
+    session_id: str,
+    store: SessionStore = Depends(get_session_store),
+    registry: FileRegistry = Depends(get_file_registry),
+):
+    """Generate per-layer material preview images from cached preview data.
+    从缓存的预览数据生成每层材料预览图。
+
+    Returns a list of layer image URLs with material names.
+    返回每层图片 URL 和材料名称列表。
+    """
+    session_data = _require_session(store, session_id)
+    cache = _require_preview_cache(session_data)
+
+    material_matrix = cache.get("material_matrix")
+    mask_solid = cache.get("mask_solid")
+    color_conf = cache.get("color_conf")
+    if material_matrix is None or mask_solid is None or color_conf is None:
+        raise HTTPException(status_code=400, detail="Preview cache missing required data")
+
+    h, w = material_matrix.shape[:2]
+    n_layers = material_matrix.shape[2]
+
+    # For Merged LUTs, use the corrected preview_colors and slot_names from cache
+    # (constructed in P01 from LUT palette), otherwise fall back to color_conf
+    preview_colors = cache.get("preview_colors")
+    slots = cache.get("slot_names")
+
+    if preview_colors is None or slots is None:
+        # Fallback to color_conf for standard color modes
+        preview_colors = color_conf.get("preview", {})
+        slots = color_conf.get("slots", [])
+
+    # Build material_id -> rgba mapping
+    # preview_colors can be either dict[str, rgba] (Merged LUT) or dict[int, rgba] (standard)
+    mat_id_to_rgba = {}
+    if slots and preview_colors:
+        for mat_id, slot_name in enumerate(slots):
+            # Try to get color by name first (Merged LUT), then by ID (standard)
+            if slot_name in preview_colors:
+                mat_id_to_rgba[mat_id] = preview_colors[slot_name]
+            elif mat_id in preview_colors:
+                mat_id_to_rgba[mat_id] = preview_colors[mat_id]
+
+    layers = []
+    for layer_idx in range(n_layers):
+        layer = material_matrix[:, :, layer_idx]
+        # 浅灰背景
+        layer_img = np.ones((h, w, 3), dtype=np.uint8) * 220
+
+        for mat_id, rgba in mat_id_to_rgba.items():
+            mat_mask = (layer == mat_id) & mask_solid
+            if np.any(mat_mask):
+                layer_img[mat_mask] = rgba[:3]
+
+        # 非实体区域用更浅的灰
+        layer_img[~mask_solid] = [240, 240, 240]
+
+        png_bytes = _image_to_png_bytes(Image.fromarray(layer_img))
+        file_id = registry.register_bytes(session_id, png_bytes, f"layer_{layer_idx}.png")
+
+        slot_name = slots[layer_idx] if layer_idx < len(slots) else f"Layer {layer_idx}"
+        layers.append(
+            {
+                "layer_index": layer_idx,
+                "name": slot_name,
+                "url": f"/api/files/{file_id}",
+            }
+        )
+
+    return {"session_id": session_id, "layers": layers}
+
+
+@router.post("/upload-heightmap")
+async def upload_heightmap(
+    heightmap: UploadFile = File(..., description="高度图文件"),
+    session_id: str = Form(..., description="Session ID"),
+    max_relief_height: float = Form(2.0, description="最大浮雕高度 (mm)"),
+    store: SessionStore = Depends(get_session_store),
+    registry: FileRegistry = Depends(get_file_registry),
+) -> HeightmapUploadResponse:
+    """上传高度图并计算基于高度图的 color_height_map。
+
+    根据高度图灰度值和 preview_cache 中的颜色匹配数据，
+    计算每个调色板颜色对应区域的平均高度。
+
+    Args:
+        heightmap: 高度图图像文件
+        session_id: 会话 ID
+        max_relief_height: 最大浮雕高度 (mm)
+        store: SessionStore 依赖
+        registry: FileRegistry 依赖
+
+    Returns:
+        HeightmapUploadResponse: 包含 color_height_map 和缩略图 URL
+    """
+    # 1. Validate session
+    session_data = _require_session(store, session_id)
+
+    # 2. Validate preview_cache exists
+    cache = _require_preview_cache(session_data)
+
+    # 3. Read uploaded file and save to temp
+    temp_path = await ensure_png_tempfile(heightmap)
+    store.register_temp_file(session_id, temp_path)
+
+    # 4. Load and validate heightmap using HeightmapLoader
+    result = HeightmapLoader.load_and_validate(temp_path)
+    if not result["success"]:
+        raise HTTPException(
+            status_code=422,
+            detail=result["error"] or "Invalid heightmap file",
+        )
+
+    grayscale: np.ndarray = result["grayscale"]
+    original_size: tuple[int, int] = result["original_size"]  # (w, h)
+    thumbnail: np.ndarray | None = result["thumbnail"]
+    warnings: list[str] = list(result["warnings"])
+
+    # 5. Check aspect ratio vs original image
+    matched_rgb: np.ndarray = cache["matched_rgb"]
+    target_h, target_w = matched_rgb.shape[:2]
+    hm_w, hm_h = original_size
+
+    ar_warning = HeightmapLoader._check_aspect_ratio(hm_w, hm_h, target_w, target_h)
+    if ar_warning:
+        warnings.append(ar_warning)
+
+    # 6. Resize heightmap to match target dimensions
+    grayscale_resized = HeightmapLoader._resize_to_target(grayscale, target_w, target_h)
+
+    # 7. Compute per-color average height from heightmap
+    base_thickness: float = PrinterConfig.LAYER_HEIGHT  # 0.08mm
+    mask_solid: np.ndarray | None = cache.get("mask_solid")
+
+    color_height_map: dict[str, float] = {}
+    palette_data: list[dict] = cache.get("color_palette", [])
+
+    for entry in palette_data:
+        color_rgb = np.array(entry["color"], dtype=np.uint8)  # (3,)
+        hex_val: str = entry["hex"]  # '#rrggbb'
+        hex_key = hex_val.lstrip("#").lower()
+
+        # Find pixels matching this color in matched_rgb
+        color_mask = np.all(matched_rgb == color_rgb, axis=2)  # (H, W) bool
+        if mask_solid is not None:
+            color_mask = color_mask & mask_solid
+
+        if not np.any(color_mask):
+            # No pixels for this color, assign base thickness
+            color_height_map[hex_key] = base_thickness
+            continue
+
+        # Average grayscale value at matching pixel positions
+        avg_gray = float(np.mean(grayscale_resized[color_mask]))
+
+        # Map to height range [base_thickness, max_relief_height]
+        height = base_thickness + (avg_gray / 255.0) * (max_relief_height - base_thickness)
+        color_height_map[hex_key] = round(height, 4)
+
+    # 8. Store heightmap data in session
+    store.put(session_id, "heightmap_grayscale", grayscale_resized)
+    store.put(session_id, "heightmap_original_size", original_size)
+    store.put(session_id, "heightmap_max_relief_height", max_relief_height)
+    store.put(session_id, "heightmap_color_height_map", color_height_map)
+
+    # 9. Register thumbnail in FileRegistry
+    thumbnail_url = ""
+    if thumbnail is not None:
+        thumb_bytes = ndarray_to_png_bytes(thumbnail)
+        thumb_id = registry.register_bytes(session_id, thumb_bytes, "heightmap_thumb.png")
+        thumbnail_url = f"/api/files/{thumb_id}"
+
+    return HeightmapUploadResponse(
+        status="ok",
+        message="Heightmap uploaded and processed",
+        thumbnail_url=thumbnail_url,
+        original_size=original_size,
+        color_height_map=color_height_map,
+        warnings=warnings,
+    )

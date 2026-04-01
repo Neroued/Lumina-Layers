@@ -80,7 +80,7 @@ describe("Feature: component-completion, Property 9: 拖拽平移增量", () => 
 describe("Feature: component-completion, Property 10: 缩放重置幂等性", () => {
   it("reset produces scale=1.0 and translate=(0,0) from any state", () => {
     fc.assert(
-      fc.property(arbScale, arbPoint, (_arbitraryScale, _arbitraryTranslate) => {
+      fc.property(arbScale, arbPoint, () => {
         // Simulate arbitrary state then reset
         // Reset (same logic as resetZoom callback in ZoomableImage)
         const scale = 1;
@@ -94,7 +94,7 @@ describe("Feature: component-completion, Property 10: 缩放重置幂等性", ()
 
   it("calling reset twice produces the same result as calling it once (idempotent)", () => {
     fc.assert(
-      fc.property(arbScale, arbPoint, (_arbitraryScale, _arbitraryTranslate) => {
+      fc.property(arbScale, arbPoint, () => {
         // First reset
         const scale1 = 1;
         const translate1 = { x: 0, y: 0 };

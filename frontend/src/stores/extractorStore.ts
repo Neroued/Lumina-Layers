@@ -14,8 +14,9 @@ import {
   rotateExtractorImage,
 } from "../api/extractor";
 import type { ExtractorPaletteEntry } from "../api/types";
-import { clampValue } from "./converterStore";
+import { clampValue } from "./converter";
 import { uploadImagePreview } from "../api/system";
+import { normalizeResourceUrl } from "../utils/resourceUrl";
 
 export const RAW_EXTENSIONS = new Set([
   ".dng",
@@ -42,20 +43,20 @@ export function isRawFile(file: File): boolean {
 // ========== State Interface ==========
 
 export interface ExtractorState {
-  // 图片
+  // 鍥剧墖
   imageFile: File | null;
   imagePreviewUrl: string | null;
   imageNaturalWidth: number | null;
   imageNaturalHeight: number | null;
 
-  // 颜色模式与页码
+  // 棰滆壊妯″紡涓庨〉鐮?
   color_mode: ExtractorColorMode;
   page: ExtractorPage;
 
-  // 角点
+  // 瑙掔偣
   corner_points: Array<[number, number]>;
 
-  // 提取参数
+  // 鎻愬彇鍙傛暟
   offset_x: number;
   offset_y: number;
   zoom: number;
@@ -64,31 +65,31 @@ export interface ExtractorState {
   auto_wb: boolean;
   originalPreviewUrl: string | null;
 
-  // API 状态
+  // API 鐘舵€?
   isLoading: boolean;
   error: string | null;
   session_id: string | null;
 
-  // 提取结果
+  // 鎻愬彇缁撴灉
   lut_download_url: string | null;
   warp_view_url: string | null;
   lut_preview_url: string | null;
 
-  // 手动修正
+  // 鎵嬪姩淇
   manualFixLoading: boolean;
   manualFixError: string | null;
 
-  // 8色双页状态
+  // 8鑹插弻椤电姸鎬?
   page1Extracted: boolean;
   page2Extracted: boolean;
   mergeLoading: boolean;
   mergeError: string | null;
 
-  // 5色扩展双页状态
+  // 5鑹叉墿灞曞弻椤电姸鎬?
   page1Extracted_5c: boolean;
   page2Extracted_5c: boolean;
 
-  // 调色板确认
+  // 璋冭壊鏉跨‘璁?
   manufacturer: string;
   type: string;
   defaultPalette: ExtractorPaletteEntry[];
@@ -224,7 +225,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
             });
           })
           .catch(() => {
-            set({ error: "RAW 图片预览失败，请检查后端是否安装 rawpy" });
+            set({ error: "RAW 鍥剧墖棰勮澶辫触锛岃妫€鏌ュ悗绔槸鍚﹀畨瑁?rawpy" });
           });
         return;
       }
@@ -296,7 +297,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
         });
       } catch (err) {
         set({
-          error: err instanceof Error ? err.message : "图片旋转失败",
+          error: err instanceof Error ? err.message : "鍥剧墖鏃嬭浆澶辫触",
           isLoading: false,
         });
       }
@@ -348,7 +349,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
       }
 
       if (value) {
-        // 开启白平衡：保存原始预览，调后端获取白平衡预览
+        // Enable auto white-balance: save original preview and fetch adjusted preview
         set({ isLoading: true, error: null, auto_wb: true });
         try {
           const saved = originalPreviewUrl ?? imagePreviewUrl;
@@ -366,12 +367,12 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
         } catch (err) {
           set({
             auto_wb: false,
-            error: err instanceof Error ? err.message : "白平衡预览失败",
+            error: err instanceof Error ? err.message : "White balance preview failed",
             isLoading: false,
           });
         }
       } else {
-        // 关闭白平衡：恢复原始预览
+        // 鍏抽棴鐧藉钩琛★細鎭㈠鍘熷棰勮
         if (originalPreviewUrl) {
           set({
             auto_wb: false,
@@ -405,8 +406,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
           vignette_correction: state.vignette_correction,
           auto_wb: state.auto_wb,
         });
-        const BASE = "";
-
+        
         // Track 8-color page extraction status
         const pageUpdate: Partial<ExtractorState> = {};
         if (state.color_mode === ExtractorColorModeEnum.EIGHT_COLOR) {
@@ -428,13 +428,13 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
         set({
           session_id: response.session_id,
           lut_download_url: response.lut_download_url
-            ? `${BASE}${response.lut_download_url}`
+            ? normalizeResourceUrl(response.lut_download_url)
             : null,
           warp_view_url: response.warp_view_url
-            ? `${BASE}${response.warp_view_url}`
+            ? normalizeResourceUrl(response.warp_view_url)
             : null,
           lut_preview_url: response.lut_preview_url
-            ? `${BASE}${response.lut_preview_url}`
+            ? normalizeResourceUrl(response.lut_preview_url)
             : null,
           isLoading: false,
           defaultPalette: response.default_palette ?? [],
@@ -444,7 +444,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
         });
       } catch (err) {
         set({
-          error: err instanceof Error ? err.message : "颜色提取失败，请重试",
+          error: err instanceof Error ? err.message : "棰滆壊鎻愬彇澶辫触锛岃閲嶈瘯",
           isLoading: false,
         });
       }
@@ -463,14 +463,14 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
         );
         set({
           lut_preview_url: response.lut_preview_url
-            ? `${response.lut_preview_url}`
+            ? normalizeResourceUrl(response.lut_preview_url)
             : null,
           manualFixLoading: false,
         });
       } catch (err) {
         set({
           manualFixError:
-            err instanceof Error ? err.message : "手动修正失败，请重试",
+            err instanceof Error ? err.message : "鎵嬪姩淇澶辫触锛岃閲嶈瘯",
           manualFixLoading: false,
         });
       }
@@ -491,17 +491,16 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
         const response = is5c
           ? await mergeFiveColorExtended()
           : await mergeEightColor();
-        const BASE = "";
-        set({
+                set({
           session_id: response.session_id,
           lut_download_url: response.lut_download_url
-            ? `${BASE}${response.lut_download_url}`
+            ? normalizeResourceUrl(response.lut_download_url)
             : null,
           warp_view_url: response.warp_view_url
-            ? `${BASE}${response.warp_view_url}`
+            ? normalizeResourceUrl(response.warp_view_url)
             : null,
           lut_preview_url: response.lut_preview_url
-            ? `${BASE}${response.lut_preview_url}`
+            ? normalizeResourceUrl(response.lut_preview_url)
             : null,
           defaultPalette: response.default_palette ?? [],
           paletteConfirmed: false,
@@ -510,7 +509,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
         });
       } catch (err) {
         set({
-          mergeError: err instanceof Error ? err.message : "合并失败，请重试",
+          mergeError: err instanceof Error ? err.message : "鍚堝苟澶辫触锛岃閲嶈瘯",
           mergeLoading: false,
         });
       }
@@ -549,10 +548,12 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
       } catch (err) {
         set({
           paletteConfirmError:
-            err instanceof Error ? err.message : "调色板确认失败，请重试",
+            err instanceof Error ? err.message : "Palette confirmation failed",
           paletteConfirmLoading: false,
         });
       }
     },
   }),
 );
+
+

@@ -30,6 +30,26 @@
   --warning-border: rgba(245, 158, 11, 0.28);
   --error-soft: rgba(239, 68, 68, 0.12);
   --error-border: rgba(239, 68, 68, 0.28);
+  --snap-guide-highlight-border: rgb(96 165 250 / 0.24);
+  --snap-guide-highlight-top-bg: linear-gradient(to bottom, rgb(96 165 250 / 0.16) 0%, rgb(96 165 250 / 0.08) 20%, rgb(96 165 250 / 0) 42%);
+  --snap-guide-highlight-bottom-bg: linear-gradient(to top, rgb(96 165 250 / 0.16) 0%, rgb(96 165 250 / 0.08) 20%, rgb(96 165 250 / 0) 42%);
+  --snap-guide-highlight-top-shadow: inset 0 1px 0 rgb(191 219 254 / 0.6), inset 0 12px 18px -16px rgb(59 130 246 / 0.9);
+  --snap-guide-highlight-bottom-shadow: inset 0 -1px 0 rgb(191 219 254 / 0.6), inset 0 -12px 18px -16px rgb(59 130 246 / 0.9);
+  --snap-guide-insert-line-bg: linear-gradient(to right, rgb(96 165 250 / 0.18), rgb(96 165 250 / 0.42), rgb(96 165 250 / 0.18));
+  --snap-guide-insert-line-shadow: 0 0 0 1px rgb(96 165 250 / 0.22), 0 0 14px rgb(59 130 246 / 0.18);
+  --snap-guide-edge-shadow: 0 0 8px rgb(59 130 246 / 0.5);
+  --palette-black: rgb(0 0 0);
+  --palette-white: rgb(255 255 255);
+  --palette-crimson: rgb(220 20 60);
+  --palette-yellow: rgb(255 230 0);
+  --palette-blue: rgb(0 100 240);
+  --palette-cyan: rgb(0 134 214);
+  --palette-magenta: rgb(236 0 140);
+  --palette-yellow-soft: rgb(244 238 42);
+  --palette-charcoal: rgb(20 20 20);
+  --palette-green: rgb(0 174 66);
+  --palette-brick: rgb(193 46 31);
+  --palette-indigo: rgb(10 41 137);
 }
 
 .dark {

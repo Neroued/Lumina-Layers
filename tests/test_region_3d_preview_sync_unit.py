@@ -29,10 +29,10 @@ from api.dependencies import get_file_registry, get_session_store
 from api.file_registry import FileRegistry
 from api.session_store import SessionStore
 
-
 # ---------------------------------------------------------------------------
 # Fixtures: shared app, store, registry, and client
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def store() -> SessionStore:
@@ -64,6 +64,7 @@ def client(store: SessionStore, registry: FileRegistry) -> TestClient:
 # ---------------------------------------------------------------------------
 # Helper: set up a valid session with preview_cache and region mask
 # ---------------------------------------------------------------------------
+
 
 def _setup_session(
     store: SessionStore,
@@ -104,9 +105,7 @@ def _setup_session(
 # Hypothesis strategies
 # ---------------------------------------------------------------------------
 
-_rgb_st = st.tuples(
-    st.integers(0, 255), st.integers(0, 255), st.integers(0, 255)
-)
+_rgb_st = st.tuples(st.integers(0, 255), st.integers(0, 255), st.integers(0, 255))
 
 
 def _hex_from_rgb(r: int, g: int, b: int) -> str:
@@ -139,8 +138,11 @@ class TestRegionReplaceGlbProperty:
     @given(replacement_rgb=_rgb_st)
     @settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_region_replace_returns_valid_glb_url_and_contours(
-        self, replacement_rgb: tuple[int, int, int],
-        store: SessionStore, registry: FileRegistry, client: TestClient,
+        self,
+        replacement_rgb: tuple[int, int, int],
+        store: SessionStore,
+        registry: FileRegistry,
+        client: TestClient,
     ) -> None:
         """For any random replacement color, region-replace SHALL return
         a preview_glb_url starting with '/api/files/' and a non-empty
@@ -168,9 +170,7 @@ class TestRegionReplaceGlbProperty:
         os.close(fd)
 
         try:
-            with patch(
-                "api.routers.converter.generate_segmented_glb"
-            ) as mock_glb:
+            with patch("api.routers.converter.replace.generate_segmented_glb") as mock_glb:
                 # Mock GLB generation: write contours into cache and return path
                 def _fake_generate(cache: dict) -> str:
                     cache["color_contours"] = fake_contours
@@ -188,9 +188,9 @@ class TestRegionReplaceGlbProperty:
 
             # Property assertions
             assert data["preview_glb_url"] is not None, "preview_glb_url should not be None"
-            assert data["preview_glb_url"].startswith("/api/files/"), (
-                f"preview_glb_url should start with '/api/files/', got: {data['preview_glb_url']}"
-            )
+            assert data["preview_glb_url"].startswith(
+                "/api/files/"
+            ), f"preview_glb_url should start with '/api/files/', got: {data['preview_glb_url']}"
             assert data["color_contours"] is not None, "color_contours should not be None"
             assert isinstance(data["color_contours"], dict), "color_contours should be a dict"
             assert len(data["color_contours"]) > 0, "color_contours should be non-empty"
@@ -216,7 +216,10 @@ class TestRegionReplaceGlbGracefulDegradation:
     """
 
     def test_glb_failure_returns_none_glb_url(
-        self, store: SessionStore, registry: FileRegistry, client: TestClient,
+        self,
+        store: SessionStore,
+        registry: FileRegistry,
+        client: TestClient,
     ) -> None:
         """When generate_segmented_glb raises, preview_glb_url SHALL be None
         and the 2D preview SHALL still be valid.
@@ -232,7 +235,7 @@ class TestRegionReplaceGlbGracefulDegradation:
         session_id = _setup_session(store, matched_rgb, region_mask)
 
         with patch(
-            "api.routers.converter.generate_segmented_glb",
+            "api.routers.converter.replace.generate_segmented_glb",
             side_effect=RuntimeError("GLB generation failed"),
         ):
             resp = client.post(
@@ -244,19 +247,18 @@ class TestRegionReplaceGlbGracefulDegradation:
         data = resp.json()
 
         # GLB URL should be None (graceful degradation)
-        assert data["preview_glb_url"] is None, (
-            "preview_glb_url should be None when GLB generation fails"
-        )
+        assert data["preview_glb_url"] is None, "preview_glb_url should be None when GLB generation fails"
         # 2D preview should still be valid
         assert data["preview_url"] is not None, "preview_url should still be present"
-        assert data["preview_url"].startswith("/api/files/"), (
-            "preview_url should be a valid file URL"
-        )
+        assert data["preview_url"].startswith("/api/files/"), "preview_url should be a valid file URL"
         # Response message should indicate success (2D worked)
         assert "message" in data
 
     def test_glb_returns_none_path_gracefully(
-        self, store: SessionStore, registry: FileRegistry, client: TestClient,
+        self,
+        store: SessionStore,
+        registry: FileRegistry,
+        client: TestClient,
     ) -> None:
         """When generate_segmented_glb returns None, preview_glb_url SHALL be None.
 
@@ -270,7 +272,7 @@ class TestRegionReplaceGlbGracefulDegradation:
         session_id = _setup_session(store, matched_rgb, region_mask)
 
         with patch(
-            "api.routers.converter.generate_segmented_glb",
+            "api.routers.converter.replace.generate_segmented_glb",
             return_value=None,
         ):
             resp = client.post(
@@ -301,7 +303,10 @@ class TestRegionReplaceColorContours:
     """
 
     def test_color_contours_included_in_response(
-        self, store: SessionStore, registry: FileRegistry, client: TestClient,
+        self,
+        store: SessionStore,
+        registry: FileRegistry,
+        client: TestClient,
     ) -> None:
         """Response SHALL include color_contours when cache has contour data.
 
@@ -324,9 +329,8 @@ class TestRegionReplaceColorContours:
         os.close(fd)
 
         try:
-            with patch(
-                "api.routers.converter.generate_segmented_glb"
-            ) as mock_glb:
+            with patch("api.routers.converter.replace.generate_segmented_glb") as mock_glb:
+
                 def _fake_generate(cache: dict) -> str:
                     cache["color_contours"] = expected_contours
                     return fake_glb_path
@@ -342,15 +346,16 @@ class TestRegionReplaceColorContours:
             data = resp.json()
 
             assert data["color_contours"] is not None, "color_contours should be present"
-            assert data["color_contours"] == expected_contours, (
-                f"color_contours mismatch: {data['color_contours']}"
-            )
+            assert data["color_contours"] == expected_contours, f"color_contours mismatch: {data['color_contours']}"
         finally:
             if os.path.exists(fake_glb_path):
                 os.unlink(fake_glb_path)
 
     def test_color_contours_none_when_not_in_cache(
-        self, store: SessionStore, registry: FileRegistry, client: TestClient,
+        self,
+        store: SessionStore,
+        registry: FileRegistry,
+        client: TestClient,
     ) -> None:
         """Response SHALL have color_contours=None when cache has no contour data
         and GLB generation does not produce any.
@@ -370,7 +375,7 @@ class TestRegionReplaceColorContours:
 
         try:
             with patch(
-                "api.routers.converter.generate_segmented_glb",
+                "api.routers.converter.replace.generate_segmented_glb",
                 return_value=fake_glb_path,
             ):
                 resp = client.post(

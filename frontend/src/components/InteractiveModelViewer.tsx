@@ -2,7 +2,7 @@ import { useMemo, useEffect, useRef, useCallback } from "react";
 import { useThree, useFrame } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
-import { useConverterStore } from "../stores/converterStore";
+import { useConverterStore } from "../stores/converter";
 import OutlineFrame3D from "./OutlineFrame3D";
 import CloisonneWire3D from "./CloisonneWire3D";
 
@@ -342,7 +342,7 @@ function InteractiveModelViewer({
         }
       }
     },
-    [threeCtx.gl, threeCtx.camera, colorMeshes, selectedColor, onColorClick, selectionMode, detectRegion, detectAndAccumulateRegion, previewPixelWidth, previewPixelHeight, previewWidthMm, sceneCenter, scaleX, scaleY],
+    [threeCtx.gl, threeCtx.camera, colorMeshes, selectedColor, onColorClick, selectionMode, detectRegion, detectAndAccumulateRegion, previewPixelWidth, previewPixelHeight, previewWidthMm, sceneCenter],
   );
 
   // Expose colorHitRef check so Scene3D's onPointerMissed can query it

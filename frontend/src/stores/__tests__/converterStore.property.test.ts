@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import * as fc from 'fast-check';
-import { useConverterStore } from '../../stores/converterStore';
+import { useConverterStore } from '../../stores/converter';
 
 /**
  * Property 3: 颜色替换与撤销状态一致性

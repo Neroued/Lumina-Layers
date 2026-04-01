@@ -1,7 +1,7 @@
 import { useMemo, useEffect } from "react";
 import { useThree } from "@react-three/fiber";
 import * as THREE from "three";
-import { useConverterStore } from "../stores/converterStore";
+import { useConverterStore } from "../stores/converter";
 import { computeFitDistance } from "./ModelViewer";
 import { useThemeConfig } from "../hooks/useThemeConfig";
 import type { ThemeColors } from "./themeConfig";

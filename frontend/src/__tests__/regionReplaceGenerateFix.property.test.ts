@@ -78,11 +78,6 @@ const hexColor = fc
   .stringMatching(/^[0-9a-f]{6}$/)
   .filter((s) => s.length === 6);
 
-const globalMode: fc.Arbitrary<SelectionMode> = fc.constantFrom(
-  "select-all" as const,
-  "multi-select" as const,
-);
-
 const regionMode: fc.Arbitrary<SelectionMode> = fc.constantFrom(
   "current" as const,
   "region" as const,
@@ -343,8 +338,9 @@ interface ClearAllRemapsOutput {
 }
 
 function computeClearAllRemapsStateUpdate(
-  _input: ClearAllRemapsInput,
+  input: ClearAllRemapsInput,
 ): ClearAllRemapsOutput {
+  void input;
   return {
     colorRemapMap: {},
     regionReplacementCount: 0,

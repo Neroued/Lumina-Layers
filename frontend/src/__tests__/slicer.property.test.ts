@@ -21,10 +21,10 @@ function mapThreemfDiskPath(
 
 /**
  * Maps a GenerateResponse's download_url to the store's downloadUrl.
- * Mirrors: `downloadUrl: response.download_url ? \`http://localhost:8000\${response.download_url}\` : null`
+ * Mirrors: `downloadUrl: response.download_url ?? null`
  */
 function mapDownloadUrl(download_url: string | null | undefined): string | null {
-  return download_url ? `http://localhost:8000${download_url}` : null;
+  return download_url ?? null;
 }
 
 // ========== Tests ==========
@@ -80,14 +80,14 @@ describe("Slicer Launch Integration — Property-Based Tests", () => {
       );
     });
 
-    it("downloadUrl mapping: non-empty url gets localhost prefix, null/undefined maps to null", () => {
+    it("downloadUrl mapping: non-empty url keeps relative value, null/undefined maps to null", () => {
       fc.assert(
         fc.property(
           fc.option(fc.string({ minLength: 1 }), { nil: undefined }),
           (maybeUrl) => {
             const result = mapDownloadUrl(maybeUrl);
             if (maybeUrl) {
-              return result === `http://localhost:8000${maybeUrl}`;
+              return result === maybeUrl;
             }
             return result === null;
           }
@@ -100,7 +100,7 @@ describe("Slicer Launch Integration — Property-Based Tests", () => {
 
 // ========== Property 3: 参数变更使 threemfDiskPath 失效 ==========
 
-import { useConverterStore } from "../stores/converterStore";
+import { useConverterStore } from "../stores/converter";
 import { ColorMode, ModelingMode, StructureMode } from "../api/types";
 
 /**
@@ -115,7 +115,7 @@ describe("Property 3: 参数变更使 threemfDiskPath 失效", () => {
   function seedThreemfPath() {
     useConverterStore.setState({
       threemfDiskPath: "/some/path.3mf",
-      downloadUrl: "http://localhost:8000/api/files/test",
+      downloadUrl: "/api/files/test",
     });
   }
 

@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { useShallow } from "zustand/react/shallow";
 import { useI18n } from "../i18n/context";
 import { useVectorizerStore } from "../stores/vectorizerStore";
-import { useConverterStore } from "../stores/converterStore";
+import { useConverterStore } from "../stores/converter";
 import { useWidgetStore } from "../stores/widgetStore";
 import { usePanZoom } from "../hooks/usePanZoom";
 import { useWorkspaceMode } from "../hooks/useWorkspaceMode";
@@ -445,7 +445,7 @@ export default function VectorizerPanel() {
                 </span>
                 <ZoomViewport
                   src={imagePreviewUrl ?? undefined}
-                  alt="original"
+                  alt={t("vec.original")}
                   scale={compareZoom.scale}
                   translate={compareZoom.translate}
                   zoom={compareZoom.zoom}
@@ -460,7 +460,7 @@ export default function VectorizerPanel() {
                 </span>
                 <ZoomViewport
                   src={svgUrl ?? undefined}
-                  alt="SVG result"
+                  alt={t("vec.svg_preview")}
                   scale={compareZoom.scale}
                   translate={compareZoom.translate}
                   zoom={compareZoom.zoom}
@@ -479,7 +479,7 @@ export default function VectorizerPanel() {
                   {t("vec.colors")}: <strong>{result.num_colors}</strong>
                 </span>
                 <span>
-                  {result.width} x {result.height} px
+                  {result.width} × {result.height} {t("common_unit_px")}
                 </span>
               </div>
 

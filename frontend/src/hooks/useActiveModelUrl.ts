@@ -1,4 +1,4 @@
-import { useConverterStore } from "../stores/converterStore";
+import { useConverterStore } from "../stores/converter";
 import { useCalibrationStore } from "../stores/calibrationStore";
 
 /**

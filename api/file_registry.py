@@ -1,5 +1,6 @@
 import os
 import threading
+import time
 import uuid
 from typing import Optional, Tuple
 
@@ -13,23 +14,41 @@ class FileRegistry:
     """
 
     def __init__(self) -> None:
-        self._registry: dict[str, dict] = {}  # {file_id: {path, filename, session_id}}
+        self._registry: dict[str, dict] = {}
+        # {file_id: {path, filename, session_id, created_at, expires_at, lifecycle}}
         self._lock = threading.Lock()
 
-    def register_path(self, session_id: str, path: str, filename: Optional[str] = None) -> str:
+    def register_path(
+        self,
+        session_id: str,
+        path: str,
+        filename: Optional[str] = None,
+        ttl_seconds: Optional[int] = None,
+    ) -> str:
         """注册磁盘文件，返回 file_id。"""
         file_id = str(uuid.uuid4())
         if filename is None:
             filename = os.path.basename(path)
+        now = time.time()
+        expires_at = (now + ttl_seconds) if ttl_seconds is not None else None
         with self._lock:
             self._registry[file_id] = {
                 "path": path,
                 "filename": filename,
                 "session_id": session_id,
+                "created_at": now,
+                "expires_at": expires_at,
+                "lifecycle": "ephemeral" if ttl_seconds is not None else "session_bound",
             }
         return file_id
 
-    def register_bytes(self, session_id: str, data: bytes, filename: str) -> str:
+    def register_bytes(
+        self,
+        session_id: str,
+        data: bytes,
+        filename: str,
+        ttl_seconds: Optional[int] = None,
+    ) -> str:
         """注册字节流（写入临时文件），返回 file_id。"""
         import tempfile
         from config import TEMP_DIR
@@ -40,18 +59,58 @@ class FileRegistry:
             os.write(fd, data)
         finally:
             os.close(fd)
-        return self.register_path(session_id, path, filename)
+        return self.register_path(
+            session_id=session_id,
+            path=path,
+            filename=filename,
+            ttl_seconds=ttl_seconds,
+        )
 
     def resolve(self, file_id: str) -> Optional[Tuple[str, str]]:
         """解析 file_id，返回 (path, filename) 或 None。"""
+        now = time.time()
         with self._lock:
             entry = self._registry.get(file_id)
-        if entry is None:
-            return None
+            if entry is None:
+                return None
+            expires_at = entry.get("expires_at")
+            if expires_at is not None and now >= expires_at:
+                path = entry.get("path")
+                if path and os.path.exists(path):
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+                self._registry.pop(file_id, None)
+                return None
         path = entry["path"]
         if not os.path.exists(path):
             return None
         return path, entry["filename"]
+
+    def cleanup_expired(self) -> int:
+        """删除所有已过期条目及磁盘文件，返回清理数量。"""
+        now = time.time()
+        removed = 0
+        with self._lock:
+            expired_ids = [
+                fid
+                for fid, entry in self._registry.items()
+                if entry.get("expires_at") is not None and now >= entry["expires_at"]
+            ]
+            for fid in expired_ids:
+                entry = self._registry.get(fid)
+                if entry is None:
+                    continue
+                path = entry.get("path")
+                if path and os.path.exists(path):
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+                self._registry.pop(fid, None)
+                removed += 1
+        return removed
 
     def cleanup_session(self, session_id: str) -> int:
         """Clean up all registered files for a session and delete from disk.

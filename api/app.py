@@ -12,13 +12,23 @@ background tasks lifecycle.
 
 import asyncio
 import os
+import time
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.responses import Response
 
 from api.logger import setup_file_logging
+from api.structured_logging import (
+    get_logger,
+    reset_request_id,
+    reset_session_id,
+    set_request_id,
+    set_session_id,
+)
 
 # Install file logging as early as possible so all startup prints are captured.
 _log_path = setup_file_logging()
@@ -45,6 +55,8 @@ from api.routers import (
     vectorizer_router,
 )
 
+log = get_logger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -63,7 +75,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """
     # --- Startup ---
     worker_pool.start()
-    print(f"[POOL] Started with {worker_pool.max_workers} workers")
+    log.info(
+        "Worker pool started",
+        extra={"event": "worker_pool_started", "max_workers": worker_pool.max_workers},
+    )
 
     async def _cleanup_loop() -> None:
         """Periodically clean up expired sessions and their registered files.
@@ -74,8 +89,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             expired_sids = session_store.cleanup_expired()
             for sid in expired_sids:
                 file_registry.cleanup_session(sid)
+            expired_files = file_registry.cleanup_expired()
             if expired_sids:
-                print(f"[SESSION] Cleaned up {len(expired_sids)} expired sessions")
+                log.info(
+                    "Expired sessions cleaned",
+                    extra={"event": "session_cleanup", "cleaned_sessions": len(expired_sids)},
+                )
+            if expired_files:
+                log.info(
+                    "Expired files cleaned",
+                    extra={"event": "file_cleanup", "cleaned_files": expired_files},
+                )
 
     cleanup_task = asyncio.create_task(_cleanup_loop())
 
@@ -84,7 +108,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # --- Shutdown ---
     cleanup_task.cancel()
     worker_pool.shutdown(wait=True)
-    print("[POOL] Shutdown complete")
+    log.info("Worker pool shutdown complete", extra={"event": "worker_pool_shutdown"})
 
 
 def create_app() -> FastAPI:
@@ -105,6 +129,49 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def request_context_middleware(request: Request, call_next):
+        request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
+        request_token = set_request_id(request_id)
+        session_token = set_session_id(None)
+        started = time.perf_counter()
+        try:
+            response = await call_next(request)
+        except Exception as exc:
+            duration_ms = round((time.perf_counter() - started) * 1000, 3)
+            log.exception(
+                "Request failed",
+                extra={
+                    "event": "request_failed",
+                    "path": request.url.path,
+                    "method": request.method,
+                    "status_code": 500,
+                    "duration_ms": duration_ms,
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc),
+                },
+            )
+            reset_request_id(request_token)
+            reset_session_id(session_token)
+            raise
+
+        if isinstance(response, Response):
+            response.headers["X-Request-ID"] = request_id
+        duration_ms = round((time.perf_counter() - started) * 1000, 3)
+        log.info(
+            "Request completed",
+            extra={
+                "event": "request_completed",
+                "path": request.url.path,
+                "method": request.method,
+                "status_code": response.status_code,
+                "duration_ms": duration_ms,
+            },
+        )
+        reset_request_id(request_token)
+        reset_session_id(session_token)
+        return response
 
     app.include_router(converter_router)
     app.include_router(extractor_router)
@@ -130,10 +197,14 @@ def create_app() -> FastAPI:
         """Receive frontend timing events and write to server log."""
         label = payload.get("label", "?")
         elapsed = payload.get("elapsed_ms", None)
-        msg = f"[CLIENT] {label}"
-        if elapsed is not None:
-            msg += f" (+{elapsed:.0f}ms)"
-        print(msg)
+        log.info(
+            "Client log received",
+            extra={
+                "event": "client_log",
+                "client_label": label,
+                "duration_ms": elapsed,
+            },
+        )
         return {"ok": True}
 
     return app

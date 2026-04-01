@@ -207,27 +207,27 @@ export function SnapGuides({
     width: widgetWidth,
     height: bounds.height,
     borderRadius: WIDGET_PANEL_RADIUS,
-    border: '1px solid rgba(96,165,250,0.24)',
+    border: '1px solid var(--snap-guide-highlight-border)',
     background:
       edge === 'top'
-        ? 'linear-gradient(to bottom, rgba(96,165,250,0.16) 0%, rgba(96,165,250,0.08) 20%, rgba(96,165,250,0) 42%)'
-        : 'linear-gradient(to top, rgba(96,165,250,0.16) 0%, rgba(96,165,250,0.08) 20%, rgba(96,165,250,0) 42%)',
+        ? 'var(--snap-guide-highlight-top-bg)'
+        : 'var(--snap-guide-highlight-bottom-bg)',
     boxShadow:
       edge === 'top'
-        ? 'inset 0 1px 0 rgba(191,219,254,0.6), inset 0 12px 18px -16px rgba(59,130,246,0.9)'
-        : 'inset 0 -1px 0 rgba(191,219,254,0.6), inset 0 -12px 18px -16px rgba(59,130,246,0.9)',
+        ? 'var(--snap-guide-highlight-top-shadow)'
+        : 'var(--snap-guide-highlight-bottom-shadow)',
   });
 
   return (
     <div className="absolute inset-0 z-20 pointer-events-none">
       {nearLeft && (
         <div
-          className="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-400/60 shadow-[0_0_8px_rgba(59,130,246,0.5)]"
+          className="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-400/60 shadow-[var(--snap-guide-edge-shadow)]"
         />
       )}
       {nearRight && (
         <div
-          className="absolute right-0 top-0 bottom-0 w-0.5 bg-blue-400/60 shadow-[0_0_8px_rgba(59,130,246,0.5)]"
+          className="absolute right-0 top-0 bottom-0 w-0.5 bg-blue-400/60 shadow-[var(--snap-guide-edge-shadow)]"
         />
       )}
       {lowerHighlight && insertPreview && (
@@ -251,8 +251,8 @@ export function SnapGuides({
             width: Math.max(0, widgetWidth - INSERT_LINE_INSET * 2),
             height: INSERT_LINE_HEIGHT,
             borderRadius: 999,
-            background: 'linear-gradient(to right, rgba(96,165,250,0.18), rgba(96,165,250,0.42), rgba(96,165,250,0.18))',
-            boxShadow: '0 0 0 1px rgba(96,165,250,0.22), 0 0 14px rgba(59,130,246,0.18)',
+            background: 'var(--snap-guide-insert-line-bg)',
+            boxShadow: 'var(--snap-guide-insert-line-shadow)',
           }}
         />
       )}

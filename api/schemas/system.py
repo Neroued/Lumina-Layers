@@ -1,19 +1,12 @@
-"""Lumina Studio API — System Pydantic models.
-Lumina Studio API — 系统管理 Pydantic 数据模型。
-
-Cache cleanup response schemas and internal data structures.
-缓存清理响应 Schema 及内部数据结构。
-"""
+﻿"""Lumina Studio API system schemas."""
 
 from dataclasses import dataclass
 
-from pydantic import BaseModel
+from pydantic import BaseModel, StrictBool
 
 
 class PrinterInfo(BaseModel):
-    """Printer hardware metadata exposed to the frontend.
-    暴露给前端的打印机硬件元数据。
-    """
+    """Printer metadata exposed to frontend."""
 
     id: str
     display_name: str
@@ -27,16 +20,14 @@ class PrinterInfo(BaseModel):
 
 
 class PrinterListResponse(BaseModel):
-    """Response for GET /api/system/printers.
-    GET /api/system/printers 响应。
-    """
+    """Response for GET /api/system/printers."""
 
     status: str
     printers: list[PrinterInfo]
 
 
 class CacheCleanupDetails(BaseModel):
-    """缓存清理详情。"""
+    """Detailed cache cleanup statistics."""
 
     registry_cleaned: int
     sessions_cleaned: int
@@ -44,7 +35,7 @@ class CacheCleanupDetails(BaseModel):
 
 
 class ClearCacheResponse(BaseModel):
-    """缓存清理响应。"""
+    """Response body for cache cleanup."""
 
     status: str
     message: str
@@ -55,7 +46,7 @@ class ClearCacheResponse(BaseModel):
 
 @dataclass
 class ClearCacheResult:
-    """perform_cache_cleanup 内部返回值。"""
+    """Internal aggregate result for perform_cache_cleanup."""
 
     registry_cleaned: int
     sessions_cleaned: int
@@ -64,34 +55,34 @@ class ClearCacheResult:
 
 
 class UserSettings(BaseModel):
-    """用户设置模型，对应 user_settings.json 字段。"""
+    """User settings persisted in user_settings.json."""
 
     last_lut: str = ""
     last_modeling_mode: str = "high-fidelity"
     last_color_mode: str = "4-Color (RYBW)"
     last_slicer: str = ""
     palette_mode: str = "swatch"
-    enable_crop_modal: bool = True
+    enable_crop_modal: StrictBool = True
     printer_model: str = "bambu-h2d"
     slicer_software: str = "BambuStudio"
 
 
 class UserSettingsResponse(BaseModel):
-    """GET /api/system/settings 响应。"""
+    """Response for GET /api/system/settings."""
 
     status: str
     settings: UserSettings
 
 
 class SaveSettingsResponse(BaseModel):
-    """POST /api/system/settings 响应。"""
+    """Response for POST /api/system/settings."""
 
     status: str
     message: str
 
 
 class StatsResponse(BaseModel):
-    """GET /api/system/stats 响应。"""
+    """Response for GET /api/system/stats."""
 
     calibrations: int = 0
     extractions: int = 0
@@ -99,14 +90,14 @@ class StatsResponse(BaseModel):
 
 
 class SlicerInfo(BaseModel):
-    """切片器软件信息。"""
+    """Slicer software metadata."""
 
     id: str
     display_name: str
 
 
 class SlicerListResponse(BaseModel):
-    """GET /api/system/slicers 响应。"""
+    """Response for GET /api/system/slicers."""
 
     status: str
     slicers: list[SlicerInfo]

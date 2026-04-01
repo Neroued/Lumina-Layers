@@ -5,7 +5,7 @@ import {
   BackingColor as BackingColorEnum,
 } from "../api/types";
 import { calibrationGenerate } from "../api/calibration";
-import { clampValue } from "./converterStore";
+import { clampValue } from "./converter";
 
 // ========== State Interface ==========
 

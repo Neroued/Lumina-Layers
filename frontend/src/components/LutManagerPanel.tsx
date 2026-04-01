@@ -101,7 +101,7 @@ export default function LutManagerPanel() {
               </StatusBanner>
             )}
             {primaryInfo && (
-              <div className="rounded-2xl border border-slate-200/80 bg-white/55 px-3 py-2 text-sm text-slate-600 dark:border-slate-700/80 dark:bg-slate-900/55 dark:text-slate-300">
+              <div className="rounded-2xl border border-slate-200/80 bg-slate-100/70 px-3 py-2 text-sm text-slate-600 dark:border-slate-700/80 dark:bg-slate-900/55 dark:text-slate-300">
                 {t("lut_manager_mode_summary")
                   .replace("{mode}", primaryInfo.color_mode)
                   .replace("{count}", String(primaryInfo.color_count))}
@@ -175,7 +175,7 @@ export default function LutManagerPanel() {
                 {t("lut_manager_selected_count").replace("{count}", String(secondaryNames.length))}
               </span>
             </div>
-            <div className="max-h-64 overflow-y-auto rounded-[24px] border border-slate-200/80 bg-white/55 p-2 shadow-[var(--shadow-control)] xl:max-h-[70vh] dark:border-slate-700/80 dark:bg-slate-900/55">
+            <div className="max-h-64 overflow-y-auto rounded-[24px] border border-slate-200/80 bg-slate-100/70 p-2 shadow-[var(--shadow-control)] xl:max-h-[70vh] dark:border-slate-700/80 dark:bg-slate-900/55">
               {filteredSecondaryOptions.length === 0 ? (
                 <p className="px-2 py-3 text-sm text-slate-500 dark:text-slate-400">
                   {primaryName ? t("lut_manager_no_secondary") : t("lut_manager_select_primary_first")}
@@ -186,14 +186,14 @@ export default function LutManagerPanel() {
                   return (
                     <label
                       key={name}
-                      className="flex cursor-pointer items-center gap-3 rounded-2xl px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-white/75 dark:text-slate-200 dark:hover:bg-slate-900/75"
+                      className="flex cursor-pointer items-center gap-3 rounded-2xl px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-100/80 dark:text-slate-200 dark:hover:bg-slate-900/75"
                     >
                       <input
                         type="checkbox"
                         checked={secondaryNames.includes(name)}
                         onChange={() => handleSecondaryToggle(name)}
                         disabled={allDisabled}
-                        className="h-4 w-4 rounded border-slate-300 bg-white accent-blue-500 dark:border-slate-600 dark:bg-slate-800"
+                        className="h-4 w-4 rounded border-slate-300 bg-slate-100 accent-blue-500 dark:border-slate-600 dark:bg-slate-800"
                       />
                       <span className="truncate">{name}</span>
                       {info && (

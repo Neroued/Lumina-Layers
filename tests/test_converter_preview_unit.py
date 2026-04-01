@@ -34,6 +34,7 @@ _test_registry: FileRegistry = FileRegistry()
 # Mock WorkerPoolManager for dependency override
 _mock_pool = MagicMock(spec=WorkerPoolManager)
 
+
 def setup_module(module):
     """Re-apply dependency overrides before this module's tests run.
     在本模块测试运行前重新设置依赖覆盖，确保跨文件测试隔离。
@@ -59,8 +60,8 @@ client: TestClient = TestClient(app)
 
 # Mock cache_data returned by generate_preview_cached
 _mock_matched_rgb: np.ndarray = np.zeros((80, 120, 3), dtype=np.uint8)
-_mock_matched_rgb[:40, :, :] = [255, 0, 0]   # top half red (50 rows * 120 cols = 4800 but we use 40 rows)
-_mock_matched_rgb[40:, :, :] = [0, 255, 0]   # bottom half green
+_mock_matched_rgb[:40, :, :] = [255, 0, 0]  # top half red (50 rows * 120 cols = 4800 but we use 40 rows)
+_mock_matched_rgb[40:, :, :] = [0, 255, 0]  # bottom half green
 
 _mock_mask_solid: np.ndarray = np.ones((80, 120), dtype=bool)
 
@@ -128,7 +129,7 @@ class TestLutNotFoundReturns404:
         """Send a non-existent lut_name, expect 404."""
         buf = _make_test_image_buf()
         with patch(
-            "api.routers.converter.LUTManager.get_lut_path",
+            "api.routers.converter.preview.LUTManager.get_lut_path",
             return_value=None,
         ):
             response = client.post(
@@ -158,15 +159,19 @@ class TestSessionContainsPreviewCache:
 
         _mock_pool.submit = AsyncMock(return_value=worker_result)
 
-        with patch(
-            "api.routers.converter.LUTManager.get_lut_path",
-            return_value="/tmp/fake.npy",
-        ), patch(
-            "api.routers.converter.upload_to_tempfile",
-            return_value="/tmp/uploaded.png",
-        ), patch(
-            "api.routers.converter.generate_segmented_glb",
-            return_value=None,
+        with (
+            patch(
+                "api.routers.converter.preview.LUTManager.get_lut_path",
+                return_value="/tmp/fake.npy",
+            ),
+            patch(
+                "api.routers.converter.preview.upload_to_tempfile",
+                return_value="/tmp/uploaded.png",
+            ),
+            patch(
+                "api.routers.converter.preview.generate_segmented_glb",
+                return_value=None,
+            ),
         ):
             response = client.post(
                 "/api/convert/preview",
@@ -205,15 +210,19 @@ class TestResponseContainsPaletteAndDimensions:
 
         _mock_pool.submit = AsyncMock(return_value=worker_result)
 
-        with patch(
-            "api.routers.converter.LUTManager.get_lut_path",
-            return_value="/tmp/fake.npy",
-        ), patch(
-            "api.routers.converter.upload_to_tempfile",
-            return_value="/tmp/uploaded.png",
-        ), patch(
-            "api.routers.converter.generate_segmented_glb",
-            return_value=None,
+        with (
+            patch(
+                "api.routers.converter.preview.LUTManager.get_lut_path",
+                return_value="/tmp/fake.npy",
+            ),
+            patch(
+                "api.routers.converter.preview.upload_to_tempfile",
+                return_value="/tmp/uploaded.png",
+            ),
+            patch(
+                "api.routers.converter.preview.generate_segmented_glb",
+                return_value=None,
+            ),
         ):
             response = client.post(
                 "/api/convert/preview",
@@ -264,12 +273,15 @@ class TestTimeoutReturns504:
         buf = _make_test_image_buf()
         _mock_pool.submit = AsyncMock(side_effect=asyncio.TimeoutError())
 
-        with patch(
-            "api.routers.converter.LUTManager.get_lut_path",
-            return_value="/tmp/fake.npy",
-        ), patch(
-            "api.routers.converter.upload_to_tempfile",
-            return_value="/tmp/uploaded.png",
+        with (
+            patch(
+                "api.routers.converter.preview.LUTManager.get_lut_path",
+                return_value="/tmp/fake.npy",
+            ),
+            patch(
+                "api.routers.converter.preview.upload_to_tempfile",
+                return_value="/tmp/uploaded.png",
+            ),
         ):
             response = client.post(
                 "/api/convert/preview",
@@ -296,12 +308,15 @@ class TestGeneralExceptionReturns500:
         buf = _make_test_image_buf()
         _mock_pool.submit = AsyncMock(side_effect=RuntimeError("Worker crashed"))
 
-        with patch(
-            "api.routers.converter.LUTManager.get_lut_path",
-            return_value="/tmp/fake.npy",
-        ), patch(
-            "api.routers.converter.upload_to_tempfile",
-            return_value="/tmp/uploaded.png",
+        with (
+            patch(
+                "api.routers.converter.preview.LUTManager.get_lut_path",
+                return_value="/tmp/fake.npy",
+            ),
+            patch(
+                "api.routers.converter.preview.upload_to_tempfile",
+                return_value="/tmp/uploaded.png",
+            ),
         ):
             response = client.post(
                 "/api/convert/preview",

@@ -90,7 +90,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         set({ printerModel: id });
         
         // 延迟导入避免循环依赖
-        import("./converterStore").then(({ useConverterStore }) => {
+        import("./converter").then(({ useConverterStore }) => {
           const { bedSizes, setBedLabel } = useConverterStore.getState();
           const printerBed = bedSizes.find(bed => bed.printer_id === id);
           if (printerBed) {

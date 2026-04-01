@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { useConverterStore } from '../stores/converterStore';
+import { useConverterStore } from '../stores/converter';
 
 describe('submitFullPipeline', () => {
   beforeEach(() => {
@@ -25,9 +25,9 @@ describe('submitFullPipeline', () => {
       callOrder.push('generate');
       useConverterStore.setState({
         threemfDiskPath: '/tmp/model.3mf',
-        modelUrl: 'http://localhost:8000/api/files/glb-123',
+        modelUrl: '/api/files/glb-123',
       });
-      return 'http://localhost:8000/api/files/glb-123';
+      return '/api/files/glb-123';
     });
 
     useConverterStore.setState({
@@ -41,7 +41,7 @@ describe('submitFullPipeline', () => {
     expect(mockSubmitPreview).toHaveBeenCalledOnce();
     expect(mockSubmitGenerate).toHaveBeenCalledOnce();
     expect(callOrder).toEqual(['preview', 'generate']);
-    expect(result).toBe('http://localhost:8000/api/files/glb-123');
+    expect(result).toBe('/api/files/glb-123');
   });
 
   // Req 2.2: 有 sessionId 时跳过预览直接生成
@@ -50,9 +50,9 @@ describe('submitFullPipeline', () => {
     const mockSubmitGenerate = vi.fn(async () => {
       useConverterStore.setState({
         threemfDiskPath: '/tmp/model.3mf',
-        modelUrl: 'http://localhost:8000/api/files/glb-456',
+        modelUrl: '/api/files/glb-456',
       });
-      return 'http://localhost:8000/api/files/glb-456';
+      return '/api/files/glb-456';
     });
 
     useConverterStore.setState({
@@ -65,7 +65,7 @@ describe('submitFullPipeline', () => {
 
     expect(mockSubmitPreview).not.toHaveBeenCalled();
     expect(mockSubmitGenerate).toHaveBeenCalledOnce();
-    expect(result).toBe('http://localhost:8000/api/files/glb-456');
+    expect(result).toBe('/api/files/glb-456');
   });
 
   // Req 5.3: 预览失败时停止流水线，不调用 generate

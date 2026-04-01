@@ -147,7 +147,7 @@ export default function CalibrationPanel() {
                 data-testid="download-link"
                 href={downloadUrl}
                 download
-                className="inline-flex min-h-11 items-center justify-center rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-[0_12px_24px_rgba(37,99,235,0.22)] transition-colors hover:bg-blue-700"
+                className="inline-flex min-h-11 items-center justify-center rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-[var(--shadow-control-hover)] transition-colors hover:bg-blue-700"
               >
                 {t("cal_download_3mf")}
               </a>
