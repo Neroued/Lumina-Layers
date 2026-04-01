@@ -1,22 +1,21 @@
 """
-SVG 双通道光栅化模块（SVG Rasterizer）
+SVG 光栅化模块（SVG Rasterizer）
 
-从 image_processing.py 的 _load_svg 方法搬入。
-使用白底/黑底差分法检测透明度，保证内容零损伤。
+使用 resvg (Rust) 进行高质量 SVG → RGBA 光栅化。
+原生支持透明度，无需双通道差分 hack。
 
-SVG dual-pass rasterization using white/black background differencing.
-Extracted from LuminaImageProcessor._load_svg.
+High-quality SVG rasterization via resvg (Rust).
+Native RGBA transparency support — no dual-pass hack needed.
 """
 
 import os
+import io
 import time
 import numpy as np
 import cv2
 
-# SVG support (optional dependency)
 try:
-    from svglib.svglib import svg2rlg
-    from reportlab.graphics import renderPM
+    import resvg_py
 
     HAS_SVG = True
 except ImportError:
@@ -26,65 +25,9 @@ _SVG_RASTER_CACHE = {}
 _SVG_RASTER_CACHE_MAX = 4
 
 
-def _get_svg_pixel_dims(svg_path: str):
-    """Parse SVG width/height in original pixel units from XML.
-    解析 SVG 文件的原始像素尺寸。
-
-    svglib converts px to pt (x0.75) internally, but path coordinates stay
-    in original SVG user units. This helper reads the true pixel dimensions
-    so we can correct the coordinate mismatch.
-
-    Args:
-        svg_path (str): Path to SVG file. (SVG 文件路径)
-
-    Returns:
-        tuple[float, float]: (width_px, height_px), or (0, 0) on failure.
-            (原始像素尺寸，失败返回 (0, 0))
-    """
-    try:
-        import xml.etree.ElementTree as ET
-
-        tree = ET.parse(svg_path)
-        root = tree.getroot()
-        ns = root.tag.split("}")[0] + "}" if "}" in root.tag else ""
-        actual_root = root if root.tag.endswith("svg") else root.find(f"{ns}svg") or root
-
-        def strip_unit(s):
-            if not s:
-                return 0.0
-            s = s.strip()
-            for unit in ("px", "pt", "mm", "cm", "in"):
-                if s.endswith(unit):
-                    s = s[: -len(unit)].strip()
-                    break
-            try:
-                return float(s)
-            except (ValueError, TypeError):
-                return 0.0
-
-        w = strip_unit(actual_root.get("width", ""))
-        h = strip_unit(actual_root.get("height", ""))
-        if w > 0 and h > 0:
-            return w, h
-        vb = actual_root.get("viewBox", "")
-        if vb:
-            parts = vb.replace(",", " ").split()
-            if len(parts) == 4:
-                return float(parts[2]), float(parts[3])
-    except Exception:
-        pass
-    return 0.0, 0.0
-
-
 def rasterize_svg(svg_path: str, target_width_mm: float, pixels_per_mm: float = 20.0) -> np.ndarray:
-    """SVG 双通道光栅化。
-    Safe Padding + Dual-Pass Transparency Detection.
-
-    Method: Render twice (White BG / Black BG).
-    - If pixel changes color -> It's background (Transparent) -> Remove it.
-    - If pixel stays same -> It's content (Opaque) -> Keep it 100% intact.
-
-    This guarantees NO internal image damage.
+    """Rasterize an SVG file to an RGBA numpy array via resvg.
+    通过 resvg 将 SVG 文件光栅化为 RGBA numpy 数组。
 
     Args:
         svg_path: SVG 文件路径
@@ -95,7 +38,7 @@ def rasterize_svg(svg_path: str, target_width_mm: float, pixels_per_mm: float = 
         (H, W, 4) uint8 RGBA numpy 数组
     """
     if not HAS_SVG:
-        raise ImportError("Please install 'svglib' and 'reportlab'.")
+        raise ImportError("Please install 'resvg-py' for SVG support.")
 
     cache_key = None
     try:
@@ -109,116 +52,58 @@ def rasterize_svg(svg_path: str, target_width_mm: float, pixels_per_mm: float = 
     except Exception:
         cache_key = None
 
-    print(f"[SVG] Rasterizing: {svg_path}")
+    print(f"[SVG] Rasterizing (resvg): {svg_path}")
     _t0_total = time.perf_counter()
 
-    # 1. 读取 SVG
-    _t0 = time.perf_counter()
-    drawing = svg2rlg(svg_path)
-    _t_parse = time.perf_counter() - _t0
-
-    # --- Fix svglib px→pt coordinate mismatch ---
-    # svglib converts SVG width/height from px to pt (×0.75) but keeps
-    # path coordinates in original SVG user units. The internal Y-flip
-    # transform also uses pt height. Fix both to use original px dims.
-    svg_w, svg_h = _get_svg_pixel_dims(svg_path)
-    if svg_w > 0 and svg_h > 0:
-        main_group = drawing.contents[0]
-        if hasattr(main_group, "transform") and main_group.transform:
-            t = list(main_group.transform)
-            if len(t) >= 6 and t[3] == -1:
-                t[5] = svg_h
-                main_group.transform = tuple(t)
-        drawing.width = svg_w
-        drawing.height = svg_h
-        raw_w, raw_h = svg_w, svg_h
-    else:
-        raw_w, raw_h = float(drawing.width), float(drawing.height)
-    if raw_w <= 0 or raw_h <= 0:
-        raise ValueError(f"SVG has zero-size dimensions: {raw_w}x{raw_h}")
-    print(f"[SVG] Canvas: {raw_w:.1f}x{raw_h:.1f}")
-
-    # 2. 缩放到目标像素宽度（强制最低渲染质量保证 Dual-Pass 效果）
-    target_width_px = int(target_width_mm * pixels_per_mm)
+    target_width_px = max(1, int(target_width_mm * pixels_per_mm))
     MIN_QUALITY_PX = 800
     render_width_px = max(target_width_px, MIN_QUALITY_PX)
 
-    if raw_w > 0:
-        scale_factor = render_width_px / raw_w
-    else:
-        scale_factor = 1.0
+    _t0 = time.perf_counter()
+    png_bytes = resvg_py.svg_to_bytes(svg_path=svg_path, width=render_width_px)
+    _t_render = time.perf_counter() - _t0
 
-    drawing.scale(scale_factor, scale_factor)
-    render_w = max(1, int(raw_w * scale_factor))
-    render_h = max(1, int(raw_h * scale_factor))
-    drawing.width = render_w
-    drawing.height = render_h
+    from PIL import Image
 
-    # ================== 【终极方案】双重渲染差分法 ==================
-    try:
-        _t0 = time.perf_counter()
-        pil_white = renderPM.drawToPIL(drawing, bg=0xFFFFFF, configPIL={"transparent": False})
-        arr_white = np.array(pil_white.convert("RGB"))
-        _t_render_white = time.perf_counter() - _t0
+    img_pil = Image.open(io.BytesIO(bytes(png_bytes)))
+    img_final = np.array(img_pil.convert("RGBA"))
+    print(f"[SVG] Rendered: {img_final.shape[1]}x{img_final.shape[0]} px")
 
-        _t0 = time.perf_counter()
-        pil_black = renderPM.drawToPIL(drawing, bg=0x000000, configPIL={"transparent": False})
-        arr_black = np.array(pil_black.convert("RGB"))
-        _t_render_black = time.perf_counter() - _t0
+    _t0 = time.perf_counter()
+    alpha_channel = img_final[:, :, 3]
 
-        _t0 = time.perf_counter()
-        diff = np.abs(arr_white.astype(int) - arr_black.astype(int))
-        diff_sum = np.sum(diff, axis=2)
-        alpha_mask = np.where(diff_sum < 10, 255, 0).astype(np.uint8)
-        r, g, b = cv2.split(arr_white)
-        img_final = cv2.merge([r, g, b, alpha_mask])
+    BORDER = 2
+    h_arr, w_arr = img_final.shape[:2]
+    content_rows = np.any(alpha_channel > 0, axis=1)
+    content_cols = np.any(alpha_channel > 0, axis=0)
+    if np.any(content_rows) and np.any(content_cols):
+        row_idx = np.where(content_rows)[0]
+        col_idx = np.where(content_cols)[0]
+        y_min = max(0, row_idx[0] - BORDER)
+        x_min = max(0, col_idx[0] - BORDER)
+        y_max = min(h_arr - 1, row_idx[-1] + BORDER)
+        x_max = min(w_arr - 1, col_idx[-1] + BORDER)
+        img_final = img_final[y_min : y_max + 1, x_min : x_max + 1]
+    print(f"[SVG] Content-aware crop: {img_final.shape[1]}x{img_final.shape[0]} px")
 
-        BORDER = 2
-        h_arr, w_arr = img_final.shape[:2]
-        content_rows = np.any(alpha_mask > 0, axis=1)
-        content_cols = np.any(alpha_mask > 0, axis=0)
-        if np.any(content_rows) and np.any(content_cols):
-            row_idx = np.where(content_rows)[0]
-            col_idx = np.where(content_cols)[0]
-            y_min = max(0, row_idx[0] - BORDER)
-            x_min = max(0, col_idx[0] - BORDER)
-            y_max = min(h_arr - 1, row_idx[-1] + BORDER)
-            x_max = min(w_arr - 1, col_idx[-1] + BORDER)
-            img_final = img_final[y_min : y_max + 1, x_min : x_max + 1]
-        print(f"[SVG] Content-aware crop: {img_final.shape[1]}x{img_final.shape[0]} px")
+    if render_width_px > target_width_px and target_width_px > 0:
+        scale_back = target_width_px / render_width_px
+        out_w = max(1, round(img_final.shape[1] * scale_back))
+        out_h = max(1, round(img_final.shape[0] * scale_back))
+        img_final = cv2.resize(img_final, (out_w, out_h), interpolation=cv2.INTER_AREA)
+        print(f"[SVG] Scaled to target: {out_w}x{out_h} px")
+    _t_postprocess = time.perf_counter() - _t0
 
-        if render_width_px > target_width_px and target_width_px > 0:
-            scale_back = target_width_px / render_width_px
-            out_w = max(1, round(img_final.shape[1] * scale_back))
-            out_h = max(1, round(img_final.shape[0] * scale_back))
-            img_final = cv2.resize(img_final, (out_w, out_h), interpolation=cv2.INTER_AREA)
-            print(f"[SVG] Scaled to target: {out_w}x{out_h} px")
-        _t_postprocess = time.perf_counter() - _t0
+    _t_total = time.perf_counter() - _t0_total
+    print(
+        f"[SVG] Timing: render={_t_render:.2f}s, "
+        f"postprocess={_t_postprocess:.2f}s, total={_t_total:.2f}s"
+    )
+    print(f"[SVG] Final resolution: {img_final.shape[1]}x{img_final.shape[0]} px")
 
-        _t_total = time.perf_counter() - _t0_total
-        print(
-            f"[SVG] Timing: parse={_t_parse:.2f}s, "
-            f"render_white={_t_render_white:.2f}s, render_black={_t_render_black:.2f}s, "
-            f"postprocess={_t_postprocess:.2f}s, total={_t_total:.2f}s"
-        )
-        print(f"[SVG] Final resolution: {img_final.shape[1]}x{img_final.shape[0]} px")
-        if cache_key is not None:
-            _SVG_RASTER_CACHE[cache_key] = img_final.copy()
-            while len(_SVG_RASTER_CACHE) > _SVG_RASTER_CACHE_MAX:
-                _SVG_RASTER_CACHE.pop(next(iter(_SVG_RASTER_CACHE)))
-        return img_final
+    if cache_key is not None:
+        _SVG_RASTER_CACHE[cache_key] = img_final.copy()
+        while len(_SVG_RASTER_CACHE) > _SVG_RASTER_CACHE_MAX:
+            _SVG_RASTER_CACHE.pop(next(iter(_SVG_RASTER_CACHE)))
 
-    except Exception as e:
-        print(f"[SVG] Dual-Pass failed: {e}")
-        import traceback
-
-        traceback.print_exc()
-
-        # 最后的保底：如果双重渲染失败，回退到普通渲染
-        pil_img = renderPM.drawToPIL(drawing, bg=None, configPIL={"transparent": True})
-        img_fallback = np.array(pil_img.convert("RGBA"))
-        if cache_key is not None:
-            _SVG_RASTER_CACHE[cache_key] = img_fallback.copy()
-            while len(_SVG_RASTER_CACHE) > _SVG_RASTER_CACHE_MAX:
-                _SVG_RASTER_CACHE.pop(next(iter(_SVG_RASTER_CACHE)))
-        return img_fallback
+    return img_final

@@ -36,14 +36,6 @@ from core.pipeline import (
 )
 from core.pipeline.s03_color_replacement import _normalize_color_replacements_input
 
-# Try to import SVG rendering libraries (for vector branch 2D preview)
-try:
-    from svglib.svglib import svg2rlg
-    from reportlab.graphics import renderPM
-
-    HAS_SVG_LIB = True
-except ImportError:
-    HAS_SVG_LIB = False
 
 
 # ---------------------------------------------------------------------------
@@ -275,15 +267,20 @@ def _run_vector_branch(ctx: dict) -> dict:
 
         vec_processor = VectorProcessor(actual_lut_path, color_mode)
 
-        # 1. SVG → 3D mesh
+        # 1. Unified analysis: parse → clip → match (shared by preview + mesh)
         _report_progress(ctx, 0.05, "SVG 解析与几何处理中... | Parsing & extruding SVG...")
         mesh_t0 = time.perf_counter()
-        scene = vec_processor.svg_to_mesh(
+        analysis = vec_processor.analyze_svg(
             svg_path=image_path,
             target_width_mm=target_width_mm,
+            color_replacements=vector_replacements,
+        )
+
+        # 1b. Build 3D mesh from analysis
+        scene = vec_processor.build_mesh(
+            analysis=analysis,
             thickness_mm=spacer_thick,
             structure_mode=structure_mode,
-            color_replacements=vector_replacements,
         )
         vector_timing["mesh_total_s"] = time.perf_counter() - mesh_t0
         if isinstance(getattr(vec_processor, "last_stage_timings", None), dict):
@@ -293,20 +290,11 @@ def _run_vector_branch(ctx: dict) -> dict:
             ctx["error"] = "[ERROR] Vector mesh generation failed: no valid geometry generated"
             return ctx
 
-        # 1.5a Resolve color config early (needed by backing merge + relief)
-        is_six_color = len(vec_processor.img_processor.lut_rgb) == 1296
-        if is_six_color:
-            vec_color_conf = ColorSystem.SIX_COLOR
-            vec_color_mode = "6-Color"
-        else:
-            vec_color_conf = ColorSystem.get(color_mode)
-            vec_color_mode = color_mode
+        # 1.5a Use color config from analysis (already resolved)
+        vec_color_mode = vec_processor.color_mode
+        vec_preview_colors = dict(analysis.preview_colors)
+        vec_slot_list = analysis.slot_names
 
-        vec_preview_colors = dict(vec_color_conf["preview"])
-        vec_slot_list = vec_color_conf["slots"]
-
-        # Add name-based color entries so 3MF export always finds colors by name,
-        # avoiding index-shift issues when "Board" is present in the geometry list.
         for _mid, _rgba in list(vec_preview_colors.items()):
             if isinstance(_mid, int) and _mid < len(vec_slot_list):
                 vec_preview_colors[vec_slot_list[_mid]] = _rgba
@@ -396,7 +384,7 @@ def _run_vector_branch(ctx: dict) -> dict:
             print(f"[COORDINATOR] Warning: Preview generation skipped: {e}")
         vector_timing["export_glb_s"] = time.perf_counter() - glb_t0
 
-        # 4. 2D preview from SVG (skip when caller doesn't need it)
+        # 4. 2D preview from analyzed geometry (same data as 3MF)
         _report_progress(ctx, 0.90, "生成 2D 预览中... | Generating 2D preview...")
         preview_img = None
         preview_t0 = time.perf_counter()
@@ -405,10 +393,12 @@ def _run_vector_branch(ctx: dict) -> dict:
         if skip_heavy_preview or not need_2d_preview:
             reason = "env flag" if skip_heavy_preview else "caller does not need it"
             print(f"[COORDINATOR] Skipping SVG 2D preview ({reason})")
-        elif HAS_SVG_LIB:
-            preview_img = _generate_vector_2d_preview(vec_processor, image_path, target_width_mm, vector_replacements)
         else:
-            print("[COORDINATOR] svglib not installed, skipping 2D preview")
+            try:
+                preview_img = VectorProcessor.render_preview(analysis, pixels_per_mm=10.0)
+                print("[COORDINATOR] Generated 2D vector preview from analyzed geometry")
+            except Exception as e:
+                print(f"[COORDINATOR] Failed to render vector preview: {e}")
         vector_timing["preview_2d_s"] = time.perf_counter() - preview_t0
 
         # 5. Stats & timing
@@ -440,75 +430,6 @@ def _run_vector_branch(ctx: dict) -> dict:
         print(f"[COORDINATOR] {error_msg}")
         ctx["error"] = error_msg
         return ctx
-
-
-def _generate_vector_2d_preview(
-    vec_processor, image_path: str, target_width_mm: float, vector_replacements: dict
-) -> "np.ndarray | None":
-    """Generate 2D preview image from SVG for vector branch.
-    为矢量分支从 SVG 生成 2D 预览图像。
-
-    Args:
-        vec_processor: VectorProcessor 实例
-        image_path: SVG 文件路径
-        target_width_mm: 目标宽度（毫米）
-        vector_replacements: 颜色替换映射
-
-    Returns:
-        np.ndarray | None: RGBA 预览图像，失败返回 None
-    """
-    try:
-        preview_rgba = vec_processor.img_processor._load_svg(image_path, target_width_mm, pixels_per_mm=10.0)
-
-        # Apply color replacements to preview
-        if vector_replacements:
-            from core.color_replacement import ColorReplacementManager
-
-            manager = ColorReplacementManager.from_dict(vector_replacements)
-            replacements = manager.get_all_replacements()
-
-            if replacements:
-                print(f"[COORDINATOR] Applying {len(replacements)} color replacements to SVG preview...")
-                rgb_data = preview_rgba[:, :, :3]
-                alpha_data = preview_rgba[:, :, 3]
-                mask_solid = alpha_data > 10
-
-                for orig_color, repl_color in replacements.items():
-                    orig_arr = np.array(orig_color, dtype=np.uint8)
-                    repl_arr = np.array(repl_color, dtype=np.uint8)
-                    diff = np.abs(rgb_data.astype(int) - orig_arr.astype(int))
-                    distance = np.sum(diff, axis=2)
-                    threshold = 50
-                    match_mask = (distance < threshold) & mask_solid
-                    if np.any(match_mask):
-                        rgb_data[match_mask] = repl_arr
-                        matched_count = np.sum(match_mask)
-                        print(f"[COORDINATOR]   {orig_color} -> {repl_color}: {matched_count} pixels")
-
-                preview_rgba[:, :, :3] = rgb_data
-                print("[COORDINATOR] Color replacements applied to SVG preview")
-
-        # Downscale overly large previews
-        max_preview_px = 1600
-        h, w = preview_rgba.shape[:2]
-        if w > max_preview_px:
-            scale = max_preview_px / w
-            new_w = max_preview_px
-            new_h = max(1, int(h * scale))
-            preview_rgba = cv2.resize(preview_rgba, (new_w, new_h), interpolation=cv2.INTER_AREA)
-
-        # Fix black background: set transparent pixels to white RGB
-        alpha_channel = preview_rgba[:, :, 3]
-        transparent_mask = alpha_channel == 0
-        if np.any(transparent_mask):
-            preview_rgba[transparent_mask, :3] = 255
-
-        print("[COORDINATOR] Generated 2D vector preview")
-        return preview_rgba
-
-    except Exception as e:
-        print(f"[COORDINATOR] Failed to render SVG preview: {e}")
-        return None
 
 
 def _log_vector_timings(timings: dict) -> None:

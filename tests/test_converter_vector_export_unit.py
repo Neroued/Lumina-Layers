@@ -37,6 +37,16 @@ def _build_fake_processor(scene):
     vp.svg_to_mesh.return_value = scene
     vp.img_processor.lut_rgb = np.zeros((256, 3))
     vp.img_processor._load_svg.return_value = np.zeros((100, 100, 4), dtype=np.uint8)
+    vp.color_mode = "4-Color"
+
+    fake_analysis = MagicMock()
+    fake_analysis.preview_colors = {0: [255, 255, 255, 255], 1: [255, 0, 0, 255],
+                                    2: [255, 255, 0, 255], 3: [0, 0, 255, 255]}
+    fake_analysis.slot_names = ["White", "Red", "Yellow", "Blue"]
+    fake_analysis.stage_timings = {}
+    vp.analyze_svg.return_value = fake_analysis
+    vp.build_mesh.return_value = scene
+    vp.render_preview = MagicMock(return_value=np.zeros((100, 100, 4), dtype=np.uint8))
     return vp
 
 

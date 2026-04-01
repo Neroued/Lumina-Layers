@@ -10,8 +10,7 @@ pystray
 pytz
 networkx
 lxml
-svglib
-reportlab
+resvg-py>=0.2.6
 colormath
 # Native Vector Engine dependencies
 svgelements>=1.9.0

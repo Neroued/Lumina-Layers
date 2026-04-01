@@ -17,10 +17,15 @@ Key changes from v1:
 """
 
 import os
+import re
+import logging
 import numpy as np
 import time
+import xml.etree.ElementTree as ET
 import trimesh
-from svgelements import SVG, Path, Shape, Move, Line, Close, CubicBezier, QuadraticBezier
+import cv2
+from dataclasses import dataclass, field
+from svgelements import SVG, Path, Shape, Move, Line, Close, CubicBezier, QuadraticBezier, Color
 from shapely.geometry import Polygon, MultiPolygon
 from shapely import affinity
 from shapely.ops import unary_union
@@ -28,6 +33,154 @@ from shapely.strtree import STRtree
 from shapely.validation import make_valid
 
 from config import PrinterConfig, ColorSystem
+
+_log = logging.getLogger(__name__)
+
+MIN_SHAPE_AREA_MM2 = 0.01
+BASE_COLOR_GAP_MM = 0.005
+_MAX_BEZIER_DEPTH = 16
+
+
+def _flatten_cubic(
+    x0, y0, x1, y1, x2, y2, x3, y3, tolerance, out, depth,
+):
+    """Adaptive de Casteljau subdivision for cubic Bézier curves.
+
+    Appends flattened points to *out*.  Mirrors the algorithm used
+    by ``ChromaPrint3D::FlattenCubicBezier``.
+    """
+    bx = x3 - x0
+    by = y3 - y0
+    d1 = abs((x1 - x3) * by - (y1 - y3) * bx)
+    d2 = abs((x2 - x3) * by - (y2 - y3) * bx)
+    len_sq = bx * bx + by * by
+    tol_sq = tolerance * tolerance * len_sq
+    if (d1 + d2) * (d1 + d2) <= tol_sq or depth >= _MAX_BEZIER_DEPTH:
+        out.append((x3, y3))
+        return
+    m01x = (x0 + x1) * 0.5;  m01y = (y0 + y1) * 0.5
+    m12x = (x1 + x2) * 0.5;  m12y = (y1 + y2) * 0.5
+    m23x = (x2 + x3) * 0.5;  m23y = (y2 + y3) * 0.5
+    m012x = (m01x + m12x) * 0.5;  m012y = (m01y + m12y) * 0.5
+    m123x = (m12x + m23x) * 0.5;  m123y = (m12y + m23y) * 0.5
+    mx = (m012x + m123x) * 0.5;   my = (m012y + m123y) * 0.5
+    _flatten_cubic(x0, y0, m01x, m01y, m012x, m012y, mx, my, tolerance, out, depth + 1)
+    _flatten_cubic(mx, my, m123x, m123y, m23x, m23y, x3, y3, tolerance, out, depth + 1)
+
+
+def _flatten_quadratic(
+    x0, y0, x1, y1, x2, y2, tolerance, out, depth,
+):
+    """Adaptive de Casteljau subdivision for quadratic Bézier curves."""
+    bx = x2 - x0
+    by = y2 - y0
+    d = abs((x1 - x2) * by - (y1 - y2) * bx)
+    len_sq = bx * bx + by * by
+    if d * d <= tolerance * tolerance * len_sq or depth >= _MAX_BEZIER_DEPTH:
+        out.append((x2, y2))
+        return
+    m01x = (x0 + x1) * 0.5;  m01y = (y0 + y1) * 0.5
+    m12x = (x1 + x2) * 0.5;  m12y = (y1 + y2) * 0.5
+    mx = (m01x + m12x) * 0.5;  my = (m01y + m12y) * 0.5
+    _flatten_quadratic(x0, y0, m01x, m01y, mx, my, tolerance, out, depth + 1)
+    _flatten_quadratic(mx, my, m12x, m12y, x2, y2, tolerance, out, depth + 1)
+
+
+def _sample_gradient_stops(stops, t):
+    """Interpolate colour at parameter *t* along a gradient stop list."""
+    if not stops:
+        return (128, 128, 128)
+    if t <= stops[0][0]:
+        return stops[0][1]
+    if t >= stops[-1][0]:
+        return stops[-1][1]
+    for i in range(len(stops) - 1):
+        t0, c0 = stops[i]
+        t1, c1 = stops[i + 1]
+        if t0 <= t <= t1:
+            if t1 - t0 < 1e-9:
+                return c0
+            f = (t - t0) / (t1 - t0)
+            return (
+                int(c0[0] + (c1[0] - c0[0]) * f),
+                int(c0[1] + (c1[1] - c0[1]) * f),
+                int(c0[2] + (c1[2] - c0[2]) * f),
+            )
+    return stops[-1][1]
+
+
+def _parse_svg_transform(transform_str):
+    """Parse an SVG ``transform`` attribute into a 3x3 affine matrix.
+
+    Supports ``translate``, ``scale``, ``rotate``, ``matrix``,
+    ``skewX`` and ``skewY``, including concatenated transforms.
+
+    解析 SVG transform 属性字符串为 3×3 仿射矩阵，
+    支持 translate/scale/rotate/matrix/skewX/skewY 及其组合。
+    """
+    if not transform_str:
+        return np.eye(3, dtype=np.float64)
+
+    result = np.eye(3, dtype=np.float64)
+    _tf_re = re.compile(
+        r"(matrix|translate|scale|rotate|skewX|skewY)\s*\(([^)]*)\)"
+    )
+
+    for match in _tf_re.finditer(transform_str):
+        func = match.group(1)
+        args = [float(v) for v in re.split(r"[\s,]+", match.group(2).strip()) if v]
+        m = np.eye(3, dtype=np.float64)
+
+        if func == "translate":
+            m[0, 2] = args[0] if len(args) >= 1 else 0.0
+            m[1, 2] = args[1] if len(args) >= 2 else 0.0
+        elif func == "scale":
+            sx = args[0] if len(args) >= 1 else 1.0
+            m[0, 0] = sx
+            m[1, 1] = args[1] if len(args) >= 2 else sx
+        elif func == "rotate":
+            angle = np.radians(args[0]) if args else 0.0
+            cos_a, sin_a = np.cos(angle), np.sin(angle)
+            if len(args) >= 3:
+                cx, cy = args[1], args[2]
+                m[0, 0] = cos_a;  m[0, 1] = -sin_a
+                m[0, 2] = cx - cos_a * cx + sin_a * cy
+                m[1, 0] = sin_a;  m[1, 1] = cos_a
+                m[1, 2] = cy - sin_a * cx - cos_a * cy
+            else:
+                m[0, 0] = cos_a;  m[0, 1] = -sin_a
+                m[1, 0] = sin_a;  m[1, 1] = cos_a
+        elif func == "matrix" and len(args) >= 6:
+            m[0, 0] = args[0];  m[1, 0] = args[1]
+            m[0, 1] = args[2];  m[1, 1] = args[3]
+            m[0, 2] = args[4];  m[1, 2] = args[5]
+        elif func == "skewX" and args:
+            m[0, 1] = np.tan(np.radians(args[0]))
+        elif func == "skewY" and args:
+            m[1, 0] = np.tan(np.radians(args[0]))
+
+        result = result @ m
+
+    return result
+
+
+def _parse_gradient_length(val, default=0.0):
+    """Parse an SVG gradient coordinate value, handling ``%`` suffix.
+
+    解析 SVG 渐变坐标值，支持百分比后缀。
+    """
+    if val is None:
+        return default
+    s = str(val).strip()
+    if not s:
+        return default
+    try:
+        if s.endswith("%"):
+            return float(s[:-1]) / 100.0
+        return float(s)
+    except (ValueError, TypeError):
+        return default
+
 
 # Lazy import to avoid circular dependency at module load time
 _LuminaImageProcessor = None
@@ -42,6 +195,29 @@ def _get_image_processor_class():
 
         _LuminaImageProcessor = LuminaImageProcessor
     return _LuminaImageProcessor
+
+
+@dataclass
+class VectorAnalysis:
+    """Intermediate result of SVG parsing, clipping, and color matching.
+    SVG 解析、裁剪、配色的中间结果 — 预览与 3D 构建共享。
+
+    Produced by ``VectorProcessor.analyze_svg`` and consumed by both
+    ``build_mesh`` (3D extrusion) and ``render_preview`` (2D raster).
+    """
+
+    shape_data: list
+    clipped_shapes: list
+    matched_shapes: list
+    silhouette: object  # Polygon | MultiPolygon | None
+    scale_factor: float
+    bbox: tuple  # (gx0, gy0, real_w, real_h) in SVG user units
+    color_conf: dict
+    slot_names: list
+    num_channels: int
+    num_layers: int
+    preview_colors: dict
+    stage_timings: dict = field(default_factory=dict)
 
 
 class VectorProcessor:
@@ -64,41 +240,373 @@ class VectorProcessor:
 
         ImageProcessor = _get_image_processor_class()
         self.img_processor = ImageProcessor(lut_path, color_mode)
-        self.sampling_precision = 0.05  # mm
+        self.sampling_precision = 0.02  # mm
         self.last_stage_timings = {}
         self.parse_warnings: list[str] = []
 
         print(f"[VECTOR] Initialized with {len(self.img_processor.ref_stacks)} LUT colors")
 
-    # ── Public entry point ───────────────────────────────────────────────
+    # ── Geometry pre-processing helpers ─────────────────────────────────
 
-    def svg_to_mesh(
+    @staticmethod
+    def _normalize_contours(geom, close_delta_mm=0.03):
+        """Morphological close: inflate -> deflate to fill micro-gaps.
+
+        Mirrors ``ChromaPrint3D::NormalizeContours`` (Clipper2 inflate/deflate).
+        Uses Shapely ``buffer`` as an equivalent operation.
+        """
+        if geom is None or geom.is_empty:
+            return geom
+        try:
+            inflated = geom.buffer(close_delta_mm, join_style="mitre", mitre_limit=2.0)
+            if inflated.is_empty:
+                return geom
+            deflated = inflated.buffer(-close_delta_mm, join_style="mitre", mitre_limit=2.0)
+            if deflated.is_empty:
+                return geom
+            return make_valid(deflated)
+        except Exception:
+            return geom
+
+    @staticmethod
+    def _filter_backing_holes(geom, min_hole_area_mm2=1.0):
+        """Remove small holes from the backing plate polygon.
+
+        Mirrors ``ChromaPrint3D``'s ``base_min_hole_area_mm2`` filtering.
+        """
+        if geom is None or geom.is_empty:
+            return geom
+        if geom.geom_type == "Polygon":
+            kept = [h for h in geom.interiors if Polygon(h).area >= min_hole_area_mm2]
+            return Polygon(geom.exterior, kept)
+        if geom.geom_type == "MultiPolygon":
+            polys = []
+            for p in geom.geoms:
+                kept = [h for h in p.interiors if Polygon(h).area >= min_hole_area_mm2]
+                polys.append(Polygon(p.exterior, kept))
+            return MultiPolygon(polys)
+        return geom
+
+    @staticmethod
+    def _split_disconnected_shapes(shape_data):
+        """Split MultiPolygon / GeometryCollection shapes into individual Polygons.
+
+        Mirrors ``ChromaPrint3D::SplitDisconnectedShapes``.  Shapely already
+        distinguishes exterior rings from holes inside ``Polygon`` objects, so
+        no explicit containment-depth analysis is needed.
+        """
+        result = []
+        for item in shape_data:
+            geom = item["poly"]
+            if geom is None or geom.is_empty:
+                continue
+            if geom.geom_type == "Polygon":
+                if geom.area >= MIN_SHAPE_AREA_MM2:
+                    result.append(item)
+            elif geom.geom_type == "MultiPolygon":
+                for poly in geom.geoms:
+                    if not poly.is_empty and poly.area >= MIN_SHAPE_AREA_MM2:
+                        result.append({**item, "poly": poly})
+            elif geom.geom_type == "GeometryCollection":
+                for g in geom.geoms:
+                    if g.is_empty or not hasattr(g, "area") or g.area < MIN_SHAPE_AREA_MM2:
+                        continue
+                    if g.geom_type == "Polygon":
+                        result.append({**item, "poly": g})
+                    elif g.geom_type == "MultiPolygon":
+                        for poly in g.geoms:
+                            if not poly.is_empty and poly.area >= MIN_SHAPE_AREA_MM2:
+                                result.append({**item, "poly": poly})
+        return result
+
+    @staticmethod
+    def _parse_gradient_defs(svg_path):
+        """Pre-parse SVG XML to extract gradient definitions.
+
+        Returns ``{gradient_id: {type, stops, units, transform, ...}}``
+        for linear and radial gradients.
+
+        Handles ``gradientUnits``, ``gradientTransform``,
+        ``xlink:href`` / ``href`` inheritance, percentage coordinate
+        values, and ``stop-color`` defined via the ``style`` attribute.
+
+        解析 SVG XML 提取渐变定义，支持坐标变换、单位、继承、
+        百分比值和 style 属性中的 stop-color。
+        """
+        _SVG_NS = {"svg": "http://www.w3.org/2000/svg"}
+        _XLINK_HREF = "{http://www.w3.org/1999/xlink}href"
+        gradients = {}
+        try:
+            tree = ET.parse(svg_path)
+            root = tree.getroot()
+        except Exception:
+            return gradients
+
+        def _parse_stops(parent):
+            stops = []
+            for s in parent.findall("svg:stop", _SVG_NS):
+                raw_off = s.get("offset", "0")
+                offset = float(raw_off.rstrip("%")) / (
+                    100.0 if "%" in raw_off else 1.0
+                )
+                raw_c = s.get("stop-color")
+                if not raw_c:
+                    style = s.get("style", "")
+                    m = re.search(r"stop-color\s*:\s*([^;]+)", style)
+                    if m:
+                        raw_c = m.group(1).strip()
+                if not raw_c:
+                    raw_c = "black"
+                try:
+                    c = Color(raw_c)
+                    rgb = (int(c.red), int(c.green), int(c.blue))
+                except Exception:
+                    rgb = (0, 0, 0)
+                stops.append((offset, rgb))
+            return stops
+
+        elem_map = {}
+        for tag in ("linearGradient", "radialGradient"):
+            for elem in root.iter(f"{{http://www.w3.org/2000/svg}}{tag}"):
+                gid = elem.get("id")
+                if gid:
+                    elem_map[gid] = elem
+
+        def _resolve(gid, visited=None):
+            if visited is None:
+                visited = set()
+            if gid in gradients:
+                return gradients[gid]
+            if gid not in elem_map or gid in visited:
+                return None
+            visited.add(gid)
+
+            elem = elem_map[gid]
+            tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+
+            href = elem.get(_XLINK_HREF) or elem.get("href")
+            href_id = href.lstrip("#") if href else None
+            parent = _resolve(href_id, visited) if href_id else None
+
+            stops = _parse_stops(elem)
+            if not stops and parent:
+                stops = parent.get("stops", [])
+
+            raw_units = elem.get("gradientUnits")
+            if raw_units is None and parent:
+                raw_units = parent.get("units")
+            units = raw_units if raw_units in ("userSpaceOnUse", "objectBoundingBox") else "objectBoundingBox"
+
+            raw_tf = elem.get("gradientTransform")
+            if raw_tf is not None:
+                transform = _parse_svg_transform(raw_tf)
+            elif parent is not None:
+                transform = parent.get("transform", np.eye(3, dtype=np.float64))
+            else:
+                transform = np.eye(3, dtype=np.float64)
+
+            def _coord(attr, default):
+                val = elem.get(attr)
+                if val is not None:
+                    return _parse_gradient_length(val, default)
+                if parent is not None:
+                    return parent.get(attr, default)
+                return default
+
+            if tag == "linearGradient":
+                info = {
+                    "type": "linear",
+                    "x1": _coord("x1", 0.0), "y1": _coord("y1", 0.0),
+                    "x2": _coord("x2", 1.0), "y2": _coord("y2", 0.0),
+                    "stops": stops, "units": units, "transform": transform,
+                }
+            elif tag == "radialGradient":
+                info = {
+                    "type": "radial",
+                    "cx": _coord("cx", 0.5), "cy": _coord("cy", 0.5),
+                    "r": _coord("r", 0.5),
+                    "stops": stops, "units": units, "transform": transform,
+                }
+            else:
+                return None
+
+            gradients[gid] = info
+            return info
+
+        for gid in elem_map:
+            _resolve(gid)
+
+        return gradients
+
+    @staticmethod
+    def _flatten_gradient_shape(grad_info, subpath_polys):
+        """Convert a gradient-filled SVG element into multiple solid-color shapes.
+
+        Algorithm (mirrors ``ChromaPrint3D::FlattenGradientShape``):
+        1. Rasterise the gradient inside the element's bounding box
+        2. Quantise each pixel to the nearest gradient stop colour
+        3. Extract contours per stop colour via OpenCV ``findContours``
+        4. Convert pixel contours back to SVG coordinate polygons
+
+        Correctly handles ``gradientUnits`` (``objectBoundingBox`` vs
+        ``userSpaceOnUse``) and ``gradientTransform``.
+
+        Args:
+            grad_info: Gradient definition dict from ``_parse_gradient_defs``.
+            subpath_polys: List of Shapely Polygon objects for the element.
+
+        Returns list of ``{poly: Polygon, color: (r,g,b)}`` dicts.
+        Falls back to sampling the gradient centre colour if extraction fails.
+        """
+        stops = grad_info.get("stops", [])
+        if not stops:
+            return []
+
+        union_poly = unary_union(subpath_polys) if subpath_polys else None
+        if union_poly is None or union_poly.is_empty:
+            return []
+
+        bx0, by0, bx1, by1 = union_poly.bounds
+        bw = bx1 - bx0
+        bh = by1 - by0
+        if bw <= 0 or bh <= 0:
+            return []
+
+        units = grad_info.get("units", "objectBoundingBox")
+        transform = grad_info.get("transform", np.eye(3, dtype=np.float64))
+
+        def _map_point(x, y):
+            """Map gradient-space coords to SVG user-space coords."""
+            if units == "objectBoundingBox":
+                x = bx0 + x * bw
+                y = by0 + y * bh
+            pt = transform @ np.array([x, y, 1.0], dtype=np.float64)
+            return float(pt[0]), float(pt[1])
+
+        def _map_radius(r):
+            if units == "objectBoundingBox":
+                r = r * (bw + bh) * 0.5
+            sx = np.sqrt(transform[0, 0] ** 2 + transform[1, 0] ** 2)
+            sy = np.sqrt(transform[0, 1] ** 2 + transform[1, 1] ** 2)
+            return r * (sx + sy) * 0.5
+
+        _MAX_GRAD_PX = 2048
+        px_per_unit = min(10.0, _MAX_GRAD_PX / max(bw, bh))
+        img_w = max(4, int(bw * px_per_unit))
+        img_h = max(4, int(bh * px_per_unit))
+
+        ys = np.arange(img_h)[:, None]
+        xs = np.arange(img_w)[None, :]
+        wx = bx0 + (xs + 0.5) / px_per_unit
+        wy = by0 + (ys + 0.5) / px_per_unit
+
+        grad_type = grad_info["type"]
+        if grad_type == "linear":
+            gx1, gy1 = _map_point(grad_info["x1"], grad_info["y1"])
+            gx2, gy2 = _map_point(grad_info["x2"], grad_info["y2"])
+            dx = gx2 - gx1
+            dy = gy2 - gy1
+            length_sq = dx * dx + dy * dy
+            if length_sq < 1e-12:
+                t_map = np.zeros((img_h, img_w), dtype=np.float32)
+            else:
+                t_map = ((wx - gx1) * dx + (wy - gy1) * dy) / length_sq
+        elif grad_type == "radial":
+            cx, cy = _map_point(grad_info["cx"], grad_info["cy"])
+            r_grad = _map_radius(grad_info["r"])
+            if r_grad < 1e-12:
+                r_grad = max(bw, bh) / 2
+            t_map = np.sqrt((wx - cx) ** 2 + (wy - cy) ** 2) / r_grad
+        else:
+            mid_color = _sample_gradient_stops(stops, 0.5)
+            return [{"poly": union_poly, "color": mid_color}]
+
+        t_map = np.clip(t_map, 0.0, 1.0).astype(np.float32)
+
+        canvas = np.zeros((img_h, img_w, 3), dtype=np.uint8)
+        for i in range(len(stops) - 1):
+            t0, c0 = stops[i]
+            t1, c1 = stops[i + 1]
+            mask = (t_map >= t0) & (t_map <= t1)
+            if not np.any(mask):
+                continue
+            if t1 - t0 < 1e-9:
+                f = np.zeros_like(t_map)
+            else:
+                f = (t_map - t0) / (t1 - t0)
+            for ch in range(3):
+                canvas[:, :, ch] = np.where(
+                    mask,
+                    (c0[ch] + (c1[ch] - c0[ch]) * f).astype(np.uint8),
+                    canvas[:, :, ch],
+                )
+        below = t_map < stops[0][0]
+        above = t_map > stops[-1][0]
+        for ch in range(3):
+            canvas[:, :, ch] = np.where(below, stops[0][1][ch], canvas[:, :, ch])
+            canvas[:, :, ch] = np.where(above, stops[-1][1][ch], canvas[:, :, ch])
+
+        stop_colors = np.array([s[1] for s in stops], dtype=np.int16)
+        flat = canvas.reshape(-1, 3).astype(np.int16)
+        diffs = np.linalg.norm(
+            flat[:, None, :] - stop_colors[None, :, :],
+            axis=2,
+        )
+        quantized_idx = diffs.argmin(axis=1).reshape(img_h, img_w)
+
+        result_shapes = []
+        for si, (_, scolor) in enumerate(stops):
+            mask = (quantized_idx == si).astype(np.uint8) * 255
+            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for cnt in contours:
+                if cv2.contourArea(cnt) < 4:
+                    continue
+                approx = cv2.approxPolyDP(cnt, 1.0, True)
+                if len(approx) < 3:
+                    continue
+                svg_coords = [
+                    (bx0 + pt[0] / px_per_unit, by0 + pt[1] / px_per_unit)
+                    for pt in approx[:, 0, :]
+                ]
+                poly = Polygon(svg_coords)
+                if poly.is_valid and not poly.is_empty and poly.area > 0:
+                    try:
+                        clipped = poly.intersection(union_poly)
+                    except Exception:
+                        clipped = poly
+                    if not clipped.is_empty:
+                        result_shapes.append({"poly": clipped, "color": scolor})
+
+        if not result_shapes:
+            mid_color = _sample_gradient_stops(stops, 0.5)
+            return [{"poly": union_poly, "color": mid_color}]
+
+        return result_shapes
+
+    # ── Public entry points ─────────────────────────────────────────────
+
+    def analyze_svg(
         self,
         svg_path: str,
         target_width_mm: float,
-        thickness_mm: float,
-        structure_mode: str = "Single-sided",
         color_replacements: dict = None,
         progress_fn=None,
-    ) -> trimesh.Scene:
-        """Convert an SVG file to a trimesh Scene ready for 3MF export.
+    ) -> VectorAnalysis:
+        """Parse, clip, and color-match an SVG — shared by preview and mesh.
+        解析、裁剪、配色 SVG — 预览与 3D 构建共享此结果。
 
         Args:
             svg_path:         Path to SVG file.
             target_width_mm:  Physical width in mm for the output model.
-            thickness_mm:     Backing (spacer) thickness in mm.
-            structure_mode:   "Single-sided" or "Double-sided".
             color_replacements: Optional ``{hex: hex}`` replacement map.
+            progress_fn:      Optional progress callback.
 
         Returns:
-            A ``trimesh.Scene`` with one geometry per material slot, sorted
-            by material ID.  Geometry names match slot names from the active
-            ``ColorSystem`` configuration.
+            A ``VectorAnalysis`` containing all intermediate data needed
+            by ``build_mesh`` and ``render_preview``.
         """
-        print(f"[VECTOR] Processing: {svg_path}")
-        print(f"[VECTOR] Structure mode: {structure_mode}")
+        print(f"[VECTOR] Analyzing: {svg_path}")
         stage_timings = {}
-        t_total_start = time.perf_counter()
 
         # === Stage 1+2: Parse & Occlusion clip (with cache) ===
         cache_key = None
@@ -136,7 +644,31 @@ class VectorProcessor:
             print(f"[VECTOR] Parsed {len(shape_data)} shapes. Scale: {scale_factor:.4f}")
 
             t0 = time.perf_counter()
+            _pre_area = sum(it["poly"].area for it in shape_data if it["poly"] is not None)
             clipped_shapes, silhouette = self._clip_occlusion(shape_data, return_silhouette=True)
+            _clip_area = sum(it["geometry"].area for it in clipped_shapes if it["geometry"] is not None)
+            print(f"[VECTOR] _clip_occlusion: {len(shape_data)} -> {len(clipped_shapes)} shapes, area {_pre_area:.1f} -> {_clip_area:.1f} ({_clip_area/_pre_area*100:.1f}%)")
+
+            post_clip = []
+            for item in clipped_shapes:
+                g = item["geometry"]
+                g = VectorProcessor._normalize_contours(g)
+                if g is not None and not g.is_empty:
+                    item["geometry"] = g
+                    post_clip.append(item)
+            _norm_area = sum(it["geometry"].area for it in post_clip if it["geometry"] is not None)
+            print(f"[VECTOR] post-clip normalize: {len(clipped_shapes)} -> {len(post_clip)} shapes, area {_clip_area:.1f} -> {_norm_area:.1f}")
+            clipped_shapes = post_clip
+
+            split_input = [{"poly": it["geometry"], "color": it["color"]} for it in clipped_shapes]
+            split_output = VectorProcessor._split_disconnected_shapes(split_input)
+            clipped_shapes = [
+                {"geometry": it["poly"], "color": it["color"], "draw_order": idx}
+                for idx, it in enumerate(split_output)
+            ]
+            _split_area = sum(it["geometry"].area for it in clipped_shapes if it["geometry"] is not None)
+            print(f"[VECTOR] split disconnected: {len(post_clip)} -> {len(clipped_shapes)} shapes, area {_norm_area:.1f} -> {_split_area:.1f}")
+
             stage_timings["occlusion_s"] = time.perf_counter() - t0
             print(f"[VECTOR] After occlusion clip: {len(clipped_shapes)} non-overlapping shapes")
 
@@ -161,7 +693,7 @@ class VectorProcessor:
             color_conf = ColorSystem.get(self.color_mode)
 
         slot_names = color_conf["slots"]
-        preview_colors = color_conf["preview"]
+        preview_colors = dict(color_conf["preview"])
         num_channels = len(slot_names)
         num_layers = color_conf.get("layer_count", PrinterConfig.COLOR_LAYERS)
 
@@ -180,6 +712,54 @@ class VectorProcessor:
         stage_timings["color_match_s"] = time.perf_counter() - t0
         print(f"[VECTOR] Matched {len(matched_shapes)} shapes to LUT recipes")
 
+        return VectorAnalysis(
+            shape_data=shape_data,
+            clipped_shapes=clipped_shapes,
+            matched_shapes=matched_shapes,
+            silhouette=silhouette,
+            scale_factor=scale_factor,
+            bbox=bbox,
+            color_conf=color_conf,
+            slot_names=slot_names,
+            num_channels=num_channels,
+            num_layers=num_layers,
+            preview_colors=preview_colors,
+            stage_timings=stage_timings,
+        )
+
+    def build_mesh(
+        self,
+        analysis: VectorAnalysis,
+        thickness_mm: float,
+        structure_mode: str = "Single-sided",
+        progress_fn=None,
+    ) -> trimesh.Scene:
+        """Extrude analyzed vector shapes into a trimesh Scene.
+        将分析后的矢量形状挤出为 trimesh Scene。
+
+        Args:
+            analysis:       Result from ``analyze_svg``.
+            thickness_mm:   Backing (spacer) thickness in mm.
+            structure_mode: "Single-sided" or "Double-sided".
+            progress_fn:    Optional progress callback.
+
+        Returns:
+            A ``trimesh.Scene`` with one geometry per material slot.
+        """
+        print(f"[VECTOR] Building mesh: structure_mode={structure_mode}")
+        stage_timings = dict(analysis.stage_timings)
+        t_total_start = time.perf_counter()
+
+        matched_shapes = analysis.matched_shapes
+        clipped_shapes = analysis.clipped_shapes
+        silhouette = analysis.silhouette
+        scale_factor = analysis.scale_factor
+        bbox = analysis.bbox
+        slot_names = analysis.slot_names
+        num_channels = analysis.num_channels
+        num_layers = analysis.num_layers
+        preview_colors = analysis.preview_colors
+
         # === Stage 5: Run-length extrude per channel ===
         layer_h = PrinterConfig.LAYER_HEIGHT
         extrude_cache = {}
@@ -189,7 +769,6 @@ class VectorProcessor:
 
         t0 = time.perf_counter()
         if is_5color:
-            # Face-up: reversed optical layers stacked above the backing
             meshes_by_slot = self._run_length_extrude(
                 matched_shapes,
                 num_layers,
@@ -217,26 +796,34 @@ class VectorProcessor:
         # === Stage 6: Backing layer from silhouette ===
         t0 = time.perf_counter()
         if silhouette is None and clipped_shapes:
-            # Defensive fallback if union accumulation failed in occlusion stage.
             all_geoms = [
                 s["geometry"] for s in clipped_shapes if s["geometry"] is not None and not s["geometry"].is_empty
             ]
             silhouette = unary_union(all_geoms) if all_geoms else None
 
         if is_5color:
-            backing_z_start = 0  # face-up: backing at print-bed level
+            backing_z_start = 0
         else:
             backing_z_start = num_layers * layer_h
 
         if thickness_mm > 0 and silhouette is not None and not silhouette.is_empty:
             print(f"[VECTOR] Generating backing: {backing_layer_count} layers ({thickness_mm}mm)")
+            backing_sil = self._normalize_contours(silhouette, close_delta_mm=0.4)
+            if backing_sil is None or backing_sil.is_empty:
+                backing_sil = silhouette
+            backing_sil = self._filter_backing_holes(backing_sil, min_hole_area_mm2=0.3)
+            try:
+                backing_sil = backing_sil.buffer(0.15, join_style="mitre", mitre_limit=2.0)
+            except Exception:
+                pass
             backing_meshes = []
             backing_height = backing_layer_count * layer_h
+            gap_offset = BASE_COLOR_GAP_MM if not is_5color else 0.0
             backing_meshes.extend(
                 self._extrude_geometry(
-                    silhouette,
+                    backing_sil,
                     height=backing_height,
-                    z_offset=backing_z_start,
+                    z_offset=backing_z_start + gap_offset,
                     scale=scale_factor,
                     extrude_cache=extrude_cache,
                 )
@@ -296,9 +883,9 @@ class VectorProcessor:
 
         print(
             "[VECTOR] Stage timings (s): "
-            f"parse={stage_timings['parse_s']:.3f}, "
-            f"clip={stage_timings['occlusion_s']:.3f}, "
-            f"match={stage_timings['color_match_s']:.3f}, "
+            f"parse={stage_timings.get('parse_s', 0):.3f}, "
+            f"clip={stage_timings.get('occlusion_s', 0):.3f}, "
+            f"match={stage_timings.get('color_match_s', 0):.3f}, "
             f"extrude_bottom={stage_timings['extrude_bottom_s']:.3f}, "
             f"backing={stage_timings['backing_s']:.3f}, "
             f"extrude_top={stage_timings['extrude_top_s']:.3f}, "
@@ -308,6 +895,117 @@ class VectorProcessor:
         print(f"[VECTOR] Extrude cache entries: {stage_timings['extrude_cache_entries']}")
         print(f"[VECTOR] Scene complete: {len(scene.geometry)} objects")
         return scene
+
+    def svg_to_mesh(
+        self,
+        svg_path: str,
+        target_width_mm: float,
+        thickness_mm: float,
+        structure_mode: str = "Single-sided",
+        color_replacements: dict = None,
+        progress_fn=None,
+    ) -> trimesh.Scene:
+        """Convert an SVG file to a trimesh Scene ready for 3MF export.
+        将 SVG 文件转换为可用于 3MF 导出的 trimesh Scene。
+
+        Convenience wrapper combining ``analyze_svg`` and ``build_mesh``.
+
+        Args:
+            svg_path:         Path to SVG file.
+            target_width_mm:  Physical width in mm for the output model.
+            thickness_mm:     Backing (spacer) thickness in mm.
+            structure_mode:   "Single-sided" or "Double-sided".
+            color_replacements: Optional ``{hex: hex}`` replacement map.
+            progress_fn:      Optional progress callback.
+
+        Returns:
+            A ``trimesh.Scene`` with one geometry per material slot, sorted
+            by material ID.  Geometry names match slot names from the active
+            ``ColorSystem`` configuration.
+        """
+        analysis = self.analyze_svg(svg_path, target_width_mm, color_replacements, progress_fn)
+        return self.build_mesh(analysis, thickness_mm, structure_mode, progress_fn)
+
+    # ── 2D preview from analyzed geometry ─────────────────────────────────
+
+    @staticmethod
+    def render_preview(
+        analysis: "VectorAnalysis",
+        pixels_per_mm: float = 10.0,
+        max_width_px: int = 1600,
+    ) -> np.ndarray:
+        """Render a 2D RGBA preview from analyzed vector geometry.
+        从已分析的矢量几何渲染 2D RGBA 预览，与 3MF 使用同一组几何数据。
+
+        Args:
+            analysis:      Result from ``analyze_svg``.
+            pixels_per_mm: Rasterization density (pixels per mm).
+            max_width_px:  Maximum output width in pixels.
+
+        Returns:
+            (H, W, 4) uint8 RGBA numpy array with white background.
+        """
+        real_w = analysis.bbox[2]
+        real_h = analysis.bbox[3]
+        sf = analysis.scale_factor
+
+        w_mm = real_w * sf
+        h_mm = real_h * sf
+        ppm = pixels_per_mm
+
+        w_px = max(1, int(round(w_mm * ppm)))
+        h_px = max(1, int(round(h_mm * ppm)))
+
+        if w_px > max_width_px:
+            ratio = max_width_px / w_px
+            w_px = max_width_px
+            h_px = max(1, int(round(h_px * ratio)))
+            ppm = w_px / w_mm
+
+        canvas = np.full((h_px, w_px, 4), 255, dtype=np.uint8)
+
+        coord_scale = sf * ppm
+
+        slot_names = analysis.slot_names
+        preview_colors = analysis.preview_colors
+
+        for shape in analysis.matched_shapes:
+            geom = shape["geometry"]
+            recipe = shape["recipe"]
+            if geom is None or geom.is_empty:
+                continue
+
+            slot_idx = recipe[0] if recipe else 0
+            rgba = preview_colors.get(slot_idx, preview_colors.get(slot_names[slot_idx] if slot_idx < len(slot_names) else 0, [128, 128, 128, 255]))
+            bgr_color = (int(rgba[2]), int(rgba[1]), int(rgba[0]))
+
+            polys = []
+            if geom.geom_type == "Polygon":
+                polys = [geom]
+            elif geom.geom_type == "MultiPolygon":
+                polys = list(geom.geoms)
+            else:
+                continue
+
+            for poly in polys:
+                if poly.is_empty:
+                    continue
+                ext_coords = np.array(poly.exterior.coords)
+                pts = np.column_stack([
+                    ext_coords[:, 0] * coord_scale,
+                    h_px - ext_coords[:, 1] * coord_scale,
+                ]).astype(np.int32)
+                cv2.fillPoly(canvas, [pts], (*bgr_color, int(rgba[3])))
+
+                for interior in poly.interiors:
+                    hole_coords = np.array(interior.coords)
+                    hole_pts = np.column_stack([
+                        hole_coords[:, 0] * coord_scale,
+                        h_px - hole_coords[:, 1] * coord_scale,
+                    ]).astype(np.int32)
+                    cv2.fillPoly(canvas, [hole_pts], (255, 255, 255, 255))
+
+        return canvas
 
     # ── Stage 2: Occlusion clipping (Chroma-style) ───────────────────────
 
@@ -507,12 +1205,18 @@ class VectorProcessor:
         """Extrude each shape per channel, merging consecutive same-channel
         layers into single volumes (run-length encoding).
 
+        Before extrusion, shapes sharing the same (channel, layer-run) are
+        merged via ``unary_union`` + morphological closing to eliminate gaps
+        between adjacent same-colour regions (Fix 7).
+
         When *face_up* is True the layer order is reversed so that
         recipe[N-1] sits at the lowest Z (just above *optical_z_base*)
         and recipe[0] at the highest Z — matching ``_build_voxel_matrix_faceup``
         semantics used by the raster path for 5-Color Extended.
         """
-        meshes_by_slot = {}
+        # --- Fix 7: group shapes by (channel, run) and merge ---
+        # Key: (channel_id, run_start, run_end)  Value: list of geometries
+        run_groups: dict[tuple, list] = {}
 
         for item in matched_shapes:
             geom = item["geometry"]
@@ -521,34 +1225,49 @@ class VectorProcessor:
                 continue
 
             layers_to_use = min(num_layers, len(recipe))
-
             runs_by_channel = VectorProcessor._build_channel_runs(recipe, layers_to_use, num_channels)
+
             for ch, runs in runs_by_channel.items():
                 if ch >= len(slot_names):
                     continue
-
-                slot_name = slot_names[ch]
-                if slot_name not in meshes_by_slot:
-                    meshes_by_slot[slot_name] = {"meshes": [], "mat_id": ch}
-
                 for run_start, run_end in runs:
-                    if face_up:
-                        inv_start = (num_layers - 1) - run_end
-                        inv_end = (num_layers - 1) - run_start
-                        z_bot = optical_z_base + inv_start * layer_h
-                        height = (inv_end - inv_start + 1) * layer_h
-                    else:
-                        z_bot = run_start * layer_h
-                        height = (run_end - run_start + 1) * layer_h
+                    key = (ch, run_start, run_end)
+                    run_groups.setdefault(key, []).append(geom)
 
-                    new_meshes = VectorProcessor._extrude_geometry(
-                        geom,
-                        height=height,
-                        z_offset=z_bot,
-                        scale=scale_factor,
-                        extrude_cache=extrude_cache,
-                    )
-                    meshes_by_slot[slot_name]["meshes"].extend(new_meshes)
+        meshes_by_slot = {}
+        for (ch, run_start, run_end), geoms in run_groups.items():
+            slot_name = slot_names[ch]
+            if slot_name not in meshes_by_slot:
+                meshes_by_slot[slot_name] = {"meshes": [], "mat_id": ch}
+
+            if len(geoms) > 1:
+                try:
+                    merged = unary_union(geoms)
+                    merged = VectorProcessor._normalize_contours(merged, close_delta_mm=0.03)
+                    if merged is None or merged.is_empty:
+                        merged = unary_union(geoms)
+                except Exception:
+                    merged = unary_union(geoms)
+            else:
+                merged = geoms[0]
+
+            if face_up:
+                inv_start = (num_layers - 1) - run_end
+                inv_end = (num_layers - 1) - run_start
+                z_bot = optical_z_base + inv_start * layer_h
+                height = (inv_end - inv_start + 1) * layer_h
+            else:
+                z_bot = run_start * layer_h
+                height = (run_end - run_start + 1) * layer_h
+
+            new_meshes = VectorProcessor._extrude_geometry(
+                merged,
+                height=height,
+                z_offset=z_bot,
+                scale=scale_factor,
+                extrude_cache=extrude_cache,
+            )
+            meshes_by_slot[slot_name]["meshes"].extend(new_meshes)
 
         return meshes_by_slot
 
@@ -617,19 +1336,21 @@ class VectorProcessor:
         except Exception as e:
             raise ValueError(f"Failed to parse SVG: {e}")
 
-        def _sample_path_to_polygon(path_obj):
-            sample_step_svg = max(0.5, min(4.0, self.sampling_precision * 20.0))
-            max_total_points = 4000
+        gradient_defs = VectorProcessor._parse_gradient_defs(svg_path)
+        _url_re = re.compile(r"url\(#([^)]+)\)")
 
+        tol_svg = self.sampling_precision / max(target_width_mm / 100.0, 0.01)
+
+        def _sample_path_to_polygon(path_obj):
             try:
                 segments = list(path_obj.segments())
             except Exception:
                 segments = None
 
             if segments and len(segments) > 1:
-                coords = _sample_segments(segments, sample_step_svg, max_total_points)
+                coords = _flatten_segments(segments, tol_svg)
             else:
-                coords = _sample_parametric(path_obj, sample_step_svg, max_total_points)
+                coords = _flatten_segments_fallback(path_obj, tol_svg)
 
             if len(coords) < 3:
                 return None
@@ -647,97 +1368,58 @@ class VectorProcessor:
                 return poly
             return None
 
-        def _sample_segments(segments, step, max_points):
-            """Per-segment vectorized sampling.
-            直线段仅取起点；贝塞尔曲线用 numpy 向量化 Bernstein 多项式求值，
-            避免逐点调用 seg.point(t) 的 Python 循环开销。
-            """
-            seg_info = []
+        def _flatten_segments(segments, tolerance):
+            """Adaptive de Casteljau flattening for each segment."""
+            coords = []
             for seg in segments:
                 if isinstance(seg, Move):
                     continue
                 if isinstance(seg, (Line, Close)):
-                    dx = seg.end.x - seg.start.x
-                    dy = seg.end.y - seg.start.y
-                    seg_info.append((seg, (dx * dx + dy * dy) ** 0.5, "line"))
-                elif isinstance(seg, CubicBezier):
-                    dx_c = (abs(seg.start.x - seg.control1.x)
-                            + abs(seg.control1.x - seg.control2.x)
-                            + abs(seg.control2.x - seg.end.x))
-                    dy_c = (abs(seg.start.y - seg.control1.y)
-                            + abs(seg.control1.y - seg.control2.y)
-                            + abs(seg.control2.y - seg.end.y))
-                    dx_d = seg.end.x - seg.start.x
-                    dy_d = seg.end.y - seg.start.y
-                    chord = (dx_d * dx_d + dy_d * dy_d) ** 0.5
-                    ctrl = (dx_c * dx_c + dy_c * dy_c) ** 0.5
-                    seg_info.append((seg, max((chord + ctrl) * 0.5, 0.01), "cubic"))
-                elif isinstance(seg, QuadraticBezier):
-                    dx_d = seg.end.x - seg.start.x
-                    dy_d = seg.end.y - seg.start.y
-                    chord = (dx_d * dx_d + dy_d * dy_d) ** 0.5
-                    dx_c = abs(seg.start.x - seg.control.x) + abs(seg.control.x - seg.end.x)
-                    dy_c = abs(seg.start.y - seg.control.y) + abs(seg.control.y - seg.end.y)
-                    ctrl = (dx_c * dx_c + dy_c * dy_c) ** 0.5
-                    seg_info.append((seg, max((chord + ctrl) * 0.5, 0.01), "quad"))
-                else:
-                    try:
-                        sl = seg.length()
-                    except Exception:
-                        sl = 0
-                    if sl > 0:
-                        seg_info.append((seg, sl, "other"))
-
-            if not seg_info:
-                return []
-
-            total_len = sum(d[1] for d in seg_info)
-            if total_len == 0:
-                return []
-
-            budget = min(max(20, int(total_len / step)), max_points)
-            coords = []
-            for seg, sl, kind in seg_info:
-                if kind == "line":
                     coords.append((seg.start.x, seg.start.y))
-                elif kind == "cubic":
-                    n = max(2, int(round(budget * sl / total_len)))
-                    t = np.linspace(0, 1, n, endpoint=False)
-                    t1 = 1.0 - t
-                    xs = t1**3 * seg.start.x + 3 * t1**2 * t * seg.control1.x + 3 * t1 * t**2 * seg.control2.x + t**3 * seg.end.x
-                    ys = t1**3 * seg.start.y + 3 * t1**2 * t * seg.control1.y + 3 * t1 * t**2 * seg.control2.y + t**3 * seg.end.y
-                    coords.extend(zip(xs.tolist(), ys.tolist()))
-                elif kind == "quad":
-                    n = max(2, int(round(budget * sl / total_len)))
-                    t = np.linspace(0, 1, n, endpoint=False)
-                    t1 = 1.0 - t
-                    xs = t1**2 * seg.start.x + 2 * t1 * t * seg.control.x + t**2 * seg.end.x
-                    ys = t1**2 * seg.start.y + 2 * t1 * t * seg.control.y + t**2 * seg.end.y
-                    coords.extend(zip(xs.tolist(), ys.tolist()))
+                elif isinstance(seg, CubicBezier):
+                    if not coords:
+                        coords.append((seg.start.x, seg.start.y))
+                    _flatten_cubic(
+                        seg.start.x, seg.start.y,
+                        seg.control1.x, seg.control1.y,
+                        seg.control2.x, seg.control2.y,
+                        seg.end.x, seg.end.y,
+                        tolerance, coords, 0,
+                    )
+                elif isinstance(seg, QuadraticBezier):
+                    if not coords:
+                        coords.append((seg.start.x, seg.start.y))
+                    _flatten_quadratic(
+                        seg.start.x, seg.start.y,
+                        seg.control.x, seg.control.y,
+                        seg.end.x, seg.end.y,
+                        tolerance, coords, 0,
+                    )
                 else:
-                    n = max(2, int(round(budget * sl / total_len)))
-                    for tv in np.linspace(0, 1, n, endpoint=False):
-                        pt = seg.point(tv)
-                        coords.append((pt.x, pt.y))
-
+                    coords.append((seg.start.x, seg.start.y))
+                    try:
+                        for tv in np.linspace(0.1, 1.0, 10):
+                            pt = seg.point(tv)
+                            coords.append((pt.x, pt.y))
+                    except Exception:
+                        coords.append((seg.end.x, seg.end.y))
             return coords
 
-        def _sample_parametric(path_obj, step, max_points):
-            """Fallback: uniform t-parameter sampling across the whole path."""
+        def _flatten_segments_fallback(path_obj, tolerance):
+            """Fallback for paths that can't be decomposed into segments."""
             try:
                 path_len = path_obj.length()
             except Exception:
                 return []
             if path_len == 0:
                 return []
-            num_points = max(10, min(int(path_len / step), max_points))
-            t_vals = np.linspace(0, 1, num_points)
+            n = max(10, min(int(path_len / max(tolerance, 0.01)), 8000))
+            t_vals = np.linspace(0, 1, n)
             pts = [path_obj.point(t) for t in t_vals]
             return [(p.x, p.y) for p in pts]
 
         raw_shapes = []
         skipped_types = {}
-        stroke_only_count = 0
         skipped_gradient_count = 0
         skipped_polygon_count = 0
         print("[VECTOR] Parsing SVG geometry...")
@@ -753,10 +1435,7 @@ class VectorProcessor:
                 and element.fill.value is not None
                 and str(element.fill.value).lower() != "none"
             )
-            has_stroke = (
-                element.stroke is not None and element.stroke.value is not None and element.stroke.value != "none"
-            )
-            if not has_fill and not has_stroke:
+            if not has_fill:
                 continue
 
             if isinstance(element, Shape) and not isinstance(element, Path):
@@ -765,22 +1444,27 @@ class VectorProcessor:
                 except Exception:
                     continue
 
+            grad_info = None
+            raw_fill = None
+            vals = getattr(element, "values", None)
+            if isinstance(vals, dict):
+                raw_fill = vals.get("fill", "")
+            if raw_fill and gradient_defs:
+                m = _url_re.match(str(raw_fill))
+                if m:
+                    grad_info = gradient_defs.get(m.group(1))
+            is_gradient = grad_info is not None
+
             rgb = None
-            if has_fill:
+            if has_fill and not is_gradient:
                 try:
                     rgb = (element.fill.red, element.fill.green, element.fill.blue)
                 except (AttributeError, TypeError, ValueError):
                     rgb = None
-            if rgb is None and has_stroke:
-                try:
-                    rgb = (element.stroke.red, element.stroke.green, element.stroke.blue)
-                    stroke_only_count += 1
-                except (AttributeError, TypeError, ValueError):
-                    rgb = None
-            if rgb is None:
+            if rgb is None and not is_gradient:
                 fill_val = getattr(element.fill, 'value', None) if element.fill else None
                 eid = getattr(element, 'id', None) or f"element#{skipped_gradient_count}"
-                print(f"[VECTOR] WARNING: Skipping '{eid}' — unresolvable fill: {fill_val}")
+                _log.debug(f"Skipping '{eid}' — unresolvable fill: {fill_val}")
                 skipped_gradient_count += 1
                 continue
 
@@ -800,15 +1484,59 @@ class VectorProcessor:
                     continue
                 subpath_polys.append(poly)
 
+            # --- Fix 4: gradient flattening ---
+            if is_gradient:
+                grad_shapes = VectorProcessor._flatten_gradient_shape(grad_info, subpath_polys)
+                for gs in grad_shapes:
+                    p = gs["poly"]
+                    if p is not None and not p.is_empty:
+                        p = VectorProcessor._normalize_contours(p)
+                        if p is not None and not p.is_empty:
+                            raw_shapes.append({"poly": p, "color": gs["color"]})
+                if not grad_shapes:
+                    skipped_gradient_count += 1
+                continue
+
+            # --- Fix 2: fill-rule aware subpath merging ---
+            fill_rule = "nonzero"
+            try:
+                fr = getattr(element, "fill_rule", None)
+                if fr is not None:
+                    fill_rule = str(fr).strip().lower()
+                if fill_rule not in ("nonzero", "evenodd") or fr is None:
+                    vals = getattr(element, "values", None)
+                    if isinstance(vals, dict):
+                        vfr = vals.get("fill-rule", "").strip().lower()
+                        if vfr in ("nonzero", "evenodd"):
+                            fill_rule = vfr
+                    elif hasattr(vals, '__getitem__'):
+                        try:
+                            vfr = str(vals["fill-rule"]).strip().lower()
+                            if vfr in ("nonzero", "evenodd"):
+                                fill_rule = vfr
+                        except (KeyError, TypeError):
+                            pass
+            except Exception:
+                fill_rule = "nonzero"
+            if fill_rule not in ("nonzero", "evenodd"):
+                fill_rule = "nonzero"
+
             if len(subpath_polys) == 1:
                 result_poly = subpath_polys[0]
             elif len(subpath_polys) > 1:
-                combined = subpath_polys[0]
-                for sp in subpath_polys[1:]:
+                if fill_rule == "evenodd":
+                    combined = subpath_polys[0]
+                    for sp in subpath_polys[1:]:
+                        try:
+                            combined = combined.symmetric_difference(sp)
+                        except Exception:
+                            pass
+                else:
                     try:
-                        combined = combined.symmetric_difference(sp)
+                        combined = unary_union(subpath_polys)
                     except Exception:
-                        pass
+                        combined = subpath_polys[0]
+
                 if combined is not None and not combined.is_empty:
                     if not combined.is_valid:
                         combined = make_valid(combined)
@@ -828,32 +1556,26 @@ class VectorProcessor:
                 skipped_polygon_count += 1
                 continue
 
-            if not has_fill and has_stroke:
-                try:
-                    sw = float(getattr(element, "stroke_width", 1.0) or 1.0)
-                    result_poly = result_poly.buffer(sw / 2.0, cap_style="round", join_style="round")
-                    if result_poly.is_empty:
-                        continue
-                except Exception:
-                    continue
+            # --- Fix 3: morphological closing ---
+            result_poly = VectorProcessor._normalize_contours(result_poly)
+            if result_poly is None or result_poly.is_empty:
+                skipped_polygon_count += 1
+                continue
 
             raw_shapes.append({"poly": result_poly, "color": rgb})
 
         if skipped_types:
-            print(f"[VECTOR] Skipped non-path elements: {skipped_types}")
-        if stroke_only_count > 0:
-            print(f"[VECTOR] Converted {stroke_only_count} stroke-only elements to filled polygons")
+            _log.info(f"[VECTOR] Skipped non-path elements: {skipped_types}")
         if skipped_gradient_count > 0:
-            print(f"[VECTOR] Skipped {skipped_gradient_count} elements with gradient/unresolvable fills")
+            _log.info(f"[VECTOR] {skipped_gradient_count} gradient fills could not be fully resolved")
         if skipped_polygon_count > 0:
-            print(f"[VECTOR] Skipped {skipped_polygon_count} elements (invalid polygon after sampling)")
-        print(f"[VECTOR] Successfully parsed {len(raw_shapes)} shapes from SVG")
+            _log.info(f"[VECTOR] Skipped {skipped_polygon_count} elements (invalid polygon after sampling)")
+        _log.info(f"[VECTOR] Successfully parsed {len(raw_shapes)} shapes from SVG")
 
         parse_warnings = []
         if skipped_gradient_count > 0:
             parse_warnings.append(
-                f"{skipped_gradient_count} elements with gradient/pattern fills were skipped "
-                f"(FDM printing requires solid colors)"
+                f"{skipped_gradient_count} gradient/pattern fills could not be fully resolved"
             )
         if skipped_polygon_count > 0:
             parse_warnings.append(
@@ -899,17 +1621,11 @@ class VectorProcessor:
             raise ValueError("Invalid geometry width (0)")
 
         scale_factor = target_width_mm / real_w
-        simplify_tol_svg = max(0.0, (self.sampling_precision / max(scale_factor, 1e-9)) * 0.5)
         min_area_svg = max(0.0, (self.sampling_precision**2) / max(scale_factor**2, 1e-12) * 0.25)
 
         final_shapes = []
         for item in raw_shapes:
             shifted = affinity.translate(item["poly"], xoff=-gx0, yoff=-gy0)
-            if simplify_tol_svg > 0.0:
-                try:
-                    shifted = shifted.simplify(simplify_tol_svg, preserve_topology=True)
-                except Exception:
-                    pass
 
             if not shifted.is_valid:
                 shifted = make_valid(shifted)

@@ -4,6 +4,7 @@ Covers:
     1. Occlusion clipping: reverse-order accumulative difference
     2. Run-length extrusion: consecutive same-channel layers merged
     3. Output ordering: meshes_by_slot sorted by material ID
+    4. Public API: analyze_svg, build_mesh, render_preview, svg_to_mesh backward compat
 """
 
 import sys
@@ -13,6 +14,7 @@ import importlib.util
 from unittest.mock import patch
 
 import pytest
+import numpy as np
 from shapely.geometry import Polygon, box
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -34,6 +36,7 @@ if "core" not in sys.modules:
 sys.modules["core.vector_engine"] = _ve
 _spec.loader.exec_module(_ve)
 VectorProcessor = _ve.VectorProcessor
+VectorAnalysis = _ve.VectorAnalysis
 
 
 # =====================================================================
@@ -311,8 +314,8 @@ class TestExtrudeGeometry:
 class TestParseSvgSubpaths:
 
     def test_split_multi_subpath_path_into_multiple_polygons(self, tmp_path):
-        """Single <path> with two non-overlapping subpaths should yield
-        one shape entry whose geometry covers both subpath areas."""
+        """Single <path> with two non-overlapping subpaths: _parse_svg
+        returns 1 MultiPolygon; splitting happens post-clip in svg_to_mesh."""
         svg_file = tmp_path / "multi_subpath.svg"
         svg_file.write_text(
             (
@@ -329,9 +332,9 @@ class TestParseSvgSubpaths:
         shapes, scale, bbox = vp._parse_svg(str(svg_file), target_width_mm=100.0)
 
         assert len(shapes) == 1
-        combined = shapes[0]["poly"]
-        assert abs(combined.area - 20000.0) < 100.0
-        assert shapes[0]["color"] == (255, 0, 0)
+        total_area = sum(s["poly"].area for s in shapes)
+        assert abs(total_area - 20000.0) < 100.0
+        assert all(s["color"] == (255, 0, 0) for s in shapes)
         assert scale > 0
         assert bbox[2] > 0
 
@@ -382,3 +385,96 @@ class TestParseSvgSubpaths:
 
         assert abs(red_area - 10000.0) < 5.0
         assert abs(blue_area - 10000.0) < 5.0
+
+
+# =====================================================================
+# 6. VectorAnalysis dataclass
+# =====================================================================
+
+class TestVectorAnalysis:
+    """Verify VectorAnalysis dataclass construction and defaults."""
+
+    def test_dataclass_fields(self):
+        a = VectorAnalysis(
+            shape_data=[],
+            clipped_shapes=[],
+            matched_shapes=[],
+            silhouette=None,
+            scale_factor=0.5,
+            bbox=(0, 0, 100, 100),
+            color_conf={},
+            slot_names=["White"],
+            num_channels=1,
+            num_layers=4,
+            preview_colors={0: [255, 255, 255, 255]},
+        )
+        assert a.scale_factor == 0.5
+        assert a.num_channels == 1
+        assert a.stage_timings == {}
+
+    def test_stage_timings_default(self):
+        a = VectorAnalysis(
+            shape_data=[], clipped_shapes=[], matched_shapes=[], silhouette=None,
+            scale_factor=1.0, bbox=(0, 0, 10, 10), color_conf={},
+            slot_names=[], num_channels=0, num_layers=0, preview_colors={},
+        )
+        a.stage_timings["test"] = 1.23
+        assert a.stage_timings == {"test": 1.23}
+
+
+# =====================================================================
+# 7. render_preview
+# =====================================================================
+
+class TestRenderPreview:
+    """Verify render_preview produces correct output."""
+
+    def _make_analysis(self, shapes, silhouette=None, w=100, h=100, sf=1.0):
+        return VectorAnalysis(
+            shape_data=[],
+            clipped_shapes=[],
+            matched_shapes=shapes,
+            silhouette=silhouette,
+            scale_factor=sf,
+            bbox=(0, 0, w, h),
+            color_conf={},
+            slot_names=["White", "Red"],
+            num_channels=2,
+            num_layers=4,
+            preview_colors={0: [255, 255, 255, 255], 1: [255, 0, 0, 255]},
+        )
+
+    def test_empty_shapes_returns_white(self):
+        analysis = self._make_analysis([], w=10, h=10)
+        img = VectorProcessor.render_preview(analysis, pixels_per_mm=1.0)
+        assert img.shape[2] == 4
+        assert img.dtype == np.uint8
+        assert np.all(img[:, :, :3] == 255)
+
+    def test_basic_shape_rendered(self):
+        shape = {
+            "geometry": box(2, 2, 8, 8),
+            "recipe": [1, 1, 0, 0],
+            "color": (255, 0, 0),
+        }
+        analysis = self._make_analysis([shape], w=10, h=10, sf=1.0)
+        img = VectorProcessor.render_preview(analysis, pixels_per_mm=10.0)
+        assert img.shape == (100, 100, 4)
+        center = img[50, 50, :3]
+        assert not np.all(center == 255), "Center should be colored, not white"
+
+    def test_max_width_clamping(self):
+        shape = {
+            "geometry": box(0, 0, 200, 100),
+            "recipe": [1, 1, 0, 0],
+            "color": (255, 0, 0),
+        }
+        analysis = self._make_analysis([shape], w=200, h=100, sf=1.0)
+        img = VectorProcessor.render_preview(analysis, pixels_per_mm=20.0, max_width_px=500)
+        assert img.shape[1] <= 500
+
+    def test_rgba_output_dtype(self):
+        analysis = self._make_analysis([], w=5, h=5, sf=1.0)
+        img = VectorProcessor.render_preview(analysis, pixels_per_mm=2.0)
+        assert img.dtype == np.uint8
+        assert img.shape[2] == 4
