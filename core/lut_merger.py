@@ -1,4 +1,4 @@
-﻿"""
+"""
 Lumina Studio - LUT Merger Engine
 
 Core module for merging LUT color cards from different color modes.

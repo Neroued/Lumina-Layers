@@ -84,11 +84,11 @@ export interface RegionData {
 // ========== Pending Replacement Types ==========
 
 export interface PendingReplacement {
-  sourceHex: string; // 鍘熻壊 hex锛堜笉甯?#锛?
-  targetHex: string; // 鐩爣鑹?hex锛堜笉甯?#锛?
-  mode: SelectionMode; // 瑙﹀彂鏃剁殑閫夋嫨妯″紡
-  sourceColors?: string[]; // select-all 鎵归噺妯″紡涓嬬殑澶氫釜婧愯壊
-  sourceRegions?: RegionData[]; // multi-select 妯″紡涓嬬殑澶氫釜杩為€氬尯鍩?
+  sourceHex: string; // 原色 hex锛堜笉甯?#锛?
+  targetHex: string; // 目标色 hex（不带 #）
+  mode: SelectionMode; // 触发时的选择模式
+  sourceColors?: string[]; // select-all 批量模式下的多个源色
+  sourceRegions?: RegionData[]; // multi-select 模式下的多个连通区域
 }
 
 // ========== Helpers ==========
@@ -134,15 +134,15 @@ export function isValidImageType(mimeType: string, fileName?: string): boolean {
 // ========== State Interface ==========
 
 export interface ConverterState {
-  // 鍥剧墖
+  // 图片
   imageFile: File | null;
   imagePreviewUrl: string | null;
   aspectRatio: number | null;
 
-  // 浼氳瘽锛堥瑙堝悗鐢卞悗绔繑鍥烇級
+  // 会话（预览后由后端返回）
   sessionId: string | null;
 
-  // 鍩虹鍙傛暟
+  // 基础参数
   lut_name: string;
   target_width_mm: number;
   target_height_mm: number;
@@ -151,7 +151,7 @@ export interface ConverterState {
   color_mode: ColorMode;
   modeling_mode: ModelingMode;
 
-  // 楂樼骇璁剧疆
+  // 高级设置
   auto_bg: boolean;
   bg_tol: number;
   quantize_colors: number;
@@ -160,69 +160,69 @@ export interface ConverterState {
   chroma_gate: number;
   separate_backing: boolean;
 
-  // 鎸備欢鐜?
+  // 挂件环
   add_loop: boolean;
   loop_width: number;
   loop_length: number;
   loop_hole: number;
-  loop_angle: number; // -180 鍒?180 搴︼紝榛樿 0
-  loop_offset_x: number; // -20 鍒?20 mm锛岄粯璁?0
-  loop_offset_y: number; // -20 鍒?20 mm锛岄粯璁?0
-  loop_position_preset: string; // 榛樿 "top-center"
+  loop_angle: number; // -180 到 180 度，默认 0
+  loop_offset_x: number; // -20 到 20 mm，默认 0
+  loop_offset_y: number; // -20 到 20 mm，默认 0
+  loop_position_preset: string; // 默认 "top-center"
 
-  // 娴洉
+  // 浮雕
   enable_relief: boolean;
   color_height_map: Record<string, number>;
   heightmap_max_height: number;
 
-  // 鎻忚竟
+  // 描边
   enable_outline: boolean;
   outline_width: number;
 
-  // 鎺愪笣鐝愮悈
+  // 掐丝珐琅
   enable_cloisonne: boolean;
   wire_width_mm: number;
   wire_height_mm: number;
 
-  // 娑傚眰
+  // 涂层
   enable_coating: boolean;
   coating_height_mm: number;
 
-  // 澶х敾骞?
+  // 大画幅
   largeFormatEnabled: boolean;
   tileWidthMm: number;
   tileHeightMm: number;
 
-  // 棰滆壊鏇挎崲
+  // 颜色替换
   replacement_regions: ColorReplacementItem[];
   free_color_set: Set<string>;
 
-  // 璋冭壊鏉夸笌閫夋嫨
+  // 调色板与选择
   selectedColor: string | null;
   palette: PaletteEntry[];
 
-  // 棰滆壊鏇挎崲鏄犲皠锛堢函鍓嶇锛?
+  // 颜色替换映射（纯前端）
   colorRemapMap: Record<string, string>;
   remapHistory: Record<string, string>[];
 
-  // 棰滆壊杞粨鏁版嵁锛堝悗绔?OpenCV 鎻愬彇锛岀敤浜?3D 楂樹寒锛?
+  // 颜色轮廓数据（后端 OpenCV 提取，用于 3D 高亮）
   colorContours: Record<string, number[][][]>;
-  // 娴洉鑱斿姩
+  // 浮雕联动
   autoHeightMode: AutoHeightMode;
   heightmapFile: File | null;
   heightmapThumbnailUrl: string | null;
 
-  // 3D 棰勮
+  // 3D 预览
   previewGlbUrl: string | null;
 
-  // 棰勮鏃剁殑鍘熷灏哄锛堢敤浜庡疄鏃剁缉鏀炬瘮渚嬭绠楋級
-  preview_width_mm: number | null; // 棰勮鏃剁殑鍘熷瀹藉害
-  preview_height_mm: number | null; // 棰勮鏃剁殑鍘熷楂樺害
-  preview_spacer_thick: number | null; // 棰勮鏃剁殑鍘熷鍘氬害
-  previewPixelWidth: number | null; // 棰勮鍥惧儚鍍忕礌瀹藉害锛堢敤浜?3D鈫掑儚绱犲潗鏍囪浆鎹級
-  previewPixelHeight: number | null; // 棰勮鍥惧儚鍍忕礌楂樺害锛堢敤浜?3D鈫掑儚绱犲潗鏍囪浆鎹級
+  // 预览时的原始尺寸（用于实时缩放比例计算）
+  preview_width_mm: number | null; // 预览时的原始宽度
+  preview_height_mm: number | null; // 预览时的原始高度
+  preview_spacer_thick: number | null; // 预览时的原始厚度
+  previewPixelWidth: number | null; // 预览图像像素宽度（用于 3D→像素坐标转换）
+  previewPixelHeight: number | null; // 预览图像像素高度（用于 3D→像素坐标转换）
 
-  // 妯″瀷杈圭晫锛堜緵 KeychainRing3D 瀹氫綅锛?
+  // 模型边界（供 KeychainRing3D 定位）
   modelBounds: {
     minX: number;
     maxX: number;
@@ -231,78 +231,78 @@ export interface ConverterState {
     maxZ: number;
   } | null;
 
-  // 瑁佸壀
+  // 裁剪
   enableCrop: boolean;
   cropModalOpen: boolean;
   isCropping: boolean;
 
-  // 鑷姩妫€娴嬮鑹?
+  // 自动检测颜色
   autoDetectColorsLoading: boolean;
 
-  // UI 鐘舵€?
+  // UI 状态
   isLoading: boolean;
   isGenerating: boolean;
   error: string | null;
   previewImageUrl: string | null;
   modelUrl: string | null;
 
-  // LUT 鍒楄〃
+  // LUT 列表
   lutList: string[];
   lutListLoading: boolean;
   lutListFull: LutInfo[];
 
-  // LUT 鍏ㄩ儴棰滆壊
+  // LUT 全部颜色
   lutColors: LutColorEntry[];
   lutColorsLoading: boolean;
   lutColorsLutName: string;
 
-  // 鐑簥灏哄
+  // 热床尺寸
   bed_label: string;
   bedSizes: BedSizeItem[];
   bedSizesLoading: boolean;
 
-  // 鎵归噺妯″紡
+  // 批量模式
   batchMode: boolean;
   batchFiles: File[];
   batchLoading: boolean;
   batchResult: BatchResponse | null;
 
-  // 棰滆壊鏇挎崲棰勮
+  // 颜色替换预览
   replacePreviewLoading: boolean;
   originalPreviewUrl: string | null;
 
-  // 鍒囩墖闆嗘垚锛?MF 璺緞
+  // 切片集成：3MF 路径
   threemfDiskPath: string | null;
   downloadUrl: string | null;
 
-  // 鍒嗗眰棰勮
+  // 分层预览
   layerImages: { layer_index: number; name: string; url: string }[];
   layerImagesLoading: boolean;
   layerImagesOpen: boolean;
 
-  // 棰滆壊閫夋嫨妯″紡
+  // 颜色选择模式
   selectionMode: SelectionMode;
   selectedColors: Set<string>;
   regionData: RegionData | null;
   selectedRegions: RegionData[];
 
-  // 寰呯‘璁ら鑹叉浛鎹?
+  // 待确认颜色替换
   pendingReplacement: PendingReplacement | null;
 
-  // 鍖哄煙鏇挎崲璁℃暟锛坈urrent 妯″紡涓嶈蛋 colorRemapMap锛岄渶瑕佺嫭绔嬭鏁颁互鍚敤娓呴櫎鎸夐挳锛?
+  // 区域替换计数（current 模式不走 colorRemapMap，需要独立计数以启用清除按钮）
   regionReplacementCount: number;
 
-  // 褰撳墠鍥剧墖鏄惁宸叉墜鍔ㄧ偣鍑昏繃棰勮鎸夐挳锛堣嚜鍔ㄩ瑙堢殑鍓嶇疆鏉′欢锛?
+  // 当前图片是否已手动点击过预览按钮（自动预览的前置条件）
   hasManualPreview: boolean;
 }
 
 // ========== Actions Interface ==========
 
 export interface ConverterActions {
-  // 鍥剧墖
+  // 图片
   setImageFile: (file: File | null) => void;
 
-  // 鍙傛暟 setter
+  // 参数 setter
   setLutName: (name: string) => void;
   setTargetWidthMm: (width: number) => void;
   setTargetHeightMm: (height: number) => void;
@@ -336,20 +336,20 @@ export interface ConverterActions {
   setEnableCoating: (enabled: boolean) => void;
   setCoatingHeightMm: (height: number) => void;
 
-  // 澶х敾骞?
+  // 大画幅
   setLargeFormatEnabled: (enabled: boolean) => void;
   setTileWidthMm: (width: number) => void;
   setTileHeightMm: (height: number) => void;
 
-  // 鐑簥灏哄
+  // 热床尺寸
   setBedLabel: (label: string) => void;
   fetchBedSizes: () => Promise<void>;
 
-  // 璋冭壊鏉夸笌閫夋嫨
+  // 调色板与选择
   setSelectedColor: (hex: string | null) => void;
   setPalette: (entries: PaletteEntry[]) => void;
 
-  // 棰滆壊閫夋嫨妯″紡
+  // 颜色选择模式
   setSelectionMode: (mode: SelectionMode) => void;
   toggleColorInSelection: (hex: string) => void;
   applyBatchColorRemap: (newHex: string) => Promise<void>;
@@ -358,38 +358,38 @@ export interface ConverterActions {
   removeRegionFromSelection: (regionId: string) => void;
   applyRegionReplace: (newHex: string) => Promise<void>;
 
-  // 寰呯‘璁ら鑹叉浛鎹?
+  // 待确认颜色替换
   setPendingReplacement: (pending: PendingReplacement | null) => void;
   confirmReplacement: () => Promise<void>;
 
-  // 棰滆壊鏇挎崲锛堢函鍓嶇锛?
+  // 颜色替换（纯前端）
   applyColorRemap: (origHex: string, newHex: string) => void;
   undoColorRemap: () => void;
   clearAllRemaps: () => void;
 
-  // 娴洉楂樺害
+  // 浮雕高度
   updateColorHeight: (hex: string, heightMm: number) => void;
   applyAutoHeight: (mode: "darker-higher" | "lighter-higher") => void;
   setAutoHeightMode: (mode: AutoHeightMode) => void;
 
-  // 楂樺害鍥?
+  // 高度图
   setHeightmapFile: (file: File | null) => void;
   uploadHeightmap: () => Promise<void>;
 
-  // GLB 棰勮
+  // GLB 预览
   setPreviewGlbUrl: (url: string | null) => void;
 
-  // 妯″瀷杈圭晫
+  // 模型边界
   setModelBounds: (bounds: ConverterState["modelBounds"]) => void;
 
-  // API 鎿嶄綔
+  // API 操作
   uploadLut: (file: File) => Promise<void>;
   fetchLutList: () => Promise<void>;
   fetchLutColors: (lutName: string) => Promise<void>;
   submitPreview: () => Promise<void>;
   submitGenerate: () => Promise<string | null>;
 
-  // 瑁佸壀
+  // 裁剪
   setEnableCrop: (enabled: boolean) => void;
   setCropModalOpen: (open: boolean) => void;
   submitCrop: (
@@ -399,34 +399,34 @@ export interface ConverterActions {
     height: number,
   ) => Promise<void>;
 
-  // 鑷姩妫€娴嬮鑹?
+  // 自动检测颜色
   autoDetectColors: () => Promise<void>;
 
-  // 鎵归噺妯″紡
+  // 批量模式
   addBatchFiles: (files: File[]) => void;
   removeBatchFile: (index: number) => void;
   clearBatchFiles: () => void;
   submitBatch: () => Promise<void>;
 
-  // 缁熶竴鏂囦欢閫夋嫨锛坅uto-batch-multiselect锛?
+  // 统一文件选择（auto-batch-multiselect）
   handleFilesSelect: (files: File[]) => void;
 
-  // 棰滆壊鏇挎崲棰勮
+  // 颜色替换预览
   submitReplacePreview: () => Promise<void>;
   submitSingleReplace: (origHex: string, newHex: string) => Promise<void>;
 
-  // 瀹屾暣娴佹按绾匡紙preview 鈫?generate锛?
+  // 完整流水线（preview → generate）
   submitFullPipeline: () => Promise<string | null>;
 
-  // 鑷敱鑹?
+  // 自由色
   toggleFreeColor: (hex: string) => void;
   clearFreeColors: () => void;
 
-  // UI 鐘舵€?
+  // UI 状态
   setError: (error: string | null) => void;
   clearError: () => void;
 
-  // 鍒嗗眰棰勮
+  // 分层预览
   fetchLayerImages: () => Promise<void>;
   setLayerImagesOpen: (open: boolean) => void;
 }
@@ -605,7 +605,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
   (set, _get) => ({
     ...DEFAULT_STATE,
 
-    // --- 鍥剧墖 ---
+    // --- 图片 ---
     setImageFile: (file: File | null) => {
       // Revoke previous blob URL to avoid memory leaks
       const prev = _get().imagePreviewUrl;
@@ -664,7 +664,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       console.log("[DEBUG] setImageFile: cleared layerImages");
     },
 
-    // --- 鍩虹鍙傛暟 ---
+    // --- 基础参数 ---
     setLutName: (name: string) => {
       const state = _get();
       const lutInfo = state.lutListFull.find((l) => l.name === name);
@@ -678,7 +678,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       } catch {
         /* noop */
       }
-      // 浠呭綋 LUT 鍚嶇О瀹為檯鍙樺寲鏃惰幏鍙栭鑹?
+      // 仅当 LUT 名称实际变化时获取颜色
       if (name && name !== state.lutColorsLutName) {
         _get().fetchLutColors(name);
       }
@@ -738,7 +738,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
     setModelingMode: (mode: ModelingMode) =>
       set({ modeling_mode: mode, threemfDiskPath: null, downloadUrl: null }),
 
-    // --- 楂樼骇璁剧疆 ---
+    // --- 高级设置 ---
     setAutoBg: (enabled: boolean) =>
       set({ auto_bg: enabled, threemfDiskPath: null, downloadUrl: null }),
     setBgTol: (tol: number) =>
@@ -792,7 +792,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       set({ loop_position_preset: preset });
     },
 
-    // --- 娴洉锛堜簰鏂ワ級 ---
+    // --- 浮雕（互斥） ---
     setEnableRelief: (enabled: boolean) => {
       set((state) => {
         const updates: Partial<ConverterState> = {
@@ -847,7 +847,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       }
     },
 
-    // --- 鎻忚竟 ---
+    // --- 描边 ---
     setEnableOutline: (enabled: boolean) =>
       set({
         enable_outline: enabled,
@@ -857,7 +857,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
     setOutlineWidth: (width: number) =>
       set({ outline_width: clampValue(width, 0.5, 10.0) }),
 
-    // --- 鎺愪笣鐝愮悈锛堜簰鏂ワ級 ---
+    // --- 掐丝珐琅（互斥） ---
     setEnableCloisonne: (enabled: boolean) =>
       set((state) => ({
         enable_cloisonne: enabled,
@@ -870,7 +870,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
     setWireHeightMm: (height: number) =>
       set({ wire_height_mm: clampValue(height, 0.04, 1.0) }),
 
-    // --- 娑傚眰 ---
+    // --- 涂层 ---
     setEnableCoating: (enabled: boolean) =>
       set({
         enable_coating: enabled,
@@ -880,7 +880,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
     setCoatingHeightMm: (height: number) =>
       set({ coating_height_mm: clampValue(height, 0.04, 0.12) }),
 
-    // --- 澶х敾骞?---
+    // --- 大画幅 ---
     setLargeFormatEnabled: (enabled: boolean) =>
       set({
         largeFormatEnabled: enabled,
@@ -900,20 +900,20 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         downloadUrl: null,
       }),
 
-    // --- 鐑簥灏哄 ---
+    // --- 热床尺寸 ---
     setBedLabel: (label: string) => {
       set({ bed_label: label });
     },
 
-    // --- 璋冭壊鏉夸笌閫夋嫨 ---
+    // --- 调色板与选择 ---
     setSelectedColor: (hex: string | null) => set({ selectedColor: hex }),
     setPalette: (entries: PaletteEntry[]) => set({ palette: entries }),
 
-    // --- 棰滆壊閫夋嫨妯″紡 ---
-    // current: 鍗曞尯鍩熸浛鎹紙3D 鐐瑰嚮 鈫?region-detect 鈫?鍙浛鎹㈣杩為€氬尯鍩燂級
-    // select-all: 鍏ㄥ眬鍗曡壊鏇挎崲锛堥€変竴涓鑹?鈫?鍏ㄥ浘璇ラ鑹查兘鏇挎崲锛?
-    // multi-select: 澶氬尯鍩熸浛鎹紙3D 鐐瑰嚮绱Н澶氫釜杩為€氬尯鍩?鈫?鎵归噺鏇挎崲锛?
-    // region: 淇濈暀鐨勫眬閮ㄥ尯鍩熸ā寮?
+    // --- 颜色选择模式 ---
+    // current: 单区域替换（3D 点击 → region-detect → 可替换该连通区域）
+    // select-all: 全局单色替换（选一个颜色 → 全图该颜色都替换）
+    // multi-select: 多区域替换（3D 点击累积多个连通区域 → 批量替换）
+    // region: 保留的局部区域模式
     setSelectionMode: (mode: SelectionMode) => {
       switch (mode) {
         case "current":
@@ -953,7 +953,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       }
     },
 
-    // --- 澶氶€夋ā寮忛鑹插垏鎹?---
+    // --- 多选模式颜色切换 ---
     toggleColorInSelection: (hex: string) => {
       set((state) => {
         const next = new Set(state.selectedColors);
@@ -966,17 +966,17 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       });
     },
 
-    // --- 鎵归噺棰滆壊鏇挎崲 ---
+    // --- 批量颜色替换 ---
     applyBatchColorRemap: async (newHex: string) => {
       const state = _get();
       const colors = Array.from(state.selectedColors);
       if (colors.length === 0) return;
 
-      // 1. 蹇収褰撳墠 colorRemapMap锛屼綔涓哄崟鏉¤褰曟帹鍏?remapHistory
+      // 1. 快照当前 colorRemapMap，作为单条记录推入 remapHistory
       const snapshot = { ...state.colorRemapMap };
       const newHistory = [...state.remapHistory, snapshot];
 
-      // 2. 鎵归噺鏇存柊 colorRemapMap
+      // 2. 批量更新 colorRemapMap
       const newMap = { ...state.colorRemapMap };
       for (const hex of colors) {
         newMap[hex] = newHex;
@@ -989,28 +989,28 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         downloadUrl: null,
       });
 
-      // 3. 渚濇璋冪敤鍚庣鏇挎崲
+      // 3. 依次调用后端替换
       try {
         for (const hex of colors) {
           await _get().submitSingleReplace(hex, newHex);
         }
         set({ replacePreviewLoading: false });
       } catch {
-        // 鍥炴粴鏁翠釜鎵归噺鎿嶄綔
+        // 回滚整个批量操作
         set({
           colorRemapMap: snapshot,
           remapHistory: state.remapHistory,
           replacePreviewLoading: false,
-          error: "鎵归噺棰滆壊鏇挎崲澶辫触",
+          error: "批量颜色替换失败",
         });
       }
     },
 
-    // --- 杩為€氬尯鍩熸娴嬶紙current 妯″紡锛氬崟鍖哄煙锛?---
+    // --- 连通区域检测（current 模式：单区域） ---
     detectRegion: async (x: number, y: number) => {
       const state = _get();
       if (!state.sessionId) {
-        set({ error: "璇峰厛棰勮鍥剧墖" });
+        set({ error: "请先预览图片" });
         return;
       }
       try {
@@ -1035,11 +1035,11 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       }
     },
 
-    // --- 杩為€氬尯鍩熺疮绉娴嬶紙multi-select 妯″紡锛氬鍖哄煙锛?---
+    // --- 连通区域累积检测（multi-select 模式：多区域） ---
     detectAndAccumulateRegion: async (x: number, y: number) => {
       const state = _get();
       if (!state.sessionId) {
-        set({ error: "璇峰厛棰勮鍥剧墖" });
+        set({ error: "请先预览图片" });
         return;
       }
       try {
@@ -1079,27 +1079,11 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       }
     },
 
-    // --- 绉婚櫎宸查€夊尯鍩?---
-    removeRegionFromSelection: (regionId: string) => {
-      set((state) => {
-        const next = state.selectedRegions.filter(
-          (r) => r.regionId !== regionId,
-        );
-        const lastRegion = next.length > 0 ? next[next.length - 1] : null;
-        return {
-          selectedRegions: next,
-          selectedColor: lastRegion
-            ? lastRegion.colorHex.replace(/^#/, "")
-            : null,
-        };
-      });
-    },
-
-    // --- 杩為€氬尯鍩熸浛鎹?---
+    // --- 连通区域替换 ---
     applyRegionReplace: async (newHex: string) => {
       const state = _get();
       if (!state.sessionId) {
-        set({ error: "璇峰厛棰勮鍥剧墖" });
+        set({ error: "请先预览图片" });
         return;
       }
       if (!state.regionData) {
@@ -1117,28 +1101,28 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           downloadUrl: null,
         };
 
-        // 鏇存柊 3D 棰勮 GLB URL锛堜粎褰撳悗绔繑鍥為潪绌?URL 鏃讹級
+        // 更新 3D 预览 GLB URL（仅当后端返回非空 URL 时）
         if (response.preview_glb_url) {
           updates.previewGlbUrl = normalizeResourceUrl(response.preview_glb_url);
         }
-        // preview_glb_url 涓?null 鏃朵笉娓呴櫎鐜版湁 previewGlbUrl
+        // preview_glb_url 为 null 时不清除现有 previewGlbUrl
 
-        // 鏇存柊棰滆壊杞粨鏁版嵁锛堜粎褰撳悗绔繑鍥為潪绌烘暟鎹椂锛?
+        // 更新颜色轮廓数据（仅当后端返回非空数据时）
         if (response.color_contours) {
           updates.colorContours = response.color_contours;
         }
 
-        // 涓嶉€掑 regionReplacementCount锛堝凡鍦?confirmReplacement 涓鐞嗭級
+        // 不递增 regionReplacementCount（已在 confirmReplacement 中处理）
         set(updates);
       } catch (err) {
         set({
           replacePreviewLoading: false,
-          error: err instanceof Error ? err.message : "鍖哄煙棰滆壊鏇挎崲澶辫触",
+          error: err instanceof Error ? err.message : "区域颜色替换失败",
         });
       }
     },
 
-    // --- 寰呯‘璁ら鑹叉浛鎹?---
+    // --- 待确认颜色替换 ---
     setPendingReplacement: (pending: PendingReplacement | null) => {
       set({ pendingReplacement: pending });
     },
@@ -1148,16 +1132,16 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       const pending = state.pendingReplacement;
       if (!pending) return;
 
-      // 娓呴櫎 pending 鐘舵€?
+      // 清除 pending 状态
       set({ pendingReplacement: null });
 
       switch (pending.mode) {
         case "select-all":
-          // 涔愯鏇存柊 colorRemapMap 鈫?3D 棰勮鍗虫椂鍝嶅簲
+          // 乐观更新 colorRemapMap → 3D 预览即时响应
           _get().applyColorRemap(pending.sourceHex, pending.targetHex);
           break;
         case "multi-select": {
-          // 澶氬尯鍩熸ā寮忥細椤哄簭 re-detect 鈫?replace 姣忎釜杩為€氬尯鍩?
+          // 多区域模式：顺序 re-detect → replace 每个连通区域
           const regions = pending.sourceRegions ?? [];
           if (regions.length === 0) break;
           const curState = _get();
@@ -1206,13 +1190,13 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         }
         case "current":
         case "region": {
-          // 涓嶆洿鏂?colorRemapMap锛堥伩鍏?3D 棰勮鍏ㄥ眬鍙樿壊锛?
-          // 浠呴€掑 regionReplacementCount 骞惰皟鐢ㄥ悗绔尯鍩熸浛鎹?
+          // 不更新 colorRemapMap（避免 3D 预览全局变色）
+          // 仅递增 regionReplacementCount 并调用后端区域替换
           const curState = _get();
           set({
             regionReplacementCount: curState.regionReplacementCount + 1,
           });
-          // 璋冪敤鍚庣 region-replace 鈫?2D 棰勮绮剧‘鍖哄煙鏇挎崲
+          // 调用后端 region-replace → 2D 预览精确区域替换
           if (curState.regionData) {
             await _get().applyRegionReplace(pending.targetHex);
           }
@@ -1221,13 +1205,13 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       }
     },
 
-    // --- 棰滆壊鏇挎崲锛堢函鍓嶇锛?---
+    // --- 颜色替换（纯前端） ---
     applyColorRemap: (origHex: string, newHex: string) => {
       const state = _get();
-      // 鎺ㄥ叆褰撳墠蹇収鍒?history
+      // 推入当前快照到 history
       const snapshot = { ...state.colorRemapMap };
       const newHistory = [...state.remapHistory, snapshot];
-      // 鏇存柊 map
+      // 更新 map
       const newMap = { ...state.colorRemapMap, [origHex]: newHex };
       set({
         colorRemapMap: newMap,
@@ -1235,7 +1219,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         threemfDiskPath: null,
         downloadUrl: null,
       });
-      // 绔嬪嵆瑙﹀彂鍚庣鏇挎崲棰勮
+      // 立即触发后端替换预览
       _get().submitSingleReplace(origHex, newHex);
     },
 
@@ -1250,15 +1234,15 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         threemfDiskPath: null,
         downloadUrl: null,
       });
-      // 鏍规嵁鎾ら攢鍚庣殑 map 鐘舵€佹仮澶嶉瑙?
+      // 根据撤销后的 map 状态恢复预览
       if (Object.keys(previousMap).length === 0) {
-        // map 涓虹┖锛屾仮澶嶅師濮嬮瑙?
+        // map 为空，恢复原始预览
         const originalUrl = _get().originalPreviewUrl;
         if (originalUrl) {
           set({ previewImageUrl: originalUrl });
         }
       } else {
-        // map 浠嶆湁鏄犲皠锛岄噸鏂拌皟鐢ㄥ悗绔敓鎴愰瑙?
+        // map 仍有映射，重新调用后端生成预览
         _get().submitReplacePreview();
       }
     },
@@ -1274,8 +1258,8 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         selectedRegions: [],
         regionReplacementCount: 0,
       });
-      // 璋冪敤鍚庣娓呯┖ replacement_regions 骞朵粠鍘熷 matched_rgb 閲嶆柊鐢熸垚棰勮鍜?GLB
-      // 涓嶈兘渚濊禆 originalPreviewUrl锛屽洜涓?region-replace 浼氫慨鏀瑰悗绔紦瀛樼殑 matched_rgb
+      // 调用后端清空 replacement_regions 并从原始 matched_rgb 重新生成预览和 GLB
+      // 不能依赖 originalPreviewUrl，因为 region-replace 会修改后端缓存的 matched_rgb
       if (state.sessionId) {
         apiResetReplacements(state.sessionId)
           .then((res) => {
@@ -1284,21 +1268,21 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
               previewImageUrl: url,
               originalPreviewUrl: url,
             };
-            // 鍚庣 reset-replacements 鐜板湪涔熶細閲嶆柊鐢熸垚 GLB
+            // 后端 reset-replacements 现在也会重新生成 GLB
             if (res.preview_glb_url) {
               updates.previewGlbUrl = `${res.preview_glb_url}`;
             }
             set(updates);
           })
           .catch(() => {
-            // 鍚庣娓呯┖澶辫触鏃跺洖閫€鍒?originalPreviewUrl
+            // 后端清空失败时回退到 originalPreviewUrl
             const fallback = _get().originalPreviewUrl;
             if (fallback) {
               set({ previewImageUrl: fallback });
             }
           });
       } else {
-        // 鏃?session 鏃剁洿鎺ュ洖閫€鍒?originalPreviewUrl
+        // 无 session 时直接回退到 originalPreviewUrl
         const originalUrl = state.originalPreviewUrl;
         if (originalUrl) {
           set({ previewImageUrl: originalUrl });
@@ -1306,7 +1290,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       }
     },
 
-    // --- 娴洉楂樺害 ---
+    // --- 浮雕高度 ---
     updateColorHeight: (hex: string, heightMm: number) => {
       set((state) => ({
         color_height_map: { ...state.color_height_map, [hex]: heightMm },
@@ -1325,13 +1309,13 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
 
     setAutoHeightMode: (mode: AutoHeightMode) => set({ autoHeightMode: mode }),
 
-    // --- 楂樺害鍥?---
+    // --- 高度图 ---
     setHeightmapFile: (file: File | null) => set({ heightmapFile: file }),
 
     uploadHeightmap: async () => {
       const state = _get();
       if (!state.heightmapFile || !state.sessionId) {
-        set({ error: "璇峰厛涓婁紶楂樺害鍥炬枃浠跺苟瀹屾垚棰勮" });
+        set({ error: "请先上传高度图文件并完成预览" });
         return;
       }
       set({ isLoading: true, error: null });
@@ -1354,10 +1338,10 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       }
     },
 
-    // --- GLB 棰勮 ---
+    // --- GLB 预览 ---
     setPreviewGlbUrl: (url: string | null) => set({ previewGlbUrl: url }),
 
-    // --- 妯″瀷杈圭晫 ---
+    // --- 模型边界 ---
     setModelBounds: (bounds: ConverterState["modelBounds"]) =>
       set({ modelBounds: bounds }),
 
@@ -1380,22 +1364,22 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       } catch (err) {
         set({
           bedSizesLoading: false,
-          error: err instanceof Error ? err.message : "鐑簥灏哄鍒楄〃鍔犺浇澶辫触",
+          error: err instanceof Error ? err.message : "热床尺寸列表加载失败",
         });
       }
     },
 
-    // --- API 鎿嶄綔 ---
+    // --- API 操作 ---
     uploadLut: async (file: File) => {
       set({ lutListLoading: true, error: null });
       try {
         const res = await apiUploadLut(file);
-        // 涓婁紶鎴愬姛鍚庡埛鏂板垪琛ㄥ苟閫氳繃 setLutName 閫変腑鏂?LUT锛堝悓姝?color_mode锛?
+        // 上传成功后刷新列表并通过 setLutName 选中新 LUT（同步 color_mode）
         await _get().fetchLutList();
         _get().setLutName(res.name);
       } catch (err) {
         set({
-          error: err instanceof Error ? err.message : "LUT 涓婁紶澶辫触",
+          error: err instanceof Error ? err.message : "LUT 上传失败",
         });
       } finally {
         set({ lutListLoading: false });
@@ -1420,7 +1404,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           if (info && info.color_mode) {
             updates.color_mode = info.color_mode as ColorMode;
           } else if (!info) {
-            // Remembered LUT no longer exists 鈥?clear it
+            // Remembered LUT no longer exists — clear it
             updates.lut_name = "";
             try {
               localStorage.removeItem("lumina_lastLut");
@@ -1434,7 +1418,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       } catch (err) {
         set({
           lutListLoading: false,
-          error: err instanceof Error ? err.message : "LUT 鍒楄〃鍔犺浇澶辫触",
+          error: err instanceof Error ? err.message : "LUT 列表加载失败",
         });
       }
     },
@@ -1444,7 +1428,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         set({ lutColors: [], lutColorsLutName: "" });
         return;
       }
-      // 缂撳瓨鍛戒腑妫€鏌ワ細LUT 鍚嶇О鏈彉涓斿凡鏈夋暟鎹椂璺宠繃璇锋眰
+      // 缓存命中检查：LUT 名称未变且已有数据时跳过请求
       if (lutName === _get().lutColorsLutName && _get().lutColors.length > 0) {
         return;
       }
@@ -1459,7 +1443,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       } catch (err) {
         set({
           lutColorsLoading: false,
-          error: err instanceof Error ? err.message : "LUT 棰滆壊鍔犺浇澶辫触",
+          error: err instanceof Error ? err.message : "LUT 颜色加载失败",
         });
       }
     },
@@ -1467,11 +1451,11 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
     submitPreview: async () => {
       const state = _get();
       if (!state.imageFile) {
-        set({ error: "璇峰厛涓婁紶鍥剧墖" });
+        set({ error: "请先上传图片" });
         return;
       }
       if (!state.lut_name) {
-        set({ error: "璇峰厛閫夋嫨 LUT" });
+        set({ error: "请先选择 LUT" });
         return;
       }
 
@@ -1508,7 +1492,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           },
           signal,
         );
-        // 鍚庣杩斿洖 JSON锛宲review_url 鏄浉瀵硅矾寰勫 /api/files/xxx
+        // 后端返回 JSON，preview_url 是相对路径如 /api/files/xxx
         const previewUrl = normalizeResourceUrl(response.preview_url) ?? response.preview_url;
         const glbUrl = response.preview_glb_url
           ? normalizeResourceUrl(response.preview_glb_url)
@@ -1546,7 +1530,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         }
         set({
           isLoading: false,
-          error: err instanceof Error ? err.message : "棰勮澶辫触",
+          error: err instanceof Error ? err.message : "预览失败",
         });
       }
     },
@@ -1554,15 +1538,15 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
     submitGenerate: async () => {
       const state = _get();
       if (!state.sessionId) {
-        set({ error: "璇峰厛棰勮鍥剧墖" });
+        set({ error: "请先预览图片" });
         return null;
       }
-      // Requirement 10.4: enable_relief 涓?true 涓?color_height_map 涓虹┖鏃堕樆姝㈢敓鎴?
+      // Requirement 10.4: enable_relief 为 true 且 color_height_map 为空时阻止生成
       if (
         state.enable_relief &&
         Object.keys(state.color_height_map).length === 0
       ) {
-        // Requirement 10.3: 楂樺害鍥炬ā寮忔椂缁欏嚭鏇村叿浣撶殑鎻愮ず
+        // Requirement 10.3: 高度图模式时给出更具体的提示
         if (state.autoHeightMode === "use-heightmap") {
           set({ error: "请先上传高度图并获取高度映射后再生成" });
         } else {
@@ -1577,7 +1561,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       _clientLog('generate: click');
       _startGenerateTimer();
       try {
-        // 鍚堝苟 colorRemapMap 杞崲鐨?replacement_regions 涓庡凡鏈夌殑 replacement_regions
+        // 合并 colorRemapMap 转换的 replacement_regions 与已有的 replacement_regions
         let mergedReplacements: ColorReplacementItem[] | undefined =
           state.replacement_regions.length > 0
             ? [...state.replacement_regions]
@@ -1686,7 +1670,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       } catch (err) {
         set({
           isGenerating: false,
-          error: err instanceof Error ? err.message : "鐢熸垚澶辫触",
+          error: err instanceof Error ? err.message : "生成失败",
         });
         return null;
       } finally {
@@ -1694,7 +1678,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       }
     },
 
-    // --- 瑁佸壀 ---
+    // --- 裁剪 ---
     setEnableCrop: (enabled: boolean) => {
       set({ enableCrop: enabled });
       try {
@@ -1755,11 +1739,11 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       }
     },
 
-    // --- 鑷姩妫€娴嬮鑹?---
+    // --- 自动检测颜色 ---
     autoDetectColors: async () => {
       const state = _get();
       if (!state.imageFile) {
-        set({ error: "璇峰厛涓婁紶鍥剧墖" });
+        set({ error: "请先上传图片" });
         return;
       }
       set({ autoDetectColorsLoading: true });
@@ -1782,7 +1766,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       }
     },
 
-    // --- 鎵归噺妯″紡 ---
+    // --- 批量模式 ---
     addBatchFiles: (files: File[]) => {
       const valid = files.filter((f) => isValidImageType(f.type, f.name));
       if (valid.length === 0) return;
@@ -1865,7 +1849,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       const state = _get();
       const inBatchMode = state.batchFiles.length > 0;
 
-      // Already in BatchMode 鈫?append new files
+      // Already in BatchMode → append new files
       if (inBatchMode) {
         set({
           batchFiles: [...state.batchFiles, ...validFiles],
@@ -2010,7 +1994,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       }
     },
 
-    // --- 棰滆壊鏇挎崲锛氬崟娆″嵆鏃舵浛鎹?---
+    // --- 颜色替换：单次即时替换 ---
     submitSingleReplace: async (origHex: string, newHex: string) => {
       const state = _get();
       if (!state.sessionId) return;
@@ -2030,7 +2014,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         }
         set(updates);
       } catch (err) {
-        // 鍥炴粴 colorRemapMap 鍒版搷浣滃墠鐘舵€?
+        // 回滚 colorRemapMap 到操作前状态
         const currentHistory = _get().remapHistory;
         if (currentHistory.length > 0) {
           const previousMap = currentHistory[currentHistory.length - 1];
@@ -2038,18 +2022,18 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
             colorRemapMap: previousMap,
             remapHistory: currentHistory.slice(0, -1),
             replacePreviewLoading: false,
-            error: err instanceof Error ? err.message : "棰滆壊鏇挎崲澶辫触",
+            error: err instanceof Error ? err.message : "颜色替换失败",
           });
         } else {
           set({
             replacePreviewLoading: false,
-            error: err instanceof Error ? err.message : "棰滆壊鏇挎崲澶辫触",
+            error: err instanceof Error ? err.message : "颜色替换失败",
           });
         }
       }
     },
 
-    // --- 棰滆壊鏇挎崲棰勮 ---
+    // --- 颜色替换预览 ---
     submitReplacePreview: async () => {
       const state = _get();
       const entries = Object.entries(state.colorRemapMap);
@@ -2060,7 +2044,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         let lastPreviewUrl = state.previewImageUrl;
         let lastGlbUrl: string | null = null;
         for (const [origHex, newHex] of entries) {
-          // 鏌ユ壘 palette 涓搴旂殑 matched_hex 浣滀负 selected_color
+          // 查找 palette 中对应的 matched_hex 作为 selected_color
           const paletteEntry = state.palette.find(
             (p) => p.matched_hex === origHex,
           );
@@ -2088,30 +2072,30 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       } catch (err) {
         set({
           replacePreviewLoading: false,
-          error: err instanceof Error ? err.message : "棰滆壊鏇挎崲棰勮澶辫触",
+          error: err instanceof Error ? err.message : "颜色替换预览失败",
         });
       }
     },
 
-    // --- 瀹屾暣娴佹按绾匡紙preview 鈫?generate锛?---
+    // --- 完整流水线（preview → generate）---
     submitFullPipeline: async () => {
       const state = _get();
 
-      // 姝ラ 1锛氬鏋滄病鏈?sessionId锛屽厛鎵ц棰勮
+      // 步骤 1：如果没有 sessionId，先执行预览
       if (!state.sessionId) {
         await _get().submitPreview();
-        // 妫€鏌ラ瑙堟槸鍚︽垚鍔?
+        // 检查预览是否成功
         const afterPreview = _get();
         if (!afterPreview.sessionId) {
-          return null; // 棰勮澶辫触锛岄敊璇凡鐢?submitPreview 璁剧疆
+          return null; // 预览失败，错误已由 submitPreview 设置
         }
       }
 
-      // 姝ラ 2锛氭墽琛岀敓鎴?
+      // 步骤 2：执行生成
       return await _get().submitGenerate();
     },
 
-    // --- 鑷敱鑹?---
+    // --- 自由色 ---
     toggleFreeColor: (hex: string) => {
       set((state) => {
         const next = new Set(state.free_color_set);
@@ -2136,11 +2120,11 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       });
     },
 
-    // --- UI 鐘舵€?---
+    // --- UI 状态 ---
     setError: (error: string | null) => set({ error }),
     clearError: () => set({ error: null }),
 
-    // --- 鍒嗗眰棰勮 ---
+    // --- 分层预览 ---
     fetchLayerImages: async () => {
       const { sessionId } = _get();
       if (!sessionId) return;

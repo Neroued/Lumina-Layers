@@ -1,4 +1,4 @@
-﻿"""
+"""
 Property-based tests for backward compatibility.
 向后兼容性属性测试。
 

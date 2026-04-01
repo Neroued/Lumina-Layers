@@ -1,4 +1,4 @@
-﻿"""Lightweight package exports for the staged pipeline.
+"""Lightweight package exports for the staged pipeline.
 
 This module intentionally avoids eager imports of all step modules to prevent
 import cycles (for example, image_processing -> processing_ops -> pipeline).

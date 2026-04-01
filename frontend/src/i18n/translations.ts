@@ -698,7 +698,7 @@ export const translations: Record<string, Record<"zh" | "en", string>> = {
     en: "↩️ Undone",
   },
   palette_mode_select_all: {
-    zh: "ȫѡ",
+    zh: "全选",
     en: "All",
   },
   palette_mode_current: {

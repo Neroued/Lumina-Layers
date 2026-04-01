@@ -31,7 +31,7 @@ export function classifyHue(r: number, g: number, b: number): HueCategory {
   const s = max === 0 ? 0 : d / max;
   const v = max;
 
-  // 鎻愰珮涓€ц壊闃堝€硷紝鍑忓皯浣庨ケ鍜屽害棰滆壊鐨勮鍒嗙被
+  // 提高一致性色阈值，减少低饱和度颜色的误分类
   if (s < 0.2 || v < 0.15) return "neutral";
 
   let h = 0;
@@ -42,21 +42,21 @@ export function classifyHue(r: number, g: number, b: number): HueCategory {
   }
   h = ((h * 60) + 360) % 360;
 
-  // 浣跨敤鏇村鏉剧殑鑹茬浉鑼冨洿锛屽噺灏戣竟鐣岃壊鍧?
-  // 鏍稿績绛栫暐锛氭墿澶ф瘡涓壊鐩哥被鍒殑鑼冨洿锛岃杈圭晫鍖哄煙鏈夋洿澶氬閿欑┖闂?
-  if (h < 20 || h >= 340) return "red";      // 绾㈣壊: 340-20掳 (鎵╁ぇ 10掳)
-  if (h < 50) return "orange";                // 姗欒壊: 20-50掳 (鎵╁ぇ 20掳)
-  if (h < 80) return "yellow";                // 榛勮壊: 50-80掳 (鎵╁ぇ 20掳)
-  if (h < 170) return "green";                // 缁胯壊: 80-170掳 (鎵╁ぇ 20掳)
-  if (h < 200) return "cyan";                 // 闈掕壊: 170-200掳 (鎵╁ぇ 10掳)
-  if (h < 270) return "blue";                 // 钃濊壊: 200-270掳 (鎵╁ぇ 20掳)
-  if (h < 340) return "purple";               // 绱壊: 270-340掳 (鎵╁ぇ 10掳)
+  // 使用更宽松的色相范围，减少边界色块
+  // 核心策略：扩大每个色相类别的范围，让边界区域有更大容错空间
+  if (h < 20 || h >= 340) return "red";      // 红色: 340-20掳 (扩大 10掳)
+  if (h < 50) return "orange";                // 橙色: 20-50掳 (扩大 20掳)
+  if (h < 80) return "yellow";                // 黄色: 50-80掳 (扩大 20掳)
+  if (h < 170) return "green";                // 绿色: 80-170掳 (扩大 20掳)
+  if (h < 200) return "cyan";                 // 青色: 170-200掳 (扩大 10掳)
+  if (h < 270) return "blue";                 // 蓝色: 200-270掳 (扩大 20掳)
+  if (h < 340) return "purple";               // 紫色: 270-340° (扩大 10°)
   return "neutral";
 }
 
 /**
  * Check if a LUT color entry matches a search query.
- * 妫€鏌?LUT 棰滆壊鏉＄洰鏄惁鍖归厤鎼滅储鏌ヨ銆?
+ * 检查 LUT 颜色条目是否匹配搜索查询。
  */
 export function matchesSearch(entry: LutColorEntry, query: string): boolean {
   const q = query.toLowerCase().trim();
@@ -353,7 +353,7 @@ export default function LutColorGrid() {
 
     switch (selectionMode) {
       case 'select-all': {
-        // 鍏ㄩ€夋ā寮忥細闇€瑕佸厛閫変腑婧愯壊
+        // 全选模式：需要先选中源色
         if (!selectedColor) return;
         setPendingReplacement({
           sourceHex: selectedColor,
@@ -363,7 +363,7 @@ export default function LutColorGrid() {
         break;
       }
       case 'multi-select': {
-        // 澶氶€夋ā寮忥紙澶氬尯鍩燂級锛氶渶瑕佸厛鍦?3D 妯″瀷涓婇€変腑鑷冲皯涓€涓繛閫氬尯鍩?
+        // 多选模式（多区域）：需要先在 3D 模型上选中至少一个连通区域
         if (selectedRegions.length === 0) return;
         setPendingReplacement({
           sourceHex: selectedColor ?? '',
@@ -375,7 +375,7 @@ export default function LutColorGrid() {
       }
       case 'current':
       case 'region': {
-        // 褰撳墠/鍖哄煙妯″紡锛氳缃?pending 鐘舵€?
+        // 当前/区域模式：设置 pending 状态
         setPendingReplacement({
           sourceHex: selectedColor ?? '',
           targetHex: hexNoHash,

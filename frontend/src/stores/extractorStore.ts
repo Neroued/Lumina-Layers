@@ -43,20 +43,20 @@ export function isRawFile(file: File): boolean {
 // ========== State Interface ==========
 
 export interface ExtractorState {
-  // 鍥剧墖
+  // 图片
   imageFile: File | null;
   imagePreviewUrl: string | null;
   imageNaturalWidth: number | null;
   imageNaturalHeight: number | null;
 
-  // 棰滆壊妯″紡涓庨〉鐮?
+  // 颜色模式与页码
   color_mode: ExtractorColorMode;
   page: ExtractorPage;
 
-  // 瑙掔偣
+  // 角点
   corner_points: Array<[number, number]>;
 
-  // 鎻愬彇鍙傛暟
+  // 提取参数
   offset_x: number;
   offset_y: number;
   zoom: number;
@@ -65,21 +65,21 @@ export interface ExtractorState {
   auto_wb: boolean;
   originalPreviewUrl: string | null;
 
-  // API 鐘舵€?
+  // API 状态
   isLoading: boolean;
   error: string | null;
   session_id: string | null;
 
-  // 鎻愬彇缁撴灉
+  // 提取结果
   lut_download_url: string | null;
   warp_view_url: string | null;
   lut_preview_url: string | null;
 
-  // 鎵嬪姩淇
+  // 手动修正
   manualFixLoading: boolean;
   manualFixError: string | null;
 
-  // 8鑹插弻椤电姸鎬?
+  // 8色双页状态
   page1Extracted: boolean;
   page2Extracted: boolean;
   mergeLoading: boolean;
@@ -225,7 +225,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
             });
           })
           .catch(() => {
-            set({ error: "RAW 鍥剧墖棰勮澶辫触锛岃妫€鏌ュ悗绔槸鍚﹀畨瑁?rawpy" });
+            set({ error: "RAW 图片预览失败，请检查后端是否安装 rawpy" });
           });
         return;
       }
@@ -297,7 +297,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
         });
       } catch (err) {
         set({
-          error: err instanceof Error ? err.message : "鍥剧墖鏃嬭浆澶辫触",
+          error: err instanceof Error ? err.message : "图片旋转失败",
           isLoading: false,
         });
       }
@@ -372,7 +372,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
           });
         }
       } else {
-        // 鍏抽棴鐧藉钩琛★細鎭㈠鍘熷棰勮
+        // 关闭白平衡：恢复原始预览
         if (originalPreviewUrl) {
           set({
             auto_wb: false,
@@ -444,7 +444,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
         });
       } catch (err) {
         set({
-          error: err instanceof Error ? err.message : "棰滆壊鎻愬彇澶辫触锛岃閲嶈瘯",
+          error: err instanceof Error ? err.message : "颜色提取失败，请重试",
           isLoading: false,
         });
       }
@@ -470,7 +470,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
       } catch (err) {
         set({
           manualFixError:
-            err instanceof Error ? err.message : "鎵嬪姩淇澶辫触锛岃閲嶈瘯",
+            err instanceof Error ? err.message : "手动修正失败，请重试",
           manualFixLoading: false,
         });
       }
@@ -509,7 +509,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
         });
       } catch (err) {
         set({
-          mergeError: err instanceof Error ? err.message : "鍚堝苟澶辫触锛岃閲嶈瘯",
+          mergeError: err instanceof Error ? err.message : "合并失败，请重试",
           mergeLoading: false,
         });
       }

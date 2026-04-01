@@ -1,4 +1,4 @@
-﻿"""Unit tests for POST /api/convert/upload-heightmap endpoint.
+"""Unit tests for POST /api/convert/upload-heightmap endpoint.
 
 Validates:
 - Valid image upload returns 200 with color_height_map and thumbnail_url (Requirement 8.1, 8.2)

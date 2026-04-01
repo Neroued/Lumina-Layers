@@ -1,4 +1,4 @@
-﻿"""Property-based tests for Calibration parameter mapping completeness (Property 5).
+"""Property-based tests for Calibration parameter mapping completeness (Property 5).
 
 Uses Hypothesis to generate random valid CalibrationGenerateRequest parameters
 and verify that all CalibrationColorMode enum values route to the correct core

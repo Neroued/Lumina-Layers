@@ -1,4 +1,4 @@
-﻿"""Lumina Studio API system schemas."""
+"""Lumina Studio API system schemas."""
 
 from dataclasses import dataclass
 

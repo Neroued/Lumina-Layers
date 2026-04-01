@@ -1,5 +1,5 @@
-﻿"""Extractor domain API router.
-Extractor 棰嗗煙 API 璺敱妯″潡銆?
+"""Extractor domain API router.
+Extractor 领域 API 路由模块。
 """
 
 from __future__ import annotations
@@ -74,13 +74,13 @@ def _image_to_png_bytes(img: object) -> bytes:
 
 def _normalize_6color_mode(color_mode: str) -> str:
     """Normalize six-color variants to the unified CMYW mode.
-    灏?6 鑹插彉浣撶粺涓€褰掍竴鍒?CMYW 妯″紡銆?
+    将 6 色变体统一归一到 CMYW 模式。
 
     Args:
-        color_mode (str): Raw color mode from request. (璇锋眰涓殑鍘熷棰滆壊妯″紡)
+        color_mode (str): Raw color mode from request. (请求中的原始颜色模式)
 
     Returns:
-        str: Normalized color mode. (褰掍竴鍖栧悗鐨勯鑹叉ā寮?
+        str: Normalized color mode. (归一化后的颜色模式)
     """
     if "6-Color" in str(color_mode):
         return "6-Color (CMYWGK 1296)"
@@ -89,13 +89,13 @@ def _normalize_6color_mode(color_mode: str) -> str:
 
 def _build_default_palette(color_mode: str) -> list[dict]:
     """Build default palette array based on color mode.
-    鏍规嵁棰滆壊妯″紡鏋勫缓榛樿璋冭壊鏉挎暟缁勩€?
+    根据颜色模式构建默认调色板数组。
 
     Args:
-        color_mode (str): Color mode string. (棰滆壊妯″紡瀛楃涓?
+        color_mode (str): Color mode string. (颜色模式字符串)
 
     Returns:
-        list[dict]: Default palette entries. (榛樿璋冭壊鏉挎潯鐩垪琛?
+        list[dict]: Default palette entries. (默认调色板条目列表)
     """
     effective_mode = _normalize_6color_mode(color_mode)
     color_conf = ColorSystem.get(effective_mode)
@@ -126,7 +126,7 @@ def _build_merged_metadata(
     color_count: int,
 ) -> LUTMetadata:
     """Build merged metadata while preserving user-entered fields when available.
-    鏋勫缓鍚堝苟鍚庣殑鍏冩暟鎹紝灏介噺淇濈暀鐢ㄦ埛濉啓杩囩殑瀛楁銆?
+    构建合并后的元数据，尽量保留用户填写过的字段。
     """
     source = primary if primary.palette else secondary
     manufacturer = primary.manufacturer or secondary.manufacturer
@@ -162,11 +162,11 @@ def _build_merged_metadata(
 
 @router.post("/rotate")
 async def extractor_rotate(
-    image: UploadFile = File(..., description="寰呮棆杞殑鍥剧墖"),
+    image: UploadFile = File(..., description="待旋转的图片"),
     registry: FileRegistry = Depends(get_file_registry),
 ):
     """Rotate an image 90掳 counter-clockwise and return the rotated PNG.
-    灏嗗浘鐗囬€嗘椂閽堟棆杞?90掳 骞惰繑鍥炴棆杞悗鐨?PNG銆?
+    """Rotate an image 90° counter-clockwise and return the rotated PNG.
     """
     try:
         img_arr = await upload_to_ndarray(image)
@@ -179,7 +179,7 @@ async def extractor_rotate(
 
     rotated_bytes = ndarray_to_png_bytes(rotated)
     # Release intermediate arrays early
-    # 灏芥棭閲婃斁涓棿鏁扮粍
+    # 尽早释放中间数组
     del img_arr
     h, w = rotated.shape[:2]
     file_id = registry.register_bytes(
@@ -199,11 +199,11 @@ async def extractor_rotate(
 
 @router.post("/preview-wb")
 async def extractor_preview_wb(
-    image: UploadFile = File(..., description="寰呭鐞嗙殑鍥剧墖"),
+    image: UploadFile = File(..., description="待处理的图片"),
     registry: FileRegistry = Depends(get_file_registry),
 ):
     """Apply auto white balance to an image and return the preview PNG.
-    瀵瑰浘鐗囧簲鐢ㄨ嚜鍔ㄧ櫧骞宠　骞惰繑鍥為瑙?PNG銆?
+    """Apply auto white balance to an image and return the preview PNG.
     """
     try:
         img_arr = await upload_to_ndarray(image)
@@ -232,20 +232,20 @@ async def extractor_preview_wb(
 @router.post("/extract")
 async def extractor_extract(
     image: UploadFile = File(..., description="Calibration board image"),
-    corner_points: str = Form(..., description="4 涓鐐瑰潗鏍?JSON 鏁扮粍 [[x,y],...]"),
-    color_mode: str = Form("4-Color (RYBW)", description="鏍″噯棰滆壊妯″紡"),
-    page: str = Form("Page 1", description="8-Color 椤电爜"),
-    offset_x: int = Form(0, description="姘村钩閲囨牱鍋忕Щ"),
-    offset_y: int = Form(0, description="鍨傜洿閲囨牱鍋忕Щ"),
-    zoom: float = Form(1.0, description="閫忚鏍℃缂╂斁"),
-    distortion: float = Form(0.0, description="鐣稿彉鏍℃"),
-    vignette_correction: bool = Form(False, description="鏆楄鏍℃"),
+    corner_points: str = Form(..., description="4 个角点坐标 JSON 数组 [[x,y],...]"),
+    color_mode: str = Form("4-Color (RYBW)", description="标准颜色模式"),
+    page: str = Form("Page 1", description="8-Color 页码"),
+    offset_x: int = Form(0, description="水平采样偏移"),
+    offset_y: int = Form(0, description="垂直采样偏移"),
+    zoom: float = Form(1.0, description="透视校正缩放"),
+    distortion: float = Form(0.0, description="畸变校正"),
+    vignette_correction: bool = Form(False, description="暗角校正"),
     auto_wb: bool = Form(False, description="Enable auto white balance"),
     store: SessionStore = Depends(get_session_store),
     registry: FileRegistry = Depends(get_file_registry),
 ) -> ExtractResponse:
     """Extract colors from a photographed calibration board.
-    浠庢媿鎽勭殑鏍″噯鏉跨収鐗囦腑鎻愬彇棰滆壊銆?
+    """Extract colors from a photographed calibration board.
     """
     # Parse corner_points from JSON string
     try:
@@ -383,7 +383,7 @@ def extractor_manual_fix(
     registry: FileRegistry = Depends(get_file_registry),
 ) -> ManualFixResponse:
     """Manually override a single LUT cell color value.
-    鎵嬪姩瑕嗙洊鍗曚釜 LUT 鍗曞厓鏍肩殑棰滆壊鍊笺€?
+    """Manually override a single LUT cell color value.
     """
     # Resolve lut_path: prefer session lookup, fallback to direct path
     lut_path = request.lut_path
@@ -429,7 +429,7 @@ def extractor_merge_5color_extended(
     registry: FileRegistry = Depends(get_file_registry),
 ) -> ExtractResponse:
     """Merge two 5-Color Extended pages into a single LUT.
-    鍚堝苟涓ら〉 5 鑹叉墿灞?LUT 涓轰竴涓畬鏁?LUT銆?
+    """Merge two 5-Color Extended pages into a single LUT.
     """
     import sys
     from config import LUT_FILE_PATH
@@ -490,7 +490,7 @@ def extractor_merge_8color(
     registry: FileRegistry = Depends(get_file_registry),
 ) -> ExtractResponse:
     """Merge two 8-Color pages into a single LUT.
-    鍚堝苟涓ら〉 8 鑹?LUT 涓轰竴涓畬鏁?LUT銆?
+    """Merge two 8-Color pages into a single LUT.
     """
     import sys
     from config import LUT_FILE_PATH
@@ -549,18 +549,18 @@ def confirm_palette(
     store: SessionStore = Depends(get_session_store),
 ) -> dict:
     """Accept user-confirmed palette and save to session.
-    鎺ユ敹鐢ㄦ埛纭鐨勮皟鑹叉澘锛屼繚瀛樺埌 session銆?
+    """Accept user-confirmed palette and save to session.
 
     Args:
-        request (ConfirmPaletteRequest): Palette confirmation request. (璋冭壊鏉跨‘璁よ姹?
-        store (SessionStore): Session store dependency. (浼氳瘽瀛樺偍)
+        request (ConfirmPaletteRequest): Palette confirmation request. (调色板确认请求)
+        store (SessionStore): Session store dependency. (会话存储)
 
     Returns:
-        dict: Confirmation status. (纭鐘舵€?
+        dict: Confirmation status. (确认状态)
 
     Raises:
         HTTPException: 422 if color name is blank, 404 if session not found.
-            (棰滆壊鍚嶇О涓虹┖杩斿洖 422锛宻ession 涓嶅瓨鍦ㄨ繑鍥?404)
+            (颜色名称为空返回 422，session 不存在返回 404)
     """
     for entry in request.palette:
         if not entry.color or not entry.color.strip():

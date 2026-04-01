@@ -1,4 +1,4 @@
-﻿"""
+"""
 图像缩放与分辨率计算模块 (Image Scaler)
 
 从 image_processing.py 的 process_image 抽取缩放与分辨率计算逻辑。

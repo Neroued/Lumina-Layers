@@ -27,7 +27,7 @@ const arbRgb = fc.tuple(
   fc.integer({ min: 0, max: 255 }),
 ) as fc.Arbitrary<[number, number, number]>;
 
-/** Arbitrary LutColorEntry from a random RGB. (浠庨殢鏈?RGB 鐢熸垚 LutColorEntry) */
+/** Arbitrary LutColorEntry from a random RGB. (浠庨殢鏈?RGB 生成 LutColorEntry) */
 const arbLutColorEntry: fc.Arbitrary<LutColorEntry> = arbRgb.map((rgb) => {
   const hex =
     '#' +
@@ -37,10 +37,10 @@ const arbLutColorEntry: fc.Arbitrary<LutColorEntry> = arbRgb.map((rgb) => {
   return { hex, rgb };
 });
 
-/** Non-empty array of LutColorEntry. (闈炵┖ LutColorEntry 鏁扮粍) */
+/** Non-empty array of LutColorEntry. (非空 LutColorEntry 数组) */
 const arbLutColorEntries = fc.array(arbLutColorEntry, { minLength: 1, maxLength: 50 });
 
-// ========== Property 5: 棰滆壊璺濈鎺掑簭鍗曡皟鎬?==========
+// ========== Property 5: 颜色距离排序单调性 ==========
 
 // **Validates: Requirements 3.1**
 describe('Feature: palette-optimization, Property 5: distance sort monotonicity', () => {
@@ -83,10 +83,10 @@ describe('Feature: palette-optimization, Property 5: distance sort monotonicity'
   });
 });
 
-// ========== Property 1: LUT 棰滆壊缂撳瓨鍛戒腑璺宠繃璇锋眰 ==========
+// ========== Property 1: LUT 颜色缓存命中跳过请求 ==========
 
 // **Validates: Requirements 1.3, 5.2, 5.3**
-describe('Feature: palette-optimization, Property 1: LUT 棰滆壊缂撳瓨鍛戒腑璺宠繃璇锋眰', () => {
+describe('Feature: palette-optimization, Property 1: LUT 颜色缓存命中跳过请求', () => {
 
   // Lazy-import the store AFTER mock is set up
   let useConverterStore: typeof import('../stores/converter').useConverterStore;
@@ -100,11 +100,11 @@ describe('Feature: palette-optimization, Property 1: LUT 棰滆壊缂撳瓨鍛�
     mockApiFetchLutColors.mockClear();
   });
 
-  /** Alphanumeric LUT name generator (1-20 chars). (瀛楁瘝鏁板瓧 LUT 鍚嶇О鐢熸垚鍣? */
+  /** Alphanumeric LUT name generator (1-20 chars). (字母数字 LUT 名称生成器) */
   const arbLutName = fc.string({ minLength: 1, maxLength: 20 })
     .filter((s) => /^[a-zA-Z0-9]+$/.test(s));
 
-  /** Random non-empty LutColorEntry array for cached data. (闅忔満闈炵┖ LutColorEntry 鏁扮粍) */
+  /** Random non-empty LutColorEntry array for cached data. (随机非空 LutColorEntry 数组) */
   const arbCachedColors = fc.array(
     arbLutColorEntry,
     { minLength: 1, maxLength: 30 },
@@ -140,21 +140,21 @@ describe('Feature: palette-optimization, Property 1: LUT 棰滆壊缂撳瓨鍛�
 
 // ========== Generators for Property 2/3/4 ==========
 
-/** Arbitrary 6-char hex string (no # prefix). (鏃?# 鍓嶇紑鐨?6 浣?hex 瀛楃涓茬敓鎴愬櫒) */
+/** Arbitrary 6-char hex string (no # prefix). (无 # 前缀的 6 位 hex 字符串生成器) */
 const hexChar = fc.constantFrom(...'0123456789abcdef'.split(''));
 const arbHex6 = fc
   .tuple(hexChar, hexChar, hexChar, hexChar, hexChar, hexChar)
   .map((chars) => chars.join(''));
 
-/** Arbitrary pair of distinct hex colors. (涓嶅悓 hex 棰滆壊瀵圭敓鎴愬櫒) */
+/** Arbitrary pair of distinct hex colors. (不同 hex 颜色对生成器) */
 const arbHexPair = fc
   .tuple(arbHex6, arbHex6)
   .filter(([a, b]) => a !== b);
 
-// ========== Property 2: applyColorRemap 姝ｇ‘璁板綍鏄犲皠 ==========
+// ========== Property 2: applyColorRemap 正确记录映射 ==========
 
 // **Validates: Requirements 2.2**
-describe('Feature: palette-optimization, Property 2: applyColorRemap 姝ｇ‘璁板綍鏄犲皠', () => {
+describe('Feature: palette-optimization, Property 2: applyColorRemap 正确记录映射', () => {
   let useConverterStore: typeof import('../stores/converter').useConverterStore;
 
   beforeAll(async () => {
@@ -224,7 +224,7 @@ describe('Feature: palette-optimization, Property 2: applyColorRemap 姝ｇ‘�
   });
 });
 
-// ========== Property 3: 鎾ら攢鎭㈠涓婁竴鐘舵€侊紙Round-Trip锛?==========
+// ========== Property 3: 撤销恢复上一状态（Round-Trip） ==========
 
 // **Validates: Requirements 2.5**
 describe('Feature: palette-optimization, Property 3: undo round trip', () => {
@@ -310,10 +310,10 @@ describe('Feature: palette-optimization, Property 3: undo round trip', () => {
   });
 });
 
-// ========== Property 4: 娓呯┖鏇挎崲褰掗浂 ==========
+// ========== Property 4: 清空替换归零 ==========
 
 // **Validates: Requirements 2.6**
-describe('Feature: palette-optimization, Property 4: 娓呯┖鏇挎崲褰掗浂', () => {
+describe('Feature: palette-optimization, Property 4: 清空替换归零', () => {
   let useConverterStore: typeof import('../stores/converter').useConverterStore;
 
   beforeAll(async () => {

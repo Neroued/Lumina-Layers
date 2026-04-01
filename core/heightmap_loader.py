@@ -1,4 +1,4 @@
-﻿"""
+"""
 Lumina Studio - 高度图加载与处理模块 (Heightmap Loader)
 
 负责加载灰度高度图并将其转换为可用于 3D 模型生成的高度矩阵。

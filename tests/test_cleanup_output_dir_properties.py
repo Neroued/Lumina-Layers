@@ -1,4 +1,4 @@
-﻿"""Property-based tests for cleanup_output_dir() extension filtering (Property 3).
+"""Property-based tests for cleanup_output_dir() extension filtering (Property 3).
 
 Feature: about-page-cache-cleanup, Property 3: OUTPUT_DIR 娓呯悊鎵╁睍鍚嶈繃婊?
 
