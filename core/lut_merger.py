@@ -95,6 +95,47 @@ _MODE_MAX_MATERIAL = {
 # Standard 8-Color slot order for merged palette sorting
 _STANDARD_SLOT_ORDER = ["White", "Cyan", "Magenta", "Yellow", "Black", "Red", "Deep Blue", "Green"]
 
+_COLOR_NAME_ALIASES_TO_8COLOR = {
+    "Blue": "Deep Blue",
+}
+
+
+def _normalize_color_name_to_8color(color_name):
+    if not isinstance(color_name, str):
+        return ""
+    return _COLOR_NAME_ALIASES_TO_8COLOR.get(color_name, color_name)
+
+
+def _build_palette_index_to_8color_remap(palette):
+    canonical_lookup = {name: idx for idx, name in enumerate(_STANDARD_SLOT_ORDER)}
+    remap = {}
+    for idx, entry in enumerate(palette or []):
+        canonical_name = _normalize_color_name_to_8color(getattr(entry, "color", None))
+        if canonical_name in canonical_lookup:
+            remap[idx] = canonical_lookup[canonical_name]
+    return remap
+
+
+def _build_8color_to_palette_index_remap(palette):
+    palette_lookup = {}
+    for idx, entry in enumerate(palette or []):
+        canonical_name = _normalize_color_name_to_8color(getattr(entry, "color", None))
+        if canonical_name and canonical_name not in palette_lookup:
+            palette_lookup[canonical_name] = idx
+
+    remap = {}
+    for canonical_idx, canonical_name in enumerate(_STANDARD_SLOT_ORDER):
+        if canonical_name in palette_lookup:
+            remap[canonical_idx] = palette_lookup[canonical_name]
+    return remap
+
+
+def _apply_stack_id_remap(stacks, remap):
+    remapped = np.array(stacks, copy=True)
+    for src_id, dst_id in remap.items():
+        remapped[stacks == src_id] = dst_id
+    return remapped
+
 # Material ID remapping tables: source mode → 8-Color material IDs
 # 8-Color slots: 0=White, 1=Cyan, 2=Magenta, 3=Yellow, 4=Black, 5=Red, 6=DeepBlue, 7=Green
 _REMAP_TO_8COLOR = {
@@ -209,10 +250,7 @@ def _remap_stacks(stacks, color_mode, lut_path=None, metadata=None):
     if remap is None:
         return stacks  # Unknown mode, return as-is
 
-    remapped = stacks.copy()
-    for src_id, dst_id in remap.items():
-        remapped[stacks == src_id] = dst_id
-    return remapped
+    return _apply_stack_id_remap(stacks, remap)
 
 
 class LUTMerger:
@@ -321,7 +359,10 @@ class LUTMerger:
 
             rgb, stacks, metadata = LUTManager.load_lut_with_metadata(lut_path)
             if stacks is not None and stacks.ndim >= 2 and stacks.shape[0] > 0 and stacks.shape[1] > 0:
-                return (rgb, stacks)
+                palette_remap = _build_palette_index_to_8color_remap(metadata.palette)
+                if palette_remap:
+                    return (rgb, _apply_stack_id_remap(stacks, palette_remap))
+                return (rgb, _remap_stacks(stacks, color_mode, lut_path, metadata=metadata))
             # 回退到索引重建：stacks 为 None 或 shape[1]==0
             count = len(rgb)
             return LUTMerger._rebuild_stacks_from_index(rgb, count, color_mode, lut_path, metadata=metadata)
@@ -555,6 +596,45 @@ class LUTMerger:
                 remap[src_idx] = target_lookup[entry.color]
 
         return remap
+
+    @staticmethod
+    def reindex_canonical_stacks_for_palette(stacks: np.ndarray, palette: list) -> np.ndarray:
+        """Reindex canonical 8-color stacks to palette-local indices.
+        将规范 8 色槽位堆叠重建为当前调色板的本地索引。
+
+        Args:
+            stacks (np.ndarray): Canonical 8-color stack IDs. (规范 8 色槽位 ID)
+            palette (list[PaletteEntry]): Target palette entries. (目标调色板条目)
+
+        Returns:
+            np.ndarray: Stack IDs remapped to the target palette order.
+                (按目标调色板顺序重映射后的堆叠 ID)
+
+        Raises:
+            ValueError: If any canonical channel used by stacks is missing from the
+                target palette. (若堆叠使用的规范通道在目标调色板中缺失则抛出)
+        """
+        if stacks is None:
+            return stacks
+
+        remap = _build_8color_to_palette_index_remap(palette)
+        used_ids = {
+            int(v)
+            for v in np.unique(stacks)
+            if int(v) >= 0
+        }
+        unresolved = [idx for idx in sorted(used_ids) if idx not in remap]
+        if unresolved:
+            unresolved_names = [
+                _STANDARD_SLOT_ORDER[idx] if 0 <= idx < len(_STANDARD_SLOT_ORDER) else str(idx)
+                for idx in unresolved
+            ]
+            raise ValueError(
+                "Missing palette entries for canonical channels: "
+                + ", ".join(unresolved_names)
+            )
+
+        return _apply_stack_id_remap(stacks, remap)
 
     @staticmethod
     def merge_luts(lut_entries, dedup_threshold=3.0, metadata_list=None, output_path=None, source_names=None):

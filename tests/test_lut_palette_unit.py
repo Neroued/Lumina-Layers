@@ -292,6 +292,58 @@ class TestMergeAndIntegration:
         assert custom_idx > white_idx
         assert custom_idx > cyan_idx
 
+    def test_load_6color_json_stacks_remap_by_palette_key(self):
+        """6 色 RYBW JSON 在合并加载时应按调色板颜色键映射到规范 8 色槽位。"""
+        rgb = np.array([[255, 54, 1]], dtype=np.uint8)
+        stacks = np.array([[1, 0, 0, 0, 0]], dtype=np.int32)
+        metadata = LUTMetadata(
+            palette=[
+                PaletteEntry(color="White", material="PLA"),
+                PaletteEntry(color="Red", material="PLA"),
+                PaletteEntry(color="Yellow", material="PLA"),
+                PaletteEntry(color="Blue", material="PLA"),
+                PaletteEntry(color="Green", material="PLA"),
+                PaletteEntry(color="Black", material="PLA"),
+            ],
+            color_mode="6-Color (RYBWGK 1296)",
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            json_path = os.path.join(tmpdir, "source_6color_rybw.json")
+            LUTManager.save_keyed_json(json_path, rgb, stacks, metadata)
+
+            _loaded_rgb, loaded_stacks = LUTMerger.load_lut_with_stacks(json_path, "6-Color")
+
+        np.testing.assert_array_equal(loaded_stacks, np.array([[5, 0, 0, 0, 0]], dtype=np.int32))
+
+    def test_save_merged_json_preserves_recipe_name_after_palette_reindex(self):
+        """Merged JSON 导出时应先重建为本地 palette 索引，避免 Red 错写成 Yellow。"""
+        rgb = np.array([[255, 54, 1]], dtype=np.uint8)
+        canonical_stacks = np.array([[5, 0, 0, 0, 0]], dtype=np.int32)
+        merged_metadata = LUTMetadata(
+            palette=[
+                PaletteEntry(color="White", material="PLA"),
+                PaletteEntry(color="Yellow", material="PLA"),
+                PaletteEntry(color="Black", material="PLA"),
+                PaletteEntry(color="Red", material="PLA"),
+                PaletteEntry(color="Green", material="PLA"),
+                PaletteEntry(color="Blue", material="PLA"),
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            json_path = os.path.join(tmpdir, "merged.json")
+            json_stacks = LUTMerger.reindex_canonical_stacks_for_palette(
+                canonical_stacks,
+                merged_metadata.palette,
+            )
+            LUTManager.save_keyed_json(json_path, rgb, json_stacks, merged_metadata)
+
+            with open(json_path, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+
+        assert saved["entries"][0]["recipe"] == ["Red", "White", "White", "White", "White"]
+
     def test_print_param_mismatch_warning(self):
         """两个 LUT 的 layer_height_mm 不同，验证产生警告。"""
         meta1 = LUTMetadata(layer_height_mm=0.08)
