@@ -160,11 +160,11 @@ def _generate_recipes(color_mode: str, total_cells: int, page_choice: str = "Pag
 
     if "5-Color Extended" in color_mode:
         if "2" in str(page_choice):
-            # Page 2: 1444 colors from get_top_1444_colors()
+            # Page 2: 1444 colors from get_top_5color_extended_page2_stacks()
             try:
-                from core.calibration import get_top_1444_colors
+                from core.calibration import get_top_5color_extended_page2_stacks
 
-                top_stacks = get_top_1444_colors()
+                top_stacks = get_top_5color_extended_page2_stacks()
                 stacks = [list(s) for s in top_stacks[:total_cells]]
                 return np.array(stacks, dtype=np.int32)
             except Exception as e:
