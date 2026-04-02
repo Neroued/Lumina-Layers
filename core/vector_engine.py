@@ -27,7 +27,7 @@ import trimesh
 import cv2
 from dataclasses import dataclass, field
 from svgelements import SVG, Path, Shape, Move, Line, Close, CubicBezier, QuadraticBezier, Color
-from shapely.geometry import Polygon, MultiPolygon
+from shapely.geometry import Polygon, MultiPolygon, LineString
 from shapely import affinity
 from shapely.ops import unary_union
 from shapely.strtree import STRtree
@@ -42,12 +42,28 @@ BASE_COLOR_GAP_MM = 0.005
 _MAX_BEZIER_DEPTH = 16
 _AGENT_DEBUG_LOG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug-ab5259.log")
 _AGENT_DEBUG_SESSION_ID = "ab5259"
-_AGENT_DEBUG_TARGET_RGB = (122, 135, 119)
-_AGENT_DEBUG_TARGET_HEX = "#7a8777"
+_AGENT_DEBUG_TARGET_HEX = "#5e6546"
+_AGENT_DEBUG_SOURCE_HEX = "#675950"
+_AGENT_DEBUG_FOCUS_TARGET_HEXES = ("#282f48", "#696f51", "#5e6546")
+_AGENT_DEBUG_FOCUS_SOURCE_HEXES = ("#19160d", "#786f68", "#675950")
 _AGENT_DEBUG_EXTRUDE_FAILURE_LIMIT = 5
 _AGENT_DEBUG_EXTRUDE_FAILURES = 0
 _AGENT_DEBUG_PARSE_EXAMPLE_LIMIT = 12
 _AGENT_DEBUG_OCCLUSION_EXAMPLE_LIMIT = 12
+
+
+def _agent_debug_color_object_to_hex(color_obj):
+    """Return a lowercase hex string for svgelements Color objects."""
+    if color_obj is None:
+        return None
+    try:
+        value = getattr(color_obj, "value", None)
+        if value is None or str(value).lower() == "none":
+            return None
+        return f"#{int(color_obj.red) & 255:02x}{int(color_obj.green) & 255:02x}{int(color_obj.blue) & 255:02x}"
+    except Exception:
+        value = getattr(color_obj, "value", None)
+        return None if value is None else str(value)
 
 
 def _agent_debug_rgb_to_hex(rgb):
@@ -151,6 +167,20 @@ def _agent_debug_match_summary(items, limit=8):
             }
         )
 
+    focus_targets = {}
+    for focus_hex in _AGENT_DEBUG_FOCUS_TARGET_HEXES:
+        focus_bucket = buckets.get(
+            focus_hex,
+            {"count": 0, "area": 0.0, "recipes": set(), "source_colors": {}},
+        )
+        focus_targets[focus_hex] = {
+            "present": focus_hex in buckets,
+            "count": int(focus_bucket["count"]),
+            "area": round(float(focus_bucket["area"]), 4),
+            "recipes": [list(recipe) for recipe in sorted(focus_bucket["recipes"])[:5]],
+            "source_colors": _source_colors_payload(focus_bucket["source_colors"]),
+        }
+
     return {
         "shape_count": len(items or []),
         "unique_colors": len(buckets),
@@ -162,12 +192,18 @@ def _agent_debug_match_summary(items, limit=8):
             "recipes": [list(recipe) for recipe in sorted(target["recipes"])[:5]],
             "source_colors": _source_colors_payload(target["source_colors"]),
         },
+        "focus_targets": focus_targets,
         "top_colors_by_area": top_colors,
     }
 
 
 def _agent_debug_scene_summary(scene):
-    """Summarise scene geometry before export."""
+    """Summarise scene geometry before export.
+
+    Keep this intentionally lightweight. Expensive topology routines such as
+    ``split()``, ``is_volume`` or ``is_watertight`` can dominate runtime once
+    the vector path produces thousands of sub-meshes.
+    """
     geometries = []
     for name in sorted(scene.geometry.keys()):
         geom = scene.geometry[name]
@@ -191,6 +227,47 @@ def _agent_debug_scene_summary(scene):
             }
         )
     return {"object_count": len(scene.geometry), "geometries": geometries}
+
+
+def _agent_debug_extract_polygon_parts(geom):
+    """Flatten arbitrary geometry into polygon parts for debug stats."""
+    if geom is None or geom.is_empty:
+        return []
+    geom_type = getattr(geom, "geom_type", None)
+    if geom_type == "Polygon":
+        return [geom]
+    if geom_type == "MultiPolygon":
+        return [poly for poly in geom.geoms if not poly.is_empty]
+    if geom_type == "GeometryCollection":
+        parts = []
+        for child in geom.geoms:
+            parts.extend(_agent_debug_extract_polygon_parts(child))
+        return parts
+    return []
+
+
+def _agent_debug_color_geometry_flow(items, geometry_key, color_hex):
+    """Summarise polygon-part flow for one source colour across stages."""
+    selected = [
+        item for item in (items or [])
+        if _agent_debug_rgb_to_hex(item.get("color")) == color_hex
+    ]
+    total_area = sum(_agent_debug_geom_area(item.get(geometry_key)) for item in selected)
+    polygon_parts = []
+    for item in selected:
+        polygon_parts.extend(_agent_debug_extract_polygon_parts(item.get(geometry_key)))
+    part_areas = sorted(_agent_debug_geom_area(part) for part in polygon_parts if _agent_debug_geom_area(part) > 0.0)
+    tiny_parts = [area for area in part_areas if area < MIN_SHAPE_AREA_MM2]
+    return {
+        "color_hex": color_hex,
+        "shape_count": len(selected),
+        "total_area": round(float(total_area), 4),
+        "polygon_part_count": len(part_areas),
+        "tiny_part_count": len(tiny_parts),
+        "tiny_part_total_area": round(float(sum(tiny_parts)), 6),
+        "smallest_part_areas": [round(float(area), 6) for area in part_areas[:8]],
+        "largest_part_areas": [round(float(area), 4) for area in part_areas[-8:]][::-1],
+    }
 
 
 def _agent_debug_write(hypothesis_id, location, message, data, run_id="initial"):
@@ -901,6 +978,11 @@ class VectorProcessor:
                     }
                 )
             occlusion_examples.sort(key=lambda row: (-row["lost_area"], row["draw_order"]))
+            source_color_flow = {
+                "parse": _agent_debug_color_geometry_flow(shape_data, "poly", _AGENT_DEBUG_SOURCE_HEX),
+                "post_clip_before_split": _agent_debug_color_geometry_flow(post_clip, "geometry", _AGENT_DEBUG_SOURCE_HEX),
+                "post_split": _agent_debug_color_geometry_flow(clipped_shapes, "geometry", _AGENT_DEBUG_SOURCE_HEX),
+            }
 
             # region agent log
             _agent_debug_write(
@@ -917,6 +999,7 @@ class VectorProcessor:
                     "post_split_area": round(float(_split_area), 4),
                     "fully_occluded_count": sum(1 for row in occlusion_examples if row["fully_occluded"]),
                     "partial_loss_count": sum(1 for row in occlusion_examples if not row["fully_occluded"]),
+                    "target_source_flow": source_color_flow,
                     "top_area_losses": occlusion_examples[:_AGENT_DEBUG_OCCLUSION_EXAMPLE_LIMIT],
                 },
             )
@@ -1135,13 +1218,47 @@ class VectorProcessor:
                 continue
 
             print(f"[VECTOR] Merging {len(mesh_list)} parts for {name}...")
+            slot_t0 = time.perf_counter()
+            concat_t0 = time.perf_counter()
             combined = trimesh.util.concatenate(mesh_list) if len(mesh_list) > 1 else mesh_list[0]
+            concat_s = time.perf_counter() - concat_t0
+            fix_t0 = time.perf_counter()
             self._fix_coordinates(combined, svg_height_mm)
+            fix_s = time.perf_counter() - fix_t0
 
             color_val = preview_colors.get(mat_id, [255, 255, 255, 255])
             combined.visual.face_colors = color_val
             combined.metadata["name"] = name
+            add_t0 = time.perf_counter()
             scene.add_geometry(combined, geom_name=name)
+            add_s = time.perf_counter() - add_t0
+            slot_s = time.perf_counter() - slot_t0
+            vertices = getattr(combined, "vertices", None)
+            faces = getattr(combined, "faces", None)
+            print(
+                f"[VECTOR] {name} assembled: concat={concat_s:.3f}s "
+                f"fix={fix_s:.3f}s add={add_s:.3f}s total={slot_s:.3f}s "
+                f"v={len(vertices) if vertices is not None else 0} "
+                f"f={len(faces) if faces is not None else 0}"
+            )
+            # region agent log
+            _agent_debug_write(
+                hypothesis_id="H",
+                location="core/vector_engine.py:build_mesh.assemble_slot",
+                message="Per-slot assembly timing",
+                data={
+                    "slot_name": name,
+                    "mesh_part_count": len(mesh_list),
+                    "mat_id": int(mat_id),
+                    "concat_s": round(float(concat_s), 4),
+                    "fix_s": round(float(fix_s), 4),
+                    "add_s": round(float(add_s), 4),
+                    "slot_total_s": round(float(slot_s), 4),
+                    "vertices": len(vertices) if vertices is not None else 0,
+                    "faces": len(faces) if faces is not None else 0,
+                },
+            )
+            # endregion
 
         stage_timings["assemble_s"] = time.perf_counter() - t0
         stage_timings["total_s"] = time.perf_counter() - t_total_start
@@ -1830,6 +1947,44 @@ class VectorProcessor:
                 return poly
             return None
 
+        def _sample_path_to_stroke_geometry(path_obj, stroke_width_svg, cap_style_name="round", join_style_name="round"):
+            try:
+                segments = list(path_obj.segments())
+            except Exception:
+                segments = None
+
+            if segments and len(segments) > 1:
+                coords = _flatten_segments(segments, tol_svg)
+            else:
+                coords = _flatten_segments_fallback(path_obj, tol_svg)
+
+            if segments:
+                try:
+                    last_end = segments[-1].end
+                    last_pt = (last_end.x, last_end.y)
+                    if not coords or coords[-1] != last_pt:
+                        coords.append(last_pt)
+                except Exception:
+                    pass
+
+            if len(coords) < 2:
+                return None
+
+            try:
+                stroke_geom = LineString(coords).buffer(
+                    max(float(stroke_width_svg) * 0.5, 1e-6),
+                    cap_style=cap_style_name,
+                    join_style=join_style_name,
+                    mitre_limit=2.0,
+                )
+            except Exception:
+                return None
+
+            stroke_geom = VectorProcessor._extract_polygonal_geometry(make_valid(stroke_geom))
+            if stroke_geom is not None and not stroke_geom.is_empty:
+                return stroke_geom
+            return None
+
         def _flatten_segments(segments, tolerance):
             """Adaptive de Casteljau flattening for each segment."""
             coords = []
@@ -1888,6 +2043,14 @@ class VectorProcessor:
         fill_shape_count = 0
         stroke_only_count = 0
         filled_with_stroke_count = 0
+        stroke_only_by_color = {}
+        stroke_only_widths_by_color = {}
+        stroke_only_estimated_area_by_color = {}
+        stroke_only_estimated_components_by_color = {}
+        filled_with_stroke_by_fill = {}
+        filled_same_color_stroke_widths_by_fill = {}
+        target_source_stroke_widths = []
+        target_source_same_color_stroke_count = 0
         parse_skip_examples = []
         print("[VECTOR] Parsing SVG geometry...")
 
@@ -1905,6 +2068,32 @@ class VectorProcessor:
                     **extra,
                 }
             )
+
+        def _sample_stroke_geometry(path_obj, stroke_width_svg, cap_style_name="round", join_style_name="round"):
+            try:
+                segments = list(path_obj.segments())
+            except Exception:
+                segments = None
+
+            if segments and len(segments) > 1:
+                coords = _flatten_segments(segments, tol_svg)
+            else:
+                coords = _flatten_segments_fallback(path_obj, tol_svg)
+
+            if len(coords) < 2:
+                return None
+
+            try:
+                stroke_geom = LineString(coords).buffer(
+                    max(float(stroke_width_svg) * 0.5, 1e-6),
+                    cap_style=cap_style_name,
+                    join_style=join_style_name,
+                    mitre_limit=2.0,
+                )
+                stroke_geom = VectorProcessor._extract_polygonal_geometry(make_valid(stroke_geom))
+                return stroke_geom if stroke_geom is not None and not stroke_geom.is_empty else None
+            except Exception:
+                return None
 
         for element in svg.elements():
             if not isinstance(element, (Path, Shape)):
@@ -1924,10 +2113,86 @@ class VectorProcessor:
                 and getattr(element.stroke, "value", None) is not None
                 and str(element.stroke.value).lower() != "none"
             )
+            stroke_rgb = None
+            stroke_hex = None
+            stroke_width = 0.0
+            if has_stroke:
+                stroke_hex = _agent_debug_color_object_to_hex(getattr(element, "stroke", None))
+                try:
+                    stroke_rgb = (element.stroke.red, element.stroke.green, element.stroke.blue)
+                except (AttributeError, TypeError, ValueError):
+                    stroke_rgb = None
+                try:
+                    stroke_width = float(getattr(element, "stroke_width", 0.0) or 0.0)
+                except Exception:
+                    stroke_width = 0.0
             if not has_fill:
                 if has_stroke:
                     stroke_only_count += 1
-                    _record_parse_skip("stroke_only_ignored", element)
+                    stroke_modeled = False
+                    if stroke_hex is not None:
+                        stroke_only_by_color[stroke_hex] = stroke_only_by_color.get(stroke_hex, 0) + 1
+                        stroke_only_widths_by_color.setdefault(stroke_hex, set()).add(round(float(stroke_width), 4))
+                        if stroke_hex in _AGENT_DEBUG_FOCUS_SOURCE_HEXES and stroke_width > 0.0:
+                            try:
+                                linecap = str(getattr(element, "stroke_linecap", None) or "round").strip().lower()
+                            except Exception:
+                                linecap = "round"
+                            try:
+                                linejoin = str(getattr(element, "stroke_linejoin", None) or "round").strip().lower()
+                            except Exception:
+                                linejoin = "round"
+                            cap_style = "flat" if linecap == "butt" else ("square" if linecap == "square" else "round")
+                            join_style = "mitre" if linejoin == "miter" else linejoin
+                            stroke_geom = _sample_path_to_stroke_geometry(
+                                element,
+                                stroke_width,
+                                cap_style_name=cap_style,
+                                join_style_name=join_style,
+                            )
+                            if stroke_geom is not None:
+                                stroke_only_estimated_area_by_color[stroke_hex] = (
+                                    stroke_only_estimated_area_by_color.get(stroke_hex, 0.0) + _agent_debug_geom_area(stroke_geom)
+                                )
+                                stroke_only_estimated_components_by_color[stroke_hex] = (
+                                    stroke_only_estimated_components_by_color.get(stroke_hex, 0)
+                                    + len(_agent_debug_extract_polygon_parts(stroke_geom))
+                                )
+                    if isinstance(element, Shape) and not isinstance(element, Path):
+                        try:
+                            element = Path(element)
+                        except Exception:
+                            _record_parse_skip("shape_to_path_failed", element)
+                            continue
+
+                    if stroke_rgb is not None and stroke_width > 0.0:
+                        try:
+                            linecap = str(getattr(element, "stroke_linecap", None) or "round").strip().lower()
+                        except Exception:
+                            linecap = "round"
+                        try:
+                            linejoin = str(getattr(element, "stroke_linejoin", None) or "round").strip().lower()
+                        except Exception:
+                            linejoin = "round"
+                        cap_style = "flat" if linecap == "butt" else ("square" if linecap == "square" else "round")
+                        join_style = "mitre" if linejoin == "miter" else linejoin
+                        stroke_geom = _sample_path_to_stroke_geometry(
+                            element,
+                            stroke_width,
+                            cap_style_name=cap_style,
+                            join_style_name=join_style,
+                        )
+                        if stroke_geom is not None and not stroke_geom.is_empty:
+                            raw_shapes.append(
+                                {
+                                    "poly": stroke_geom,
+                                    "color": stroke_rgb,
+                                    "source_kind": "stroke_only",
+                                    "stroke_width_svg": float(stroke_width),
+                                }
+                            )
+                            stroke_modeled = True
+                    _record_parse_skip("stroke_only_modeled" if stroke_modeled else "stroke_only_ignored", element)
                 continue
 
             fill_shape_count += 1
@@ -1965,6 +2230,16 @@ class VectorProcessor:
                 skipped_gradient_count += 1
                 _record_parse_skip("unresolvable_fill", element)
                 continue
+
+            fill_hex = _agent_debug_rgb_to_hex(rgb)
+            if has_stroke and fill_hex is not None:
+                filled_with_stroke_by_fill[fill_hex] = filled_with_stroke_by_fill.get(fill_hex, 0) + 1
+                if stroke_hex == fill_hex:
+                    filled_same_color_stroke_widths_by_fill.setdefault(fill_hex, set()).add(round(float(stroke_width), 4))
+                if fill_hex == _AGENT_DEBUG_SOURCE_HEX:
+                    target_source_stroke_widths.append(round(float(stroke_width), 4))
+                    if stroke_hex == fill_hex:
+                        target_source_same_color_stroke_count += 1
 
             try:
                 subpaths = list(element.as_subpaths())
@@ -2057,13 +2332,43 @@ class VectorProcessor:
                 continue
 
             # --- Fix 3: morphological closing ---
+            if has_stroke and fill_hex is not None:
+                stroke_hex = _agent_debug_color_object_to_hex(getattr(element, "stroke", None))
+                try:
+                    stroke_width = float(getattr(element, "stroke_width", 0.0) or 0.0)
+                except Exception:
+                    stroke_width = 0.0
+                if stroke_hex == fill_hex and stroke_width > 0.0:
+                    try:
+                        # SVG renders same-color stroke as additional visible area.
+                        # Preserve that paint so native vector output does not leave
+                        # pinholes between neighboring filled paths.
+                        expanded = result_poly.buffer(
+                            stroke_width * 0.5,
+                            join_style="mitre",
+                            mitre_limit=2.0,
+                        )
+                        expanded = VectorProcessor._extract_polygonal_geometry(make_valid(expanded))
+                        if expanded is not None and not expanded.is_empty:
+                            result_poly = expanded
+                    except Exception:
+                        pass
+
             result_poly = VectorProcessor._normalize_contours(result_poly)
             if result_poly is None or result_poly.is_empty:
                 skipped_polygon_count += 1
                 _record_parse_skip("normalize_empty", element, subpath_count=len(subpath_polys))
                 continue
 
-            raw_shapes.append({"poly": result_poly, "color": rgb})
+            raw_shapes.append(
+                {
+                    "poly": result_poly,
+                    "color": rgb,
+                    "source_kind": "fill",
+                    "same_color_stroke": bool(has_stroke and stroke_hex == fill_hex and stroke_width > 0.0),
+                    "stroke_width_svg": float(stroke_width) if has_stroke else 0.0,
+                }
+            )
 
         if skipped_types:
             _log.info(f"[VECTOR] Skipped non-path elements: {skipped_types}")
@@ -2099,6 +2404,33 @@ class VectorProcessor:
                 "skipped_gradient_count": int(skipped_gradient_count),
                 "skipped_polygon_count": int(skipped_polygon_count),
                 "skipped_non_path_types": skipped_types,
+                "stroke_only_top_colors": [
+                    {"hex": hex_color, "count": int(count)}
+                    for hex_color, count in sorted(stroke_only_by_color.items(), key=lambda kv: (-kv[1], kv[0]))[:8]
+                ],
+                "focus_source_stroke_only": {
+                    hex_color: {
+                        "count": int(stroke_only_by_color.get(hex_color, 0)),
+                        "stroke_widths": sorted(stroke_only_widths_by_color.get(hex_color, set()))[:12],
+                        "estimated_polygon_area": round(float(stroke_only_estimated_area_by_color.get(hex_color, 0.0)), 4),
+                        "estimated_polygon_components": int(stroke_only_estimated_components_by_color.get(hex_color, 0)),
+                    }
+                    for hex_color in _AGENT_DEBUG_FOCUS_SOURCE_HEXES
+                },
+                "filled_with_stroke_top_fill_colors": [
+                    {"hex": hex_color, "count": int(count)}
+                    for hex_color, count in sorted(filled_with_stroke_by_fill.items(), key=lambda kv: (-kv[1], kv[0]))[:8]
+                ],
+                "focus_source_same_color_fill_strokes": {
+                    hex_color: {
+                        "count": int(filled_with_stroke_by_fill.get(hex_color, 0)),
+                        "same_color_stroke_widths": sorted(filled_same_color_stroke_widths_by_fill.get(hex_color, set()))[:12],
+                    }
+                    for hex_color in _AGENT_DEBUG_FOCUS_SOURCE_HEXES
+                },
+                "target_source_fill_hex": _AGENT_DEBUG_SOURCE_HEX,
+                "target_source_fill_with_same_color_stroke_count": int(target_source_same_color_stroke_count),
+                "target_source_stroke_widths": sorted(set(target_source_stroke_widths))[:12],
                 "parse_skip_examples": parse_skip_examples,
             },
         )
@@ -2144,7 +2476,6 @@ class VectorProcessor:
 
         scale_factor = target_width_mm / real_w
         min_area_svg = max(0.0, (self.sampling_precision**2) / max(scale_factor**2, 1e-12) * 0.25)
-
         final_shapes = []
         for item in raw_shapes:
             shifted = affinity.translate(item["poly"], xoff=-gx0, yoff=-gy0)

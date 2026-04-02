@@ -81,7 +81,7 @@ _STUB_RESPONSE: dict[str, str] = {
 }
 _AGENT_DEBUG_LOG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "debug-ab5259.log")
 _AGENT_DEBUG_SESSION_ID = "ab5259"
-_AGENT_DEBUG_TARGET_HEX = "#7a8777"
+_AGENT_DEBUG_TARGET_HEX = "#5e6546"
 
 
 def _agent_debug_write(hypothesis_id, location, message, data, run_id="initial"):

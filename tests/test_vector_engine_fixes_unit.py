@@ -758,8 +758,8 @@ class TestFillRuleValuesFallback:
         )
 
 
-class TestStrokeOnlyElementsSkipped:
-    """Stroke-only elements must be skipped (no geometry produced)."""
+class TestVisibleStrokeElementsPreserved:
+    """Visible SVG strokes should contribute geometry in vector mode."""
 
     def _make_svg_with_stroke_and_fill(self):
         """SVG with one fill rect and one stroke-only line."""
@@ -767,7 +767,7 @@ class TestStrokeOnlyElementsSkipped:
             '<?xml version="1.0" encoding="UTF-8"?>'
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">'
             '  <rect x="10" y="10" width="80" height="80" fill="rgb(255,0,0)"/>'
-            '  <line x1="0" y1="100" x2="200" y2="100"'
+            '  <path d="M0,100 L200,100"'
             '    stroke="rgb(0,0,255)" stroke-width="5" fill="none"/>'
             "</svg>"
         )
@@ -796,17 +796,57 @@ class TestStrokeOnlyElementsSkipped:
         finally:
             os.unlink(path)
 
-    def test_stroke_only_produces_no_shapes(self):
-        """An SVG with only stroke-only elements should produce zero shapes."""
+    def test_stroke_only_produces_shapes(self):
+        """An SVG with visible strokes should produce stroke geometry."""
         svg = self._make_svg_stroke_only()
-        with pytest.raises(ValueError, match="No valid shapes"):
-            self._parse_shapes(svg)
+        shapes = self._parse_shapes(svg)
+        assert len(shapes) >= 1
+        colors = {s["color"] for s in shapes}
+        assert (0, 128, 0) in colors or (0, 0, 255) in colors
 
-    def test_fill_element_preserved_stroke_skipped(self):
-        """Fill element must be kept; stroke-only element must be skipped."""
+    def test_fill_element_preserved_stroke_added(self):
+        """Fill element must be kept; stroke-only element must also contribute geometry."""
         svg = self._make_svg_with_stroke_and_fill()
         shapes = self._parse_shapes(svg)
         assert len(shapes) >= 1
         colors = {s["color"] for s in shapes}
         assert (255, 0, 0) in colors, "Fill element should produce a red shape"
-        assert (0, 0, 255) not in colors, "Stroke-only blue line should not produce a shape"
+        assert (0, 0, 255) in colors, "Stroke-only blue line should now produce geometry"
+
+
+class TestSameColorStrokeCompensation:
+    """Same-color SVG strokes should contribute visible area."""
+
+    def _parse_shapes(self, svg_content: str):
+        fd, path = tempfile.mkstemp(suffix=".svg")
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(svg_content)
+            vp = VectorProcessor.__new__(VectorProcessor)
+            vp.sampling_precision = 0.02
+            shapes, _scale, _bbox = vp._parse_svg(path, target_width_mm=50.0)
+            return shapes
+        finally:
+            os.unlink(path)
+
+    def test_same_color_stroke_expands_visible_polygon(self):
+        no_stroke_svg = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">'
+            '  <path fill="#ff0000" d="M0,0 L10,0 L10,10 L0,10 Z"/>'
+            "</svg>"
+        )
+        same_stroke_svg = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">'
+            '  <path fill="#ff0000" stroke="#ff0000" stroke-width="2"'
+            ' d="M0,0 L10,0 L10,10 L0,10 Z"/>'
+            "</svg>"
+        )
+
+        base_shapes = self._parse_shapes(no_stroke_svg)
+        stroked_shapes = self._parse_shapes(same_stroke_svg)
+
+        assert len(base_shapes) == 1
+        assert len(stroked_shapes) == 1
+        assert stroked_shapes[0]["poly"].area > base_shapes[0]["poly"].area
