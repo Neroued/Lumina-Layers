@@ -295,6 +295,46 @@ export interface MergeResponse {
   stats: MergeStats;
 }
 
+export interface CompareDiffItem {
+  recipe: string[];
+  rgb_a: [number, number, number];
+  rgb_b: [number, number, number];
+  hex_a: string;
+  hex_b: string;
+  delta_e00: number;
+}
+
+export interface CompareStats {
+  matched_recipe_count: number;
+  recipe_coverage_a: number;
+  recipe_coverage_b: number;
+  mean_delta_e00: number;
+  median_delta_e00: number;
+  p95_delta_e00: number;
+  max_delta_e00: number;
+  identical_rgb_count: number;
+  recipes_only_in_a: number;
+  recipes_only_in_b: number;
+}
+
+export interface CompareRequest {
+  lut_a_name: string;
+  lut_b_name: string;
+  top_n: number;
+}
+
+export interface CompareResponse {
+  status: string;
+  message: string;
+  lut_a_name: string;
+  lut_b_name: string;
+  lut_a_mode: string;
+  lut_b_mode: string;
+  stats: CompareStats;
+  warnings: string[];
+  worst_diffs: CompareDiffItem[];
+}
+
 // ========== System Models ==========
 
 export interface ClearCacheResponse {

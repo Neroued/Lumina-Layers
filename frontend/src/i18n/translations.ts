@@ -1195,6 +1195,10 @@ export const translations: Record<string, Record<"zh" | "en", string>> = {
     zh: "LUT 合并",
     en: "LUT Merge",
   },
+  "tab.lutCompare": {
+    zh: "LUT 对比",
+    en: "LUT Compare",
+  },
   "tab.fiveColor": {
     zh: "配方查询",
     en: "Five-Color",
@@ -1411,6 +1415,127 @@ export const translations: Record<string, Record<"zh" | "en", string>> = {
   lut_manager_selected_count: {
     zh: "已选择 {count} 个副 LUT",
     en: "{count} secondary LUTs selected",
+  },
+
+  lut_compare_title: {
+    zh: "LUT 对比工具",
+    en: "LUT Compare Tool",
+  },
+  lut_compare_desc: {
+    zh: "按同配方比较两个 LUT 的颜色偏移，适用于耗材、批次和重复校准的一致性分析。",
+    en: "Compare two LUTs by shared recipe to measure material, batch, and calibration drift.",
+  },
+  lut_compare_lut_a_label: {
+    zh: "基准 LUT",
+    en: "Baseline LUT",
+  },
+  lut_compare_lut_b_label: {
+    zh: "对比 LUT",
+    en: "Comparison LUT",
+  },
+  lut_compare_lut_a_placeholder: {
+    zh: "选择基准 LUT...",
+    en: "Select baseline LUT...",
+  },
+  lut_compare_lut_b_placeholder: {
+    zh: "选择对比 LUT...",
+    en: "Select comparison LUT...",
+  },
+  lut_compare_compare_btn: {
+    zh: "开始对比",
+    en: "Compare LUTs",
+  },
+  lut_compare_result_title: {
+    zh: "对比结果",
+    en: "Comparison Result",
+  },
+  lut_compare_summary: {
+    zh: "已比较 {lutA} 与 {lutB} 的 {count} 个共享配方。",
+    en: "Compared {count} shared recipes between {lutA} and {lutB}.",
+  },
+  lut_compare_matched: {
+    zh: "共享配方",
+    en: "Shared Recipes",
+  },
+  lut_compare_coverage_a: {
+    zh: "A 覆盖率",
+    en: "A Coverage",
+  },
+  lut_compare_coverage_b: {
+    zh: "B 覆盖率",
+    en: "B Coverage",
+  },
+  lut_compare_mean: {
+    zh: "平均 ΔE00",
+    en: "Mean ΔE00",
+  },
+  lut_compare_p95: {
+    zh: "P95 ΔE00",
+    en: "P95 ΔE00",
+  },
+  lut_compare_max: {
+    zh: "最大 ΔE00",
+    en: "Max ΔE00",
+  },
+  lut_compare_identical: {
+    zh: "RGB 完全一致",
+    en: "Exact RGB Matches",
+  },
+  lut_compare_warnings_title: {
+    zh: "注意事项",
+    en: "Warnings",
+  },
+  lut_compare_warning_mode_mismatch: {
+    zh: "LUT 模式不一致：{modeA} vs {modeB}",
+    en: "LUT modes differ: {modeA} vs {modeB}",
+  },
+  lut_compare_warning_layer_count_mismatch: {
+    zh: "配方层数不一致：{countA} vs {countB}",
+    en: "Recipe layer counts differ: {countA} vs {countB}",
+  },
+  lut_compare_warning_layer_height_mismatch: {
+    zh: "层高不一致：{values}",
+    en: "Layer heights differ: {values}",
+  },
+  lut_compare_warning_line_width_mismatch: {
+    zh: "线宽不一致：{values}",
+    en: "Line widths differ: {values}",
+  },
+  lut_compare_warning_no_shared_recipes: {
+    zh: "没有共享配方，统计结果已归零。",
+    en: "No shared recipes were found, so comparison metrics were zeroed.",
+  },
+  lut_compare_warning_row_mismatch: {
+    zh: "{label} 的 rgb/stacks 行数不一致：rgb={rgb}，stacks={stacks}；已仅使用前 {used} 行。",
+    en: "{label} has mismatched rgb/stacks rows: rgb={rgb}, stacks={stacks}; only the first {used} rows were used.",
+  },
+  lut_compare_warning_duplicate_recipes: {
+    zh: "{label} 存在 {count} 条重复配方记录；每个配方仅保留第一条。",
+    en: "{label} contains {count} duplicate recipe rows; only the first row for each recipe was kept.",
+  },
+  lut_compare_warning_generic: {
+    zh: "对比过程中返回了额外警告，请结合结果谨慎解读。",
+    en: "Additional warnings were returned during comparison; please interpret the result with care.",
+  },
+  lut_compare_worst_title: {
+    zh: "最大差异配方",
+    en: "Largest Recipe Diffs",
+  },
+  lut_compare_worst_desc: {
+    zh: "展示共享配方中差异最大的若干条目，帮助快速定位色偏最明显的配方。",
+    en: "Shows the shared recipes with the largest differences so the biggest color shifts are easy to spot.",
+  },
+  lut_compare_delta: {
+    zh: "ΔE00",
+    en: "ΔE00",
+  },
+  lut_compare_no_result: {
+    zh: "选择两个 LUT 后即可开始对比。",
+    en: "Select two LUTs to start comparing.",
+  },
+  lut_compare_no_diffs: {
+    zh: "当前没有可展示的共享配方差异。",
+    en: "There are no shared recipe diffs to display.",
   },
 
   // ==================== About View ====================

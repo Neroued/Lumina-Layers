@@ -14,6 +14,10 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from api.schemas.lut import (
+    CompareDiffItem,
+    CompareRequest,
+    CompareResponse,
+    CompareStats,
     LutInfoResponse,
     MergeRequest,
     MergeResponse,
@@ -28,6 +32,19 @@ from utils.lut_manager import LUTManager
 router = APIRouter(prefix="/api/lut", tags=["LUT"])
 
 _VALID_PRIMARY_MODES = {"6-Color", "8-Color", "8-Color Max"}
+
+
+def _dedupe_warnings(warnings: list[str]) -> list[str]:
+    """Preserve warning order while removing duplicates.
+    保持警告顺序并移除重复项。
+    """
+    seen: set[str] = set()
+    result: list[str] = []
+    for warning in warnings:
+        if warning and warning not in seen:
+            seen.add(warning)
+            result.append(warning)
+    return result
 
 
 @router.get("/list")
@@ -262,6 +279,88 @@ def merge_luts_endpoint(request: MergeRequest) -> MergeResponse:
         raise HTTPException(
             status_code=500,
             detail=f"Merge failed: {exc}",
+        ) from exc
+
+
+@router.post("/compare")
+def compare_luts_endpoint(request: CompareRequest) -> CompareResponse:
+    """Compare two LUTs by shared recipe keys.
+    按共享配方键比较两个 LUT。
+    """
+    path_a: str | None = LUTManager.get_lut_path(request.lut_a_name)
+    if path_a is None:
+        raise HTTPException(status_code=404, detail=f"LUT not found: {request.lut_a_name}")
+
+    path_b: str | None = LUTManager.get_lut_path(request.lut_b_name)
+    if path_b is None:
+        raise HTTPException(status_code=404, detail=f"LUT not found: {request.lut_b_name}")
+
+    try:
+        mode_a, _count_a = LUTMerger.detect_color_mode(path_a)
+        mode_b, _count_b = LUTMerger.detect_color_mode(path_b)
+
+        rgb_a, stacks_a = LUTMerger.load_lut_with_stacks(path_a, mode_a)
+        rgb_b, stacks_b = LUTMerger.load_lut_with_stacks(path_b, mode_b)
+
+        try:
+            _, _, metadata_a = LUTManager.load_lut_with_metadata(path_a)
+        except Exception:
+            metadata_a = LUTMetadata(color_mode=mode_a)
+
+        try:
+            _, _, metadata_b = LUTManager.load_lut_with_metadata(path_b)
+        except Exception:
+            metadata_b = LUTMetadata(color_mode=mode_b)
+
+        compare_result = LUTMerger.compare_luts_by_recipe(
+            rgb_a,
+            stacks_a,
+            rgb_b,
+            stacks_b,
+            top_n=request.top_n,
+        )
+
+        warnings = list(compare_result.get("warnings", []))
+
+        if mode_a != mode_b:
+            warnings.append(f"color_mode 不一致: {mode_a} vs {mode_b}")
+
+        if stacks_a.ndim == 2 and stacks_b.ndim == 2:
+            if stacks_a.shape[1] != stacks_b.shape[1]:
+                warnings.append(
+                    f"recipe layer count differs: {stacks_a.shape[1]} vs {stacks_b.shape[1]}"
+                )
+
+        _compatible, param_warnings = LUTMerger.validate_print_params([metadata_a, metadata_b])
+        warnings.extend(param_warnings)
+
+        stats_dict = compare_result["stats"]
+        if stats_dict["matched_recipe_count"] == 0:
+            warnings.append("No shared recipes found; comparison metrics are zeroed.")
+
+        warnings = _dedupe_warnings(warnings)
+        message = (
+            f"Compared {stats_dict['matched_recipe_count']} shared recipes between "
+            f"{request.lut_a_name} and {request.lut_b_name}"
+        )
+
+        return CompareResponse(
+            status="success",
+            message=message,
+            lut_a_name=request.lut_a_name,
+            lut_b_name=request.lut_b_name,
+            lut_a_mode=mode_a,
+            lut_b_mode=mode_b,
+            stats=CompareStats(**stats_dict),
+            warnings=warnings,
+            worst_diffs=[CompareDiffItem(**item) for item in compare_result["worst_diffs"]],
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Compare failed: {exc}",
         ) from exc
 
 

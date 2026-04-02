@@ -30,6 +30,7 @@ vi.mock("../api/slicer", () => ({
 vi.mock("../api/lut", () => ({
   fetchLutInfo: vi.fn(),
   mergeLuts: vi.fn(),
+  compareLuts: vi.fn(),
 }));
 
 vi.mock("../api/extractor", () => ({

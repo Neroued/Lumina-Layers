@@ -30,6 +30,7 @@ vi.mock("../api/slicer", () => ({
 vi.mock("../api/lut", () => ({
   fetchLutInfo: vi.fn(),
   mergeLuts: vi.fn(),
+  compareLuts: vi.fn(),
 }));
 
 vi.mock("../api/extractor", () => ({
@@ -47,6 +48,7 @@ vi.mock("../components/CalibrationPanel", () => ({ default: () => null }));
 vi.mock("../components/ExtractorPanel", () => ({ default: () => null }));
 vi.mock("../components/ExtractorCanvas", () => ({ default: () => null }));
 vi.mock("../components/LutManagerPanel", () => ({ default: () => null }));
+vi.mock("../components/LutComparePanel", () => ({ default: () => null }));
 vi.mock("../components/AboutView", () => ({ default: () => null }));
 vi.mock("../components/FiveColorQueryPanel", () => ({ default: () => null }));
 vi.mock("../components/LoadingSpinner", () => ({ default: () => null }));

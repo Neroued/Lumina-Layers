@@ -1,5 +1,11 @@
 import apiClient from "./client";
-import type { LutInfoResponse, MergeRequest, MergeResponse } from "./types";
+import type {
+  CompareRequest,
+  CompareResponse,
+  LutInfoResponse,
+  MergeRequest,
+  MergeResponse,
+} from "./types";
 
 /** 获取指定 LUT 的颜色模式和颜色数量 */
 export async function fetchLutInfo(
@@ -17,6 +23,18 @@ export async function mergeLuts(
 ): Promise<MergeResponse> {
   const response = await apiClient.post<MergeResponse>(
     "/lut/merge",
+    request,
+    { timeout: 600_000 }
+  );
+  return response.data;
+}
+
+/** Compare two LUTs by shared recipe */
+export async function compareLuts(
+  request: CompareRequest
+): Promise<CompareResponse> {
+  const response = await apiClient.post<CompareResponse>(
+    "/lut/compare",
     request,
     { timeout: 600_000 }
   );
