@@ -312,18 +312,11 @@ def compare_luts_endpoint(request: CompareRequest) -> CompareResponse:
         except Exception:
             metadata_b = LUTMetadata(color_mode=mode_b)
 
-        normalized_stacks_a = LUTMerger.normalize_stacks_for_compare(
-            stacks_a, mode_a, path_a, metadata=metadata_a
-        )
-        normalized_stacks_b = LUTMerger.normalize_stacks_for_compare(
-            stacks_b, mode_b, path_b, metadata=metadata_b
-        )
-
         compare_result = LUTMerger.compare_luts_by_recipe(
             rgb_a,
-            normalized_stacks_a,
+            stacks_a,
             rgb_b,
-            normalized_stacks_b,
+            stacks_b,
             top_n=request.top_n,
         )
 
@@ -332,10 +325,10 @@ def compare_luts_endpoint(request: CompareRequest) -> CompareResponse:
         if mode_a != mode_b:
             warnings.append(f"color_mode 不一致: {mode_a} vs {mode_b}")
 
-        if normalized_stacks_a.ndim == 2 and normalized_stacks_b.ndim == 2:
-            if normalized_stacks_a.shape[1] != normalized_stacks_b.shape[1]:
+        if stacks_a.ndim == 2 and stacks_b.ndim == 2:
+            if stacks_a.shape[1] != stacks_b.shape[1]:
                 warnings.append(
-                    f"recipe layer count differs: {normalized_stacks_a.shape[1]} vs {normalized_stacks_b.shape[1]}"
+                    f"recipe layer count differs: {stacks_a.shape[1]} vs {stacks_b.shape[1]}"
                 )
 
         _compatible, param_warnings = LUTMerger.validate_print_params([metadata_a, metadata_b])

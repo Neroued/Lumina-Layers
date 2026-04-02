@@ -1449,6 +1449,10 @@ export const translations: Record<string, Record<"zh" | "en", string>> = {
     zh: "对比结果",
     en: "Comparison Result",
   },
+  lut_compare_summary: {
+    zh: "已比较 {lutA} 与 {lutB} 的 {count} 个共享配方。",
+    en: "Compared {count} shared recipes between {lutA} and {lutB}.",
+  },
   lut_compare_matched: {
     zh: "共享配方",
     en: "Shared Recipes",
@@ -1480,6 +1484,38 @@ export const translations: Record<string, Record<"zh" | "en", string>> = {
   lut_compare_warnings_title: {
     zh: "注意事项",
     en: "Warnings",
+  },
+  lut_compare_warning_mode_mismatch: {
+    zh: "LUT 模式不一致：{modeA} vs {modeB}",
+    en: "LUT modes differ: {modeA} vs {modeB}",
+  },
+  lut_compare_warning_layer_count_mismatch: {
+    zh: "配方层数不一致：{countA} vs {countB}",
+    en: "Recipe layer counts differ: {countA} vs {countB}",
+  },
+  lut_compare_warning_layer_height_mismatch: {
+    zh: "层高不一致：{values}",
+    en: "Layer heights differ: {values}",
+  },
+  lut_compare_warning_line_width_mismatch: {
+    zh: "线宽不一致：{values}",
+    en: "Line widths differ: {values}",
+  },
+  lut_compare_warning_no_shared_recipes: {
+    zh: "没有共享配方，统计结果已归零。",
+    en: "No shared recipes were found, so comparison metrics were zeroed.",
+  },
+  lut_compare_warning_row_mismatch: {
+    zh: "{label} 的 rgb/stacks 行数不一致：rgb={rgb}，stacks={stacks}；已仅使用前 {used} 行。",
+    en: "{label} has mismatched rgb/stacks rows: rgb={rgb}, stacks={stacks}; only the first {used} rows were used.",
+  },
+  lut_compare_warning_duplicate_recipes: {
+    zh: "{label} 存在 {count} 条重复配方记录；每个配方仅保留第一条。",
+    en: "{label} contains {count} duplicate recipe rows; only the first row for each recipe was kept.",
+  },
+  lut_compare_warning_generic: {
+    zh: "对比过程中返回了额外警告，请结合结果谨慎解读。",
+    en: "Additional warnings were returned during comparison; please interpret the result with care.",
   },
   lut_compare_worst_title: {
     zh: "最大差异配方",

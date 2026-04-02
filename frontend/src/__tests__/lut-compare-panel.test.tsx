@@ -96,8 +96,14 @@ describe("LutComparePanel", () => {
     render(<LutComparePanel />);
 
     expect(screen.getByTestId("compare-result")).toBeInTheDocument();
-    expect(screen.getByTestId("compare-result")).toHaveTextContent("Compared 2 shared recipes");
-    expect(screen.getByTestId("compare-warnings")).toHaveTextContent("layer_height_mm 不一致");
+    expect(screen.getByTestId("compare-result")).toHaveTextContent(
+      "已比较 LUT A 与 LUT B 的 2 个共享配方。"
+    );
+    expect(screen.queryByText("Compared 2 shared recipes between LUT A and LUT B")).not.toBeInTheDocument();
+    expect(screen.getByTestId("compare-warnings")).toHaveTextContent(
+      "层高不一致：0.0800, 0.1000"
+    );
+    expect(screen.queryByText("layer_height_mm 不一致: 0.0800, 0.1000")).not.toBeInTheDocument();
     expect(screen.getByTestId("worst-diffs")).toHaveTextContent("White / Red / Yellow / Blue / White");
     expect(screen.getByTestId("worst-diffs")).toHaveTextContent("2.80");
   });

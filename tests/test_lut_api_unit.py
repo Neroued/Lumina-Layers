@@ -214,6 +214,74 @@ class TestCompareSuccess:
         assert data["stats"]["mean_delta_e00"] == 1.25
         assert data["worst_diffs"][0]["delta_e00"] == 2.0
 
+    @patch("api.routers.lut.LUTMerger.normalize_stacks_for_compare")
+    @patch("api.routers.lut.LUTMerger.validate_print_params", return_value=(True, []))
+    @patch("api.routers.lut.LUTManager.load_lut_with_metadata")
+    @patch("api.routers.lut.LUTMerger.load_lut_with_stacks")
+    @patch("api.routers.lut.LUTMerger.detect_color_mode")
+    @patch("api.routers.lut.LUTManager.get_lut_path")
+    def test_compare_uses_canonical_stacks_from_loader(
+        self,
+        mock_path,
+        mock_detect,
+        mock_load,
+        mock_load_meta,
+        mock_validate,
+        mock_normalize,
+    ) -> None:
+        import numpy as np
+
+        dummy_rgb = np.array([[255, 0, 0]], dtype=np.uint8)
+        canonical_stacks = np.array([[0, 5, 3, 6, 0]], dtype=np.int32)
+
+        def compare_side_effect(rgb_a, stacks_a, rgb_b, stacks_b, top_n):
+            np.testing.assert_array_equal(stacks_a, canonical_stacks)
+            np.testing.assert_array_equal(stacks_b, canonical_stacks)
+            return {
+                "stats": {
+                    "matched_recipe_count": 1,
+                    "recipe_coverage_a": 1.0,
+                    "recipe_coverage_b": 1.0,
+                    "mean_delta_e00": 0.0,
+                    "median_delta_e00": 0.0,
+                    "p95_delta_e00": 0.0,
+                    "max_delta_e00": 0.0,
+                    "identical_rgb_count": 1,
+                    "recipes_only_in_a": 0,
+                    "recipes_only_in_b": 0,
+                },
+                "warnings": [],
+                "worst_diffs": [],
+            }
+
+        mock_normalize.side_effect = AssertionError(
+            "compare route should not re-normalize canonical stacks"
+        )
+        mock_path.side_effect = ["/fake/a.json", "/fake/b.json"]
+        mock_detect.side_effect = [("4-Color", 1024), ("4-Color", 1024)]
+        mock_load.side_effect = [
+            (dummy_rgb, canonical_stacks),
+            (dummy_rgb, canonical_stacks),
+        ]
+        mock_load_meta.side_effect = [
+            (dummy_rgb, canonical_stacks, LUTMetadata(color_mode="4-Color (RYBW)")),
+            (dummy_rgb, canonical_stacks, LUTMetadata(color_mode="4-Color (RYBW)")),
+        ]
+
+        with patch(
+            "api.routers.lut.LUTMerger.compare_luts_by_recipe",
+            side_effect=compare_side_effect,
+        ):
+            payload = {
+                "lut_a_name": "LUT_A",
+                "lut_b_name": "LUT_B",
+                "top_n": 5,
+            }
+            response = client.post("/api/lut/compare", json=payload)
+
+        assert response.status_code == 200
+        mock_normalize.assert_not_called()
+
 
 # =========================================================================
 # 7. POST /api/lut/compare — 404 scenario

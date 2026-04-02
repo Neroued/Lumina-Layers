@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { useI18n } from "../i18n/context";
 import { useWorkspaceMode } from "../hooks/useWorkspaceMode";
 import { useLutCompareStore } from "../stores/lutCompareStore";
+import type { CompareResponse } from "../api/types";
 import Dropdown from "./ui/Dropdown";
 import Button from "./ui/Button";
 import {
@@ -22,6 +23,100 @@ function formatMetric(value: number): string {
 
 function formatPercent(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
+}
+
+function replaceTokens(
+  template: string,
+  values: Record<string, string | number>
+): string {
+  let text = template;
+  for (const [key, value] of Object.entries(values)) {
+    text = text.replace(`{${key}}`, String(value));
+  }
+  return text;
+}
+
+function localizeCompareWarning(
+  warning: string,
+  t: (key: string) => string
+): string {
+  let match = warning.match(/^color_mode 不一致: (.+) vs (.+)$/);
+  if (match) {
+    return replaceTokens(t("lut_compare_warning_mode_mismatch"), {
+      modeA: match[1],
+      modeB: match[2],
+    });
+  }
+
+  match = warning.match(/^recipe layer count differs: (\d+) vs (\d+)$/);
+  if (match) {
+    return replaceTokens(t("lut_compare_warning_layer_count_mismatch"), {
+      countA: match[1],
+      countB: match[2],
+    });
+  }
+
+  match = warning.match(/^layer_height_mm 不一致: (.+)$/);
+  if (match) {
+    return replaceTokens(t("lut_compare_warning_layer_height_mismatch"), {
+      values: match[1],
+    });
+  }
+
+  match = warning.match(/^line_width_mm 不一致: (.+)$/);
+  if (match) {
+    return replaceTokens(t("lut_compare_warning_line_width_mismatch"), {
+      values: match[1],
+    });
+  }
+
+  if (warning === "No shared recipes found; comparison metrics are zeroed.") {
+    return t("lut_compare_warning_no_shared_recipes");
+  }
+
+  match = warning.match(
+    /^(LUT [AB]) row mismatch: rgb=(\d+), stacks=(\d+); using first (\d+)$/
+  );
+  if (match) {
+    return replaceTokens(t("lut_compare_warning_row_mismatch"), {
+      label: match[1],
+      rgb: match[2],
+      stacks: match[3],
+      used: match[4],
+    });
+  }
+
+  match = warning.match(
+    /^(LUT [AB]) contains (\d+) duplicate recipe rows; kept the first occurrence for each recipe$/
+  );
+  if (match) {
+    return replaceTokens(t("lut_compare_warning_duplicate_recipes"), {
+      label: match[1],
+      count: match[2],
+    });
+  }
+
+  return t("lut_compare_warning_generic");
+}
+
+function buildLocalizedWarnings(
+  compareResult: CompareResponse | null,
+  t: (key: string) => string
+): string[] {
+  if (!compareResult) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const localized: string[] = [];
+  for (const warning of compareResult.warnings) {
+    const translated = localizeCompareWarning(warning, t);
+    if (!seen.has(translated)) {
+      seen.add(translated);
+      localized.push(translated);
+    }
+  }
+  return localized;
 }
 
 export default function LutComparePanel() {
@@ -57,6 +152,15 @@ export default function LutComparePanel() {
 
   const compareDisabled = comparing || !lutAName || !lutBName;
   const stats = compareResult?.stats ?? null;
+  const compareSummary =
+    compareResult && stats
+      ? replaceTokens(t("lut_compare_summary"), {
+          lutA: compareResult.lut_a_name,
+          lutB: compareResult.lut_b_name,
+          count: stats.matched_recipe_count,
+        })
+      : null;
+  const localizedWarnings = buildLocalizedWarnings(compareResult, t);
 
   return (
     <motion.aside
@@ -157,7 +261,7 @@ export default function LutComparePanel() {
               tone="success"
               title={t("lut_compare_result_title")}
             >
-              <p>{compareResult.message}</p>
+              <p>{compareSummary}</p>
               <p>
                 {t("lut_compare_matched")}: {stats.matched_recipe_count} |{" "}
                 {t("lut_compare_identical")}: {stats.identical_rgb_count}
@@ -174,14 +278,14 @@ export default function LutComparePanel() {
             </StatusBanner>
           )}
 
-          {compareResult?.warnings.length ? (
+          {localizedWarnings.length ? (
             <StatusBanner
               data-testid="compare-warnings"
               tone="warning"
               title={t("lut_compare_warnings_title")}
             >
               <ul className="list-disc pl-5">
-                {compareResult.warnings.map((warning) => (
+                {localizedWarnings.map((warning) => (
                   <li key={warning}>{warning}</li>
                 ))}
               </ul>

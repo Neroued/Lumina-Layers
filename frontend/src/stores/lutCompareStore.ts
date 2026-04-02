@@ -44,10 +44,10 @@ export const useLutCompareStore = create<LutCompareState & LutCompareActions>(
     ...DEFAULT_STATE,
 
     fetchLutList: async () => {
-      set({ lutListLoading: true });
+      set({ lutListLoading: true, error: null });
       try {
         const response = await apiFetchLutList();
-        set({ lutList: response.luts, lutListLoading: false });
+        set({ lutList: response.luts, lutListLoading: false, error: null });
       } catch (err) {
         set({
           lutListLoading: false,
