@@ -2476,6 +2476,13 @@ class VectorProcessor:
 
         scale_factor = target_width_mm / real_w
         min_area_svg = max(0.0, (self.sampling_precision**2) / max(scale_factor**2, 1e-12) * 0.25)
+        min_printable_stroke_svg = PrinterConfig.NOZZLE_WIDTH / max(scale_factor, 1e-12)
+        printable_compensation = {
+            "min_printable_stroke_svg": round(float(min_printable_stroke_svg), 4),
+            "min_printable_stroke_mm": round(float(PrinterConfig.NOZZLE_WIDTH), 4),
+            "stroke_only_adjusted": 0,
+            "same_color_fill_adjusted": 0,
+        }
         final_shapes = []
         for item in raw_shapes:
             shifted = affinity.translate(item["poly"], xoff=-gx0, yoff=-gy0)
@@ -2483,9 +2490,37 @@ class VectorProcessor:
             if not shifted.is_valid:
                 shifted = make_valid(shifted)
 
+            source_kind = item.get("source_kind")
+            stroke_width_svg = float(item.get("stroke_width_svg", 0.0) or 0.0)
+            if stroke_width_svg > 0.0 and stroke_width_svg < min_printable_stroke_svg:
+                try:
+                    delta = 0.5 * (min_printable_stroke_svg - stroke_width_svg)
+                    expanded = shifted.buffer(delta, join_style="mitre", mitre_limit=2.0)
+                    expanded = VectorProcessor._extract_polygonal_geometry(make_valid(expanded))
+                    if expanded is not None and not expanded.is_empty:
+                        shifted = expanded
+                        if source_kind == "stroke_only":
+                            printable_compensation["stroke_only_adjusted"] += 1
+                        elif item.get("same_color_stroke"):
+                            printable_compensation["same_color_fill_adjusted"] += 1
+                except Exception:
+                    pass
+
             if shifted.is_empty or shifted.area <= min_area_svg:
                 continue
             final_shapes.append({"poly": shifted, "color": item["color"]})
+
+        # region agent log
+        _agent_debug_write(
+            hypothesis_id="I",
+            location="core/vector_engine.py:_parse_svg.printable_stroke_compensation",
+            message="Printable stroke width compensation summary",
+            data={
+                "svg_path": os.path.basename(svg_path),
+                **printable_compensation,
+            },
+        )
+        # endregion
 
         return final_shapes, scale_factor, (gx0, gy0, real_w, real_h)
 

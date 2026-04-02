@@ -813,6 +813,28 @@ class TestVisibleStrokeElementsPreserved:
         assert (255, 0, 0) in colors, "Fill element should produce a red shape"
         assert (0, 0, 255) in colors, "Stroke-only blue line should now produce geometry"
 
+    def test_stroke_only_is_widened_to_printable_width(self):
+        svg = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+            '  <path d="M0,50 L100,50" stroke="#0000ff" stroke-width="0.5" fill="none"/>'
+            "</svg>"
+        )
+        fd, path = tempfile.mkstemp(suffix=".svg")
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(svg)
+            vp = VectorProcessor.__new__(VectorProcessor)
+            vp.sampling_precision = 0.02
+            small_shapes, _, _ = vp._parse_svg(path, target_width_mm=10.0)
+            large_shapes, _, _ = vp._parse_svg(path, target_width_mm=100.0)
+        finally:
+            os.unlink(path)
+
+        small_blue = sum(s["poly"].area for s in small_shapes if s["color"] == (0, 0, 255))
+        large_blue = sum(s["poly"].area for s in large_shapes if s["color"] == (0, 0, 255))
+        assert small_blue > large_blue
+
 
 class TestSameColorStrokeCompensation:
     """Same-color SVG strokes should contribute visible area."""
