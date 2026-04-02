@@ -44,6 +44,26 @@ def _get_n3mf():
 
 _CONFIG_TEMPLATE_CACHE = None
 _PRINTER_TEMPLATE_CACHE: dict[str, dict] = {}
+_AGENT_DEBUG_LOG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug-ab5259.log")
+_AGENT_DEBUG_SESSION_ID = "ab5259"
+
+
+def _agent_debug_write(hypothesis_id, location, message, data, run_id="initial"):
+    """Append one NDJSON debug entry for the current session."""
+    payload = {
+        "sessionId": _AGENT_DEBUG_SESSION_ID,
+        "runId": run_id,
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data,
+        "timestamp": int(time.time() * 1000),
+    }
+    try:
+        with open(_AGENT_DEBUG_LOG_PATH, "a", encoding="utf-8") as debug_fp:
+            debug_fp.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 
 def load_printer_template(printer_id: str, slicer: str = "BambuStudio") -> dict:
@@ -674,16 +694,53 @@ def export_scene_with_bambu_metadata(
 
     print("[BAMBU_3MF] Adding meshes to 3MF:")
     unmatched = []
+    slot_debug = []
     for idx, slot_name in enumerate(slot_names):
         mesh = scene.geometry.get(slot_name)
         if mesh is None:
             unmatched.append(slot_name)
+            slot_debug.append(
+                {
+                    "slot_name": slot_name,
+                    "found": False,
+                    "vertices": 0,
+                    "faces": 0,
+                    "color_rgb": list(name_to_color.get(slot_name, (200, 200, 200))),
+                }
+            )
             print(f"[BAMBU_3MF]   {idx}: '{slot_name}' - NOT FOUND in scene")
             continue
 
         color_rgb = name_to_color.get(slot_name, (200, 200, 200))
+        vertices = getattr(mesh, "vertices", None)
+        faces = getattr(mesh, "faces", None)
+        slot_debug.append(
+            {
+                "slot_name": slot_name,
+                "found": True,
+                "vertices": len(vertices) if vertices is not None else 0,
+                "faces": len(faces) if faces is not None else 0,
+                "color_rgb": list(color_rgb),
+            }
+        )
         writer.add_mesh(mesh, slot_name, color_rgb)
         print(f"[BAMBU_3MF]   {idx}: '{slot_name}' -> RGB{color_rgb} (added to 3MF)")
+
+    # region agent log
+    _agent_debug_write(
+        hypothesis_id="D",
+        location="utils/bambu_3mf_writer.py:export_scene_with_bambu_metadata",
+        message="3MF slot-to-scene mapping summary",
+        data={
+            "output_path": output_path,
+            "slot_names": slot_names,
+            "actual_color_mode": actual_color_mode,
+            "writer_object_count": len(writer.objects),
+            "unmatched": unmatched,
+            "slot_debug": slot_debug,
+        },
+    )
+    # endregion
 
     if unmatched:
         raise ValueError("[BAMBU_3MF] Missing geometries for slot names: " + ", ".join(unmatched))

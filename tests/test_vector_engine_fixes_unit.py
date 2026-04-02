@@ -16,7 +16,7 @@ import tempfile
 import os
 import numpy as np
 import pytest
-from shapely.geometry import Polygon, MultiPolygon, GeometryCollection
+from shapely.geometry import Polygon, MultiPolygon, GeometryCollection, LineString
 
 from core.vector_engine import (
     _flatten_cubic,
@@ -251,6 +251,22 @@ class TestSplitDisconnectedShapes:
         data = [{"poly": Polygon(), "color": (0, 0, 0)}]
         result = VectorProcessor._split_disconnected_shapes(data)
         assert len(result) == 0
+
+
+class TestExtractPolygonalGeometry:
+    """Verify polygonal parts survive GeometryCollection repair output."""
+
+    def test_geometry_collection_keeps_multipolygon_child(self):
+        p1 = Polygon([(0, 0), (2, 0), (2, 2), (0, 2)])
+        p2 = Polygon([(3, 0), (5, 0), (5, 2), (3, 2)])
+        gc = GeometryCollection([MultiPolygon([p1, p2]), LineString([(0, 0), (5, 2)])])
+
+        result = VectorProcessor._extract_polygonal_geometry(gc)
+
+        assert result is not None
+        assert not result.is_empty
+        assert result.geom_type in ("Polygon", "MultiPolygon")
+        assert result.area == pytest.approx(p1.area + p2.area)
 
 
 # ---------------------------------------------------------------------------

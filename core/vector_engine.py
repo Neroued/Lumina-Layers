@@ -19,6 +19,7 @@ Key changes from v1:
 import os
 import re
 import logging
+import json
 import numpy as np
 import time
 import xml.etree.ElementTree as ET
@@ -39,6 +40,175 @@ _log = logging.getLogger(__name__)
 MIN_SHAPE_AREA_MM2 = 0.01
 BASE_COLOR_GAP_MM = 0.005
 _MAX_BEZIER_DEPTH = 16
+_AGENT_DEBUG_LOG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug-ab5259.log")
+_AGENT_DEBUG_SESSION_ID = "ab5259"
+_AGENT_DEBUG_TARGET_RGB = (122, 135, 119)
+_AGENT_DEBUG_TARGET_HEX = "#7a8777"
+_AGENT_DEBUG_EXTRUDE_FAILURE_LIMIT = 5
+_AGENT_DEBUG_EXTRUDE_FAILURES = 0
+_AGENT_DEBUG_PARSE_EXAMPLE_LIMIT = 12
+_AGENT_DEBUG_OCCLUSION_EXAMPLE_LIMIT = 12
+
+
+def _agent_debug_rgb_to_hex(rgb):
+    """Return a stable lowercase hex string for RGB tuples."""
+    try:
+        return f"#{int(rgb[0]) & 255:02x}{int(rgb[1]) & 255:02x}{int(rgb[2]) & 255:02x}"
+    except Exception:
+        return None
+
+
+def _agent_debug_geom_area(geom):
+    """Return geometry area for debug summaries."""
+    try:
+        return float(getattr(geom, "area", 0.0) or 0.0)
+    except Exception:
+        return 0.0
+
+
+def _agent_debug_shape_summary(items, geometry_key, limit=8):
+    """Summarise shape counts and areas by source colour."""
+    buckets = {}
+    for item in items or []:
+        hex_color = _agent_debug_rgb_to_hex(item.get("color"))
+        if hex_color is None:
+            continue
+        bucket = buckets.setdefault(hex_color, {"count": 0, "area": 0.0})
+        bucket["count"] += 1
+        bucket["area"] += _agent_debug_geom_area(item.get(geometry_key))
+
+    target = buckets.get(_AGENT_DEBUG_TARGET_HEX, {"count": 0, "area": 0.0})
+    top_colors = []
+    for hex_color, bucket in sorted(buckets.items(), key=lambda kv: (-kv[1]["area"], kv[0]))[:limit]:
+        top_colors.append(
+            {
+                "hex": hex_color,
+                "count": int(bucket["count"]),
+                "area": round(float(bucket["area"]), 4),
+            }
+        )
+
+    return {
+        "shape_count": len(items or []),
+        "unique_colors": len(buckets),
+        "target_color": {
+            "hex": _AGENT_DEBUG_TARGET_HEX,
+            "present": _AGENT_DEBUG_TARGET_HEX in buckets,
+            "count": int(target["count"]),
+            "area": round(float(target["area"]), 4),
+        },
+        "top_colors_by_area": top_colors,
+    }
+
+
+def _agent_debug_match_summary(items, limit=8):
+    """Summarise matched LUT colours, recipes, and source SVG colours."""
+    buckets = {}
+    for item in items or []:
+        matched_hex = _agent_debug_rgb_to_hex(item.get("matched_rgb"))
+        source_hex = _agent_debug_rgb_to_hex(item.get("color"))
+        if matched_hex is None:
+            continue
+        bucket = buckets.setdefault(
+            matched_hex,
+            {"count": 0, "area": 0.0, "recipes": set(), "source_colors": {}},
+        )
+        geom_area = _agent_debug_geom_area(item.get("geometry"))
+        bucket["count"] += 1
+        bucket["area"] += geom_area
+        recipe = item.get("recipe") or []
+        bucket["recipes"].add(tuple(int(v) for v in recipe))
+        if source_hex is not None:
+            src = bucket["source_colors"].setdefault(source_hex, {"count": 0, "area": 0.0})
+            src["count"] += 1
+            src["area"] += geom_area
+
+    def _source_colors_payload(source_colors, source_limit=6):
+        rows = []
+        for source_hex, data in sorted(source_colors.items(), key=lambda kv: (-kv[1]["area"], kv[0]))[:source_limit]:
+            rows.append(
+                {
+                    "hex": source_hex,
+                    "count": int(data["count"]),
+                    "area": round(float(data["area"]), 4),
+                }
+            )
+        return rows
+
+    target = buckets.get(
+        _AGENT_DEBUG_TARGET_HEX,
+        {"count": 0, "area": 0.0, "recipes": set(), "source_colors": {}},
+    )
+    top_colors = []
+    for matched_hex, bucket in sorted(buckets.items(), key=lambda kv: (-kv[1]["area"], kv[0]))[:limit]:
+        top_colors.append(
+            {
+                "hex": matched_hex,
+                "count": int(bucket["count"]),
+                "area": round(float(bucket["area"]), 4),
+                "recipes": [list(recipe) for recipe in sorted(bucket["recipes"])[:3]],
+                "source_colors": _source_colors_payload(bucket["source_colors"]),
+            }
+        )
+
+    return {
+        "shape_count": len(items or []),
+        "unique_colors": len(buckets),
+        "target_color": {
+            "hex": _AGENT_DEBUG_TARGET_HEX,
+            "present": _AGENT_DEBUG_TARGET_HEX in buckets,
+            "count": int(target["count"]),
+            "area": round(float(target["area"]), 4),
+            "recipes": [list(recipe) for recipe in sorted(target["recipes"])[:5]],
+            "source_colors": _source_colors_payload(target["source_colors"]),
+        },
+        "top_colors_by_area": top_colors,
+    }
+
+
+def _agent_debug_scene_summary(scene):
+    """Summarise scene geometry before export."""
+    geometries = []
+    for name in sorted(scene.geometry.keys()):
+        geom = scene.geometry[name]
+        vertices = getattr(geom, "vertices", None)
+        faces = getattr(geom, "faces", None)
+        bounds = getattr(geom, "bounds", None)
+        bounds_list = None
+        try:
+            if bounds is not None:
+                bounds_arr = np.asarray(bounds, dtype=np.float64)
+                if bounds_arr.shape == (2, 3):
+                    bounds_list = np.round(bounds_arr, 4).tolist()
+        except Exception:
+            bounds_list = None
+        geometries.append(
+            {
+                "name": name,
+                "vertices": len(vertices) if vertices is not None else 0,
+                "faces": len(faces) if faces is not None else 0,
+                "bounds": bounds_list,
+            }
+        )
+    return {"object_count": len(scene.geometry), "geometries": geometries}
+
+
+def _agent_debug_write(hypothesis_id, location, message, data, run_id="initial"):
+    """Append one NDJSON debug entry for the current session."""
+    payload = {
+        "sessionId": _AGENT_DEBUG_SESSION_ID,
+        "runId": run_id,
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data,
+        "timestamp": int(time.time() * 1000),
+    }
+    try:
+        with open(_AGENT_DEBUG_LOG_PATH, "a", encoding="utf-8") as debug_fp:
+            debug_fp.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 
 def _flatten_cubic(
@@ -318,6 +488,43 @@ class VectorProcessor:
                             if not poly.is_empty and poly.area >= MIN_SHAPE_AREA_MM2:
                                 result.append({**item, "poly": poly})
         return result
+
+    @staticmethod
+    def _extract_polygonal_geometry(geom):
+        """Return only polygonal parts from arbitrary Shapely geometry.
+
+        ``make_valid()`` can turn self-intersecting filled SVG paths into a
+        ``GeometryCollection`` containing a ``MultiPolygon`` plus stray line
+        segments.  The vector parser must preserve those polygonal parts
+        instead of dropping the whole element.
+        """
+        if geom is None or geom.is_empty:
+            return None
+        if geom.geom_type in ("Polygon", "MultiPolygon"):
+            return geom
+        if geom.geom_type != "GeometryCollection":
+            return None
+
+        polygon_parts = []
+        for child in geom.geoms:
+            extracted = VectorProcessor._extract_polygonal_geometry(child)
+            if extracted is None or extracted.is_empty:
+                continue
+            if extracted.geom_type == "Polygon":
+                polygon_parts.append(extracted)
+            elif extracted.geom_type == "MultiPolygon":
+                polygon_parts.extend([poly for poly in extracted.geoms if not poly.is_empty])
+
+        if not polygon_parts:
+            return None
+        if len(polygon_parts) == 1:
+            return polygon_parts[0]
+
+        try:
+            merged = unary_union(polygon_parts)
+            return merged if merged is not None and not merged.is_empty else MultiPolygon(polygon_parts)
+        except Exception:
+            return MultiPolygon(polygon_parts)
 
     @staticmethod
     def _parse_gradient_defs(svg_path):
@@ -669,6 +876,52 @@ class VectorProcessor:
             _split_area = sum(it["geometry"].area for it in clipped_shapes if it["geometry"] is not None)
             print(f"[VECTOR] split disconnected: {len(post_clip)} -> {len(clipped_shapes)} shapes, area {_norm_area:.1f} -> {_split_area:.1f}")
 
+            clipped_area_by_order = {
+                int(item["draw_order"]): _agent_debug_geom_area(item["geometry"])
+                for item in post_clip
+            }
+            occlusion_examples = []
+            for draw_order, item in enumerate(shape_data):
+                orig_area = _agent_debug_geom_area(item["poly"])
+                if orig_area <= 0.0:
+                    continue
+                kept_area = float(clipped_area_by_order.get(draw_order, 0.0))
+                lost_area = max(0.0, orig_area - kept_area)
+                if lost_area <= 0.0:
+                    continue
+                occlusion_examples.append(
+                    {
+                        "draw_order": int(draw_order),
+                        "color": _agent_debug_rgb_to_hex(item.get("color")),
+                        "orig_area": round(orig_area, 4),
+                        "kept_area": round(kept_area, 4),
+                        "lost_area": round(lost_area, 4),
+                        "loss_ratio": round(lost_area / orig_area, 4),
+                        "fully_occluded": kept_area <= 1e-9,
+                    }
+                )
+            occlusion_examples.sort(key=lambda row: (-row["lost_area"], row["draw_order"]))
+
+            # region agent log
+            _agent_debug_write(
+                hypothesis_id="G",
+                location="core/vector_engine.py:analyze_svg.occlusion_diagnostics",
+                message="Occlusion and normalization diagnostics",
+                data={
+                    "svg_path": os.path.basename(svg_path),
+                    "pre_clip_shape_count": len(shape_data),
+                    "post_clip_shape_count": len(clipped_shapes),
+                    "pre_clip_area": round(float(_pre_area), 4),
+                    "post_clip_area": round(float(_clip_area), 4),
+                    "post_normalize_area": round(float(_norm_area), 4),
+                    "post_split_area": round(float(_split_area), 4),
+                    "fully_occluded_count": sum(1 for row in occlusion_examples if row["fully_occluded"]),
+                    "partial_loss_count": sum(1 for row in occlusion_examples if not row["fully_occluded"]),
+                    "top_area_losses": occlusion_examples[:_AGENT_DEBUG_OCCLUSION_EXAMPLE_LIMIT],
+                },
+            )
+            # endregion
+
             stage_timings["occlusion_s"] = time.perf_counter() - t0
             print(f"[VECTOR] After occlusion clip: {len(clipped_shapes)} non-overlapping shapes")
 
@@ -711,6 +964,20 @@ class VectorProcessor:
         matched_shapes = self._match_colors(clipped_shapes, replacement_manager, num_channels, num_layers=num_layers)
         stage_timings["color_match_s"] = time.perf_counter() - t0
         print(f"[VECTOR] Matched {len(matched_shapes)} shapes to LUT recipes")
+
+        # region agent log
+        _agent_debug_write(
+            hypothesis_id="C",
+            location="core/vector_engine.py:analyze_svg.match_summary",
+            message="Matched LUT color and recipe summary",
+            data={
+                "svg_path": os.path.basename(svg_path),
+                "num_channels": int(num_channels),
+                "num_layers": int(num_layers),
+                "summary": _agent_debug_match_summary(matched_shapes),
+            },
+        )
+        # endregion
 
         return VectorAnalysis(
             shape_data=shape_data,
@@ -881,6 +1148,23 @@ class VectorProcessor:
         stage_timings["extrude_cache_entries"] = len(extrude_cache)
         self.last_stage_timings = stage_timings
 
+        # region agent log
+        _agent_debug_write(
+            hypothesis_id="D",
+            location="core/vector_engine.py:build_mesh.scene_summary",
+            message="Scene summary before 3MF export",
+            data={
+                "structure_mode": structure_mode,
+                "stage_timings": {
+                    key: round(float(value), 4)
+                    for key, value in stage_timings.items()
+                    if isinstance(value, (int, float))
+                },
+                "scene": _agent_debug_scene_summary(scene),
+            },
+        )
+        # endregion
+
         print(
             "[VECTOR] Stage timings (s): "
             f"parse={stage_timings.get('parse_s', 0):.3f}, "
@@ -1007,6 +1291,123 @@ class VectorProcessor:
 
         return canvas
 
+    @staticmethod
+    def build_preview_cache(
+        analysis: "VectorAnalysis",
+        pixels_per_mm: float = 10.0,
+        max_width_px: int = 1600,
+    ) -> dict:
+        """Rasterise vector analysis into preview-cache arrays.
+        将矢量分析结果光栅化为预览缓存数组，供预览/调色板/GLB 复用。
+
+        Unlike ``render_preview()``, this method preserves separate
+        ``matched_rgb`` / ``quantized_image`` / ``mask_solid`` data so the
+        frontend preview cache stays aligned with the native vector pipeline.
+        """
+        real_w = analysis.bbox[2]
+        real_h = analysis.bbox[3]
+        sf = analysis.scale_factor
+
+        w_mm = real_w * sf
+        h_mm = real_h * sf
+        ppm = pixels_per_mm
+
+        w_px = max(1, int(round(w_mm * ppm)))
+        h_px = max(1, int(round(h_mm * ppm)))
+
+        if w_px > max_width_px:
+            ratio = max_width_px / w_px
+            w_px = max_width_px
+            h_px = max(1, int(round(h_px * ratio)))
+            ppm = w_px / w_mm
+
+        coord_scale = sf * ppm
+        matched_rgb = np.zeros((h_px, w_px, 3), dtype=np.uint8)
+        quantized_image = np.zeros((h_px, w_px, 3), dtype=np.uint8)
+        mask_solid = np.zeros((h_px, w_px), dtype=bool)
+        material_matrix = np.full((h_px, w_px, analysis.num_layers), -1, dtype=np.int16)
+
+        def _iter_polygons(geom):
+            if geom is None or geom.is_empty:
+                return []
+            if geom.geom_type == "Polygon":
+                return [geom]
+            if geom.geom_type == "MultiPolygon":
+                return list(geom.geoms)
+            return []
+
+        def _coords_to_pts(coords):
+            pts = np.column_stack([
+                coords[:, 0] * coord_scale,
+                h_px - coords[:, 1] * coord_scale,
+            ]).astype(np.int32)
+            if len(pts) < 3:
+                return None
+            return pts
+
+        def _polygon_mask(poly):
+            region = np.zeros((h_px, w_px), dtype=np.uint8)
+            ext_coords = np.array(poly.exterior.coords)
+            ext_pts = _coords_to_pts(ext_coords)
+            if ext_pts is None:
+                return None
+            cv2.fillPoly(region, [ext_pts], 255)
+
+            for interior in poly.interiors:
+                hole_coords = np.array(interior.coords)
+                hole_pts = _coords_to_pts(hole_coords)
+                if hole_pts is not None:
+                    cv2.fillPoly(region, [hole_pts], 0)
+
+            return region.astype(bool)
+
+        for shape in analysis.matched_shapes:
+            geom = shape.get("geometry")
+            if geom is None or geom.is_empty:
+                continue
+
+            matched_color = np.array(
+                shape.get("matched_rgb") or shape.get("color") or (0, 0, 0),
+                dtype=np.uint8,
+            )
+            source_color = np.array(
+                shape.get("color") or shape.get("matched_rgb") or (0, 0, 0),
+                dtype=np.uint8,
+            )
+
+            recipe = shape.get("recipe") or []
+            recipe_full = np.full((analysis.num_layers,), -1, dtype=np.int16)
+            for idx, value in enumerate(recipe[:analysis.num_layers]):
+                recipe_full[idx] = int(value)
+
+            for poly in _iter_polygons(geom):
+                if poly.is_empty:
+                    continue
+                region_mask = _polygon_mask(poly)
+                if region_mask is None or not np.any(region_mask):
+                    continue
+
+                matched_rgb[region_mask] = matched_color
+                quantized_image[region_mask] = source_color
+                mask_solid[region_mask] = True
+                material_matrix[region_mask] = recipe_full
+
+        preview_rgba = np.zeros((h_px, w_px, 4), dtype=np.uint8)
+        preview_rgba[mask_solid, :3] = matched_rgb[mask_solid]
+        preview_rgba[mask_solid, 3] = 255
+
+        return {
+            "target_w": w_px,
+            "target_h": h_px,
+            "target_width_mm": w_mm,
+            "pixel_scale": (w_mm / w_px) if w_px > 0 else 0.0,
+            "matched_rgb": matched_rgb,
+            "quantized_image": quantized_image,
+            "mask_solid": mask_solid,
+            "material_matrix": material_matrix,
+            "preview_rgba": preview_rgba,
+        }
+
     # ── Stage 2: Occlusion clipping (Chroma-style) ───────────────────────
 
     @staticmethod
@@ -1126,35 +1527,46 @@ class VectorProcessor:
             rgb = item["color"]
 
             if rgb in color_cache:
-                recipe = color_cache[rgb]
+                cached = color_cache[rgb]
+                recipe = cached["recipe"]
+                matched_rgb = cached["matched_rgb"]
+                lut_idx = cached["lut_idx"]
             else:
                 query_lab = self.img_processor._rgb_to_lab(np.array([rgb], dtype=np.uint8))
                 _, index = self.img_processor.kdtree.query(query_lab)
-                lut_idx = index[0]
+                lut_idx = int(index[0])
+                matched_rgb = tuple(int(c) for c in self.img_processor.lut_rgb[lut_idx])
 
                 if replacement_manager is not None:
-                    matched_rgb = tuple(int(c) for c in self.img_processor.lut_rgb[lut_idx])
                     replacement = replacement_manager.get_replacement(matched_rgb)
                     if replacement is not None:
                         rep_lab = self.img_processor._rgb_to_lab(np.array([replacement], dtype=np.uint8))
                         _, rep_index = self.img_processor.kdtree.query(rep_lab)
-                        lut_idx = rep_index[0]
+                        lut_idx = int(rep_index[0])
+                        matched_rgb = tuple(int(c) for c in self.img_processor.lut_rgb[lut_idx])
 
                 stack = self.img_processor.ref_stacks[lut_idx]
                 recipe = [min(int(stack[z]), num_channels - 1) for z in range(min(num_layers, len(stack)))]
-                color_cache[rgb] = recipe
+                color_cache[rgb] = {
+                    "recipe": recipe,
+                    "matched_rgb": matched_rgb,
+                    "lut_idx": lut_idx,
+                }
 
                 hex_c = f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
+                matched_hex = f"#{matched_rgb[0]:02x}{matched_rgb[1]:02x}{matched_rgb[2]:02x}"
                 if recipe_log_mode == "full":
-                    print(f"  {hex_c} -> recipe {recipe}")
+                    print(f"  {hex_c} -> {matched_hex} -> recipe {recipe}")
                 elif recipe_log_mode == "summary" and len(sample_logs) < 8:
-                    sample_logs.append(f"{hex_c} -> {recipe}")
+                    sample_logs.append(f"{hex_c} -> {matched_hex} -> {recipe}")
 
             matched.append(
                 {
                     "geometry": item["geometry"],
                     "recipe": recipe,
                     "color": rgb,
+                    "matched_rgb": matched_rgb,
+                    "lut_idx": int(lut_idx),
                 }
             )
 
@@ -1217,6 +1629,7 @@ class VectorProcessor:
         # --- Fix 7: group shapes by (channel, run) and merge ---
         # Key: (channel_id, run_start, run_end)  Value: list of geometries
         run_groups: dict[tuple, list] = {}
+        target_run_groups = {}
 
         for item in matched_shapes:
             geom = item["geometry"]
@@ -1226,6 +1639,8 @@ class VectorProcessor:
 
             layers_to_use = min(num_layers, len(recipe))
             runs_by_channel = VectorProcessor._build_channel_runs(recipe, layers_to_use, num_channels)
+            source_hex = _agent_debug_rgb_to_hex(item.get("matched_rgb"))
+            source_area = _agent_debug_geom_area(geom)
 
             for ch, runs in runs_by_channel.items():
                 if ch >= len(slot_names):
@@ -1233,6 +1648,26 @@ class VectorProcessor:
                 for run_start, run_end in runs:
                     key = (ch, run_start, run_end)
                     run_groups.setdefault(key, []).append(geom)
+                    if source_hex == _AGENT_DEBUG_TARGET_HEX:
+                        debug_key = f"{slot_names[ch]}:{run_start}-{run_end}"
+                        info = target_run_groups.setdefault(
+                            debug_key,
+                            {
+                                "slot_name": slot_names[ch],
+                                "run_start": int(run_start),
+                                "run_end": int(run_end),
+                                "source_shape_count": 0,
+                                "source_area": 0.0,
+                                "group_geom_count": 0,
+                                "merged_geom_type": None,
+                                "merged_area": 0.0,
+                                "meshes_created": 0,
+                                "height": 0.0,
+                                "z_bot": 0.0,
+                            },
+                        )
+                        info["source_shape_count"] += 1
+                        info["source_area"] += source_area
 
         meshes_by_slot = {}
         for (ch, run_start, run_end), geoms in run_groups.items():
@@ -1268,6 +1703,37 @@ class VectorProcessor:
                 extrude_cache=extrude_cache,
             )
             meshes_by_slot[slot_name]["meshes"].extend(new_meshes)
+            debug_key = f"{slot_name}:{run_start}-{run_end}"
+            if debug_key in target_run_groups:
+                target_run_groups[debug_key]["group_geom_count"] = len(geoms)
+                target_run_groups[debug_key]["merged_geom_type"] = getattr(merged, "geom_type", type(merged).__name__)
+                target_run_groups[debug_key]["merged_area"] = round(_agent_debug_geom_area(merged), 4)
+                target_run_groups[debug_key]["meshes_created"] = len(new_meshes)
+                target_run_groups[debug_key]["height"] = round(float(height), 4)
+                target_run_groups[debug_key]["z_bot"] = round(float(z_bot), 4)
+
+        # region agent log
+        _agent_debug_write(
+            hypothesis_id="C",
+            location="core/vector_engine.py:_run_length_extrude",
+            message="Run-length extrusion summary for target matched LUT color",
+            data={
+                "face_up": bool(face_up),
+                "optical_z_base": round(float(optical_z_base), 4),
+                "slot_mesh_counts": {
+                    name: len(data["meshes"]) for name, data in sorted(meshes_by_slot.items())
+                },
+                "target_color": _AGENT_DEBUG_TARGET_HEX,
+                "target_run_groups": [
+                    {
+                        **info,
+                        "source_area": round(float(info["source_area"]), 4),
+                    }
+                    for _, info in sorted(target_run_groups.items())
+                ],
+            },
+        )
+        # endregion
 
         return meshes_by_slot
 
@@ -1358,13 +1824,9 @@ class VectorProcessor:
             poly = Polygon(coords)
             if not poly.is_valid:
                 poly = make_valid(poly)
-                if poly.geom_type == "GeometryCollection":
-                    polys = [g for g in poly.geoms if hasattr(g, "exterior") and not g.is_empty]
-                    if not polys:
-                        return None
-                    poly = max(polys, key=lambda p: p.area) if len(polys) > 1 else polys[0]
+            poly = VectorProcessor._extract_polygonal_geometry(poly)
 
-            if poly.is_valid and not poly.is_empty:
+            if poly is not None and not poly.is_empty:
                 return poly
             return None
 
@@ -1422,7 +1884,27 @@ class VectorProcessor:
         skipped_types = {}
         skipped_gradient_count = 0
         skipped_polygon_count = 0
+        path_like_count = 0
+        fill_shape_count = 0
+        stroke_only_count = 0
+        filled_with_stroke_count = 0
+        parse_skip_examples = []
         print("[VECTOR] Parsing SVG geometry...")
+
+        def _record_parse_skip(reason, element_obj, **extra):
+            if len(parse_skip_examples) >= _AGENT_DEBUG_PARSE_EXAMPLE_LIMIT:
+                return
+            fill_val = getattr(getattr(element_obj, "fill", None), "value", None)
+            stroke_val = getattr(getattr(element_obj, "stroke", None), "value", None)
+            parse_skip_examples.append(
+                {
+                    "reason": reason,
+                    "element_type": type(element_obj).__name__,
+                    "fill": None if fill_val is None else str(fill_val),
+                    "stroke": None if stroke_val is None else str(stroke_val),
+                    **extra,
+                }
+            )
 
         for element in svg.elements():
             if not isinstance(element, (Path, Shape)):
@@ -1430,18 +1912,33 @@ class VectorProcessor:
                 skipped_types[type_name] = skipped_types.get(type_name, 0) + 1
                 continue
 
+            path_like_count += 1
+
             has_fill = (
                 element.fill is not None
                 and element.fill.value is not None
                 and str(element.fill.value).lower() != "none"
             )
+            has_stroke = (
+                getattr(element, "stroke", None) is not None
+                and getattr(element.stroke, "value", None) is not None
+                and str(element.stroke.value).lower() != "none"
+            )
             if not has_fill:
+                if has_stroke:
+                    stroke_only_count += 1
+                    _record_parse_skip("stroke_only_ignored", element)
                 continue
+
+            fill_shape_count += 1
+            if has_stroke:
+                filled_with_stroke_count += 1
 
             if isinstance(element, Shape) and not isinstance(element, Path):
                 try:
                     element = Path(element)
                 except Exception:
+                    _record_parse_skip("shape_to_path_failed", element)
                     continue
 
             grad_info = None
@@ -1466,6 +1963,7 @@ class VectorProcessor:
                 eid = getattr(element, 'id', None) or f"element#{skipped_gradient_count}"
                 _log.debug(f"Skipping '{eid}' — unresolvable fill: {fill_val}")
                 skipped_gradient_count += 1
+                _record_parse_skip("unresolvable_fill", element)
                 continue
 
             try:
@@ -1495,6 +1993,7 @@ class VectorProcessor:
                             raw_shapes.append({"poly": p, "color": gs["color"]})
                 if not grad_shapes:
                     skipped_gradient_count += 1
+                    _record_parse_skip("gradient_flatten_empty", element, subpath_count=len(subpath_polys))
                 continue
 
             # --- Fix 2: fill-rule aware subpath merging ---
@@ -1554,12 +2053,14 @@ class VectorProcessor:
 
             if result_poly is None:
                 skipped_polygon_count += 1
+                _record_parse_skip("polygon_sampling_failed", element, subpath_count=len(subpath_polys))
                 continue
 
             # --- Fix 3: morphological closing ---
             result_poly = VectorProcessor._normalize_contours(result_poly)
             if result_poly is None or result_poly.is_empty:
                 skipped_polygon_count += 1
+                _record_parse_skip("normalize_empty", element, subpath_count=len(subpath_polys))
                 continue
 
             raw_shapes.append({"poly": result_poly, "color": rgb})
@@ -1582,6 +2083,27 @@ class VectorProcessor:
                 f"{skipped_polygon_count} elements produced invalid geometry and were skipped"
             )
         self.parse_warnings = parse_warnings
+
+        # region agent log
+        _agent_debug_write(
+            hypothesis_id="F",
+            location="core/vector_engine.py:_parse_svg",
+            message="SVG parse diagnostics",
+            data={
+                "svg_path": os.path.basename(svg_path),
+                "path_like_count": int(path_like_count),
+                "fill_shape_count": int(fill_shape_count),
+                "stroke_only_count": int(stroke_only_count),
+                "filled_with_stroke_count": int(filled_with_stroke_count),
+                "parsed_shape_count": int(len(raw_shapes)),
+                "skipped_gradient_count": int(skipped_gradient_count),
+                "skipped_polygon_count": int(skipped_polygon_count),
+                "skipped_non_path_types": skipped_types,
+                "parse_skip_examples": parse_skip_examples,
+            },
+        )
+        # endregion
+
         if not raw_shapes:
             raise ValueError("No valid shapes found in SVG")
 
@@ -1675,6 +2197,24 @@ class VectorProcessor:
                 m.apply_translation([0, 0, z_offset])
                 meshes.append(m)
             except Exception as e:
+                global _AGENT_DEBUG_EXTRUDE_FAILURES
+                if _AGENT_DEBUG_EXTRUDE_FAILURES < _AGENT_DEBUG_EXTRUDE_FAILURE_LIMIT:
+                    _AGENT_DEBUG_EXTRUDE_FAILURES += 1
+                    # region agent log
+                    _agent_debug_write(
+                        hypothesis_id="C",
+                        location="core/vector_engine.py:_extrude_geometry",
+                        message="Polygon extrusion failed",
+                        data={
+                            "geom_type": getattr(poly, "geom_type", type(poly).__name__),
+                            "area": round(_agent_debug_geom_area(poly), 4),
+                            "height": round(float(height), 4),
+                            "z_offset": round(float(z_offset), 4),
+                            "scale": round(float(scale), 6),
+                            "error": str(e),
+                        },
+                    )
+                    # endregion
                 print(f"[VECTOR] Warning: Failed to extrude polygon: {e}")
                 continue
 

@@ -14,6 +14,7 @@ import time
 import cv2
 import numpy as np
 
+from config import BedManager
 from core.pipeline import (
     s01_input_validation,
     s02_image_processing,
@@ -35,6 +36,7 @@ from core.pipeline import (
     p06_bed_rendering,
 )
 from core.pipeline.s03_color_replacement import _normalize_color_replacements_input
+from core.pipeline.pipeline_utils import extract_color_palette
 
 
 
@@ -188,6 +190,28 @@ def run_preview_pipeline(ctx: dict) -> dict:
     if ctx.get("error"):
         return ctx
 
+    modeling_mode = ctx.get("modeling_mode")
+    modeling_mode_value = getattr(modeling_mode, "value", modeling_mode)
+    image_path = str(ctx.get("image_path", "") or "")
+    is_svg_vector = modeling_mode_value == "vector" and image_path.lower().endswith(".svg")
+    if is_svg_vector:
+        _report_progress(ctx, 0.10, "SVG 矢量预览分析中... | Building vector preview...")
+        t0 = time.perf_counter()
+        ctx = _run_vector_preview_branch(ctx)
+        step_timings["P_VECTOR"] = time.perf_counter() - t0
+        if ctx.get("error"):
+            return ctx
+        total_s = time.perf_counter() - pipeline_t0
+        print(f"\n{'=' * 60}")
+        print(f"[PREVIEW] P01 + VectorPreview completed in {total_s:.2f}s")
+        for label, elapsed in step_timings.items():
+            pct = elapsed / total_s * 100 if total_s > 0 else 0
+            print(f"  {label}: {elapsed:.2f}s ({pct:.1f}%)")
+        print(f"{'=' * 60}")
+        ctx["_preview_total_s"] = total_s
+        ctx["_preview_step_timings"] = step_timings
+        return ctx
+
     # ---- P02-P06 ----
     for module, label, prog_before, prog_after, optional in _PREVIEW_STEPS:
         _report_progress(ctx, prog_before, f"{label} 执行中...")
@@ -217,6 +241,82 @@ def run_preview_pipeline(ctx: dict) -> dict:
     ctx["_preview_step_timings"] = step_timings
 
     return ctx
+
+
+# ===================================================================
+# Vector preview branch (SVG native preview processing)
+# ===================================================================
+
+
+def _run_vector_preview_branch(ctx: dict) -> dict:
+    """Execute SVG native preview processing for vector mode.
+    为 SVG + vector 模式构建与 native vector 生成一致的预览缓存。
+    """
+    image_path = ctx["image_path"]
+    actual_lut_path = ctx["actual_lut_path"]
+    color_mode = ctx["color_mode"]
+    target_width_mm = ctx["target_width_mm"]
+    is_dark = ctx.get("is_dark", True)
+    quantize_colors = ctx.get("quantize_colors", 64)
+    backing_color_id = ctx.get("backing_color_id", 0)
+    lut_metadata = ctx.get("lut_metadata")
+
+    try:
+        from core.vector_engine import VectorProcessor
+
+        vec_processor = VectorProcessor(actual_lut_path, color_mode)
+        analysis = vec_processor.analyze_svg(
+            svg_path=image_path,
+            target_width_mm=target_width_mm,
+            color_replacements=None,
+        )
+
+        raster_cache = VectorProcessor.build_preview_cache(
+            analysis,
+            pixels_per_mm=10.0,
+        )
+
+        cache = {
+            "target_w": raster_cache["target_w"],
+            "target_h": raster_cache["target_h"],
+            "target_width_mm": target_width_mm,
+            "pixel_scale": raster_cache["pixel_scale"],
+            "mask_solid": raster_cache["mask_solid"],
+            "material_matrix": raster_cache["material_matrix"],
+            "matched_rgb": raster_cache["matched_rgb"],
+            "preview_rgba": raster_cache["preview_rgba"].copy(),
+            "color_conf": analysis.color_conf,
+            "color_mode": color_mode,
+            "quantize_colors": quantize_colors,
+            "backing_color_id": backing_color_id,
+            "is_dark": is_dark,
+            "bed_label": BedManager.DEFAULT_BED,
+            "lut_metadata": lut_metadata,
+            "preview_colors": dict(analysis.preview_colors),
+            "slot_names": list(analysis.slot_names),
+            "debug_data": None,
+            "quantized_image": raster_cache["quantized_image"],
+        }
+        cache["color_palette"] = extract_color_palette(cache)
+
+        ctx["matched_rgb"] = raster_cache["matched_rgb"]
+        ctx["material_matrix"] = raster_cache["material_matrix"]
+        ctx["mask_solid"] = raster_cache["mask_solid"]
+        ctx["target_w"] = raster_cache["target_w"]
+        ctx["target_h"] = raster_cache["target_h"]
+        ctx["quantized_image"] = raster_cache["quantized_image"]
+        ctx["preview_rgba"] = raster_cache["preview_rgba"]
+        ctx["cache"] = cache
+        ctx["color_conf"] = analysis.color_conf
+        ctx["preview_colors"] = dict(analysis.preview_colors)
+        ctx["slot_names"] = list(analysis.slot_names)
+
+        ctx = p06_bed_rendering.run(ctx)
+        return ctx
+    except Exception as exc:
+        ctx["error"] = f"[VECTOR_PREVIEW] {exc}"
+        print(f"[COORDINATOR] Vector preview branch failed: {exc}")
+        return ctx
 
 
 # ===================================================================
