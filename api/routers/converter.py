@@ -5,7 +5,6 @@ Converter 领域 API 路由模块。
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import pickle
 import tempfile
@@ -79,87 +78,6 @@ _STUB_RESPONSE: dict[str, str] = {
     "status": "not_implemented",
     "message": "Phase 2 will integrate core logic",
 }
-_AGENT_DEBUG_LOG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "debug-ab5259.log")
-_AGENT_DEBUG_SESSION_ID = "ab5259"
-_AGENT_DEBUG_TARGET_HEX = "#5e6546"
-
-
-def _agent_debug_write(hypothesis_id, location, message, data, run_id="initial"):
-    """Append one NDJSON debug entry for the current session."""
-    payload = {
-        "sessionId": _AGENT_DEBUG_SESSION_ID,
-        "runId": run_id,
-        "hypothesisId": hypothesis_id,
-        "location": location,
-        "message": message,
-        "data": data,
-        "timestamp": int(time.time() * 1000),
-    }
-    try:
-        with open(_AGENT_DEBUG_LOG_PATH, "a", encoding="utf-8") as debug_fp:
-            debug_fp.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-
-
-def _agent_debug_preview_cache_palette(cache: dict, target_hex: str) -> dict:
-    """Summarise preview-cache palette for a target matched hex."""
-    raw_palette = list(cache.get("color_palette") or [])
-    target_hex = str(target_hex or "").strip().lower()
-    target_entry = None
-    for entry in raw_palette:
-        if str(entry.get("hex", "")).strip().lower() == target_hex:
-            target_entry = {
-                "hex": str(entry.get("hex", "")).strip().lower(),
-                "count": int(entry.get("count", 0)),
-                "percentage": float(entry.get("percentage", 0.0)),
-            }
-            break
-
-    dominant_quantized_hex = None
-    if target_entry is not None:
-        try:
-            matched_rgb = cache.get("matched_rgb")
-            quantized_image = cache.get("quantized_image")
-            mask_solid = cache.get("mask_solid")
-            if matched_rgb is not None and quantized_image is not None and mask_solid is not None:
-                target_rgb = np.array(
-                    [
-                        int(target_hex[1:3], 16),
-                        int(target_hex[3:5], 16),
-                        int(target_hex[5:7], 16),
-                    ],
-                    dtype=np.uint8,
-                )
-                target_mask = mask_solid & np.all(matched_rgb == target_rgb, axis=-1)
-                if np.any(target_mask):
-                    q_pixels = quantized_image[target_mask]
-                    unique_q, counts = np.unique(q_pixels.reshape(-1, 3), axis=0, return_counts=True)
-                    best = unique_q[int(np.argmax(counts))]
-                    dominant_quantized_hex = f"#{int(best[0]):02x}{int(best[1]):02x}{int(best[2]):02x}"
-        except Exception:
-            dominant_quantized_hex = None
-
-    top_palette = []
-    for entry in raw_palette[:8]:
-        top_palette.append(
-            {
-                "hex": str(entry.get("hex", "")).strip().lower(),
-                "count": int(entry.get("count", 0)),
-                "percentage": float(entry.get("percentage", 0.0)),
-            }
-        )
-
-    return {
-        "palette_size": len(raw_palette),
-        "target_hex": target_hex,
-        "target_entry": (
-            {**target_entry, "dominant_quantized_hex": dominant_quantized_hex}
-            if target_entry is not None
-            else None
-        ),
-        "top_palette": top_palette,
-    }
 
 
 def _handle_core_error(e: Exception, context: str) -> None:
@@ -761,23 +679,6 @@ async def convert_generate(
     free_color_set = session_data.get("free_color_set") or None
     if request.free_color_set is not None:
         free_color_set = request.free_color_set
-
-    if request.modeling_mode.value == "vector" and str(image_path).lower().endswith(".svg"):
-        # region agent log
-        _agent_debug_write(
-            hypothesis_id="E",
-            location="api/routers/converter.py:convert_generate.cache_palette",
-            message="Vector generate request preview-cache palette summary",
-            data={
-                "session_id": body.session_id,
-                "modeling_mode": request.modeling_mode.value,
-                "structure_mode": request.structure_mode.value,
-                "use_cached_matched_rgb": bool(request.use_cached_matched_rgb),
-                "replacement_regions_count": len(replacement_regions or []),
-                "preview_cache": _agent_debug_preview_cache_palette(cache, _AGENT_DEBUG_TARGET_HEX),
-            },
-        )
-        # endregion
 
     # Convert API ModelingMode enum to core ModelingMode enum
     core_modeling_mode = CoreModelingMode(request.modeling_mode.value)
