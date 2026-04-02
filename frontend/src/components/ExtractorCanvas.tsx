@@ -4,6 +4,7 @@ import { useExtractorStore } from "../stores/extractorStore";
 import { ExtractorColorMode } from "../api/types";
 import { useI18n } from "../i18n/context";
 import { getObjectFitRect, lutClickToCell, getCellOverlayStyle, type RenderedImageRect } from "../utils/lutCoordUtils";
+import { UI_COLOR_TOKENS } from "../theme/uiTokens";
 
 // ========== Corner Labels Mapping (exported for testing) ==========
 
@@ -67,9 +68,9 @@ export function canvasClickToImageCoord(
 
 const MARKER_RADIUS = 8;
 const MARKER_FONT = "bold 12px sans-serif";
-const MARKER_FILL = "rgba(255, 50, 50, 0.85)";
-const MARKER_STROKE = "#ffffff";
-const MARKER_TEXT_COLOR = "#ffffff";
+const MARKER_FILL = UI_COLOR_TOKENS.extractorMarkerFill;
+const MARKER_STROKE = UI_COLOR_TOKENS.extractorMarkerStroke;
+const MARKER_TEXT_COLOR = UI_COLOR_TOKENS.extractorMarkerText;
 
 // ========== Helper: draw image + corner markers on canvas ==========
 
@@ -143,7 +144,7 @@ export default function ExtractorCanvas() {
 
   // ---------- Manual fix state: selected cell + color picker ----------
   const [selectedCell, setSelectedCell] = useState<[number, number] | null>(null);
-  const [fixColor, setFixColor] = useState("#000000");
+  const [fixColor, setFixColor] = useState(UI_COLOR_TOKENS.extractorFixColorDefault);
   const [renderedRect, setRenderedRect] = useState<RenderedImageRect | null>(null);
   const lutPreviewRef = useRef<HTMLImageElement>(null);
 
@@ -251,7 +252,7 @@ export default function ExtractorCanvas() {
               <img
                 data-testid="warp-view-image"
                 src={warp_view_url}
-                alt="Warp view"
+                alt={t("ext_canvas_warp_view")}
                 className="h-auto w-full object-contain"
                 style={{ maxHeight: EXTRACTOR_RESULT_MEDIA_MAX_HEIGHT }}
               />
@@ -267,7 +268,7 @@ export default function ExtractorCanvas() {
                   ref={lutPreviewRef}
                   data-testid="lut-preview-image"
                   src={lut_preview_url}
-                  alt="LUT preview"
+                  alt={t("ext_canvas_lut_preview")}
                   onClick={handleLutPreviewClick}
                   className="h-auto w-full cursor-crosshair object-contain"
                   style={{ maxHeight: EXTRACTOR_RESULT_MEDIA_MAX_HEIGHT }}
@@ -284,9 +285,9 @@ export default function ExtractorCanvas() {
                         top: overlay.top,
                         width: overlay.width,
                         height: overlay.height,
-                        border: "2px solid rgba(96, 165, 250, 0.92)",
+                        border: UI_COLOR_TOKENS.extractorCellOverlayBorder,
                         pointerEvents: "none",
-                        boxShadow: "0 0 0 1px rgba(255, 255, 255, 0.55)",
+                        boxShadow: UI_COLOR_TOKENS.extractorCellOverlayShadow,
                         boxSizing: "border-box",
                       }}
                     />
@@ -323,7 +324,7 @@ export default function ExtractorCanvas() {
             </button>
             <button
               onClick={() => setSelectedCell(null)}
-              className="rounded-full border border-slate-200/80 bg-white px-3 py-1.5 text-sm text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-700/80 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="rounded-full border border-slate-200/80 bg-slate-50 px-3 py-1.5 text-sm text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700/80 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               {t("ext_canvas_cancel")}
             </button>
@@ -378,7 +379,7 @@ export default function ExtractorCanvas() {
         <button
           data-testid="rotate-image-btn"
           onClick={rotateImage}
-          className="rounded-full border border-slate-200/80 bg-white px-3 py-1 text-sm text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-700/80 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+          className="rounded-full border border-slate-200/80 bg-slate-50 px-3 py-1 text-sm text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700/80 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
         >
           {t("ext_rotate_btn")}
         </button>

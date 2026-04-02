@@ -21,6 +21,7 @@ CHANGELOG v2.1:
 """
 
 from abc import ABC, abstractmethod
+import logging
 import numpy as np
 import cv2
 import trimesh
@@ -33,6 +34,8 @@ try:
 except ImportError:
     numba = None
     HAS_NUMBA = False
+
+log = logging.getLogger(__name__)
 
 
 if HAS_NUMBA:
@@ -243,11 +246,14 @@ class BaseMesher(ABC):
             rect_idx += n
 
         # Fast vertex dedup via integer coordinate unique (collision-free)
-        int_verts = np.stack([
-            np.round(raw_verts[:, 0]).astype(np.int64),
-            np.round(raw_verts[:, 1]).astype(np.int64),
-            np.round(raw_verts[:, 2]).astype(np.int64),
-        ], axis=1)
+        int_verts = np.stack(
+            [
+                np.round(raw_verts[:, 0]).astype(np.int64),
+                np.round(raw_verts[:, 1]).astype(np.int64),
+                np.round(raw_verts[:, 2]).astype(np.int64),
+            ],
+            axis=1,
+        )
         _, first_idx, inverse = np.unique(int_verts, axis=0, return_index=True, return_inverse=True)
 
         unique_verts = raw_verts[first_idx]
@@ -281,7 +287,7 @@ class VoxelMesher(BaseMesher):
             return None
 
         mesh_type = "Backing" if mat_id == -2 else f"Mat ID {mat_id}"
-        print(f"[VOXEL_MESHER] {mesh_type}: Merged {voxel_matrix.shape[0]} Z-layers -> {len(layer_groups)} groups")
+        log.info(f"[VOXEL_MESHER] {mesh_type}: Merged {voxel_matrix.shape[0]} Z-layers -> {len(layer_groups)} groups")
 
         layer_rects = []
         for start_z, end_z, mask in layer_groups:
@@ -292,7 +298,7 @@ class VoxelMesher(BaseMesher):
         mesh = self._build_mesh_from_layer_rects(layer_rects, height_px)
         if mesh is not None:
             total_rects = sum(r.shape[0] for _, _, r in layer_rects)
-            print(
+            log.info(
                 f"[VOXEL_MESHER] {mesh_type}: {total_rects} rects -> "
                 f"{len(mesh.vertices):,} verts, {len(mesh.faces):,} faces"
             )
@@ -364,7 +370,7 @@ class HighFidelityMesher(BaseMesher):
             return None
 
         mesh_type = "Backing" if mat_id == -2 else f"Mat ID {mat_id}"
-        print(f"[HIGH_FIDELITY] {mesh_type}: Merged {voxel_matrix.shape[0]} layers -> {len(layer_groups)} groups")
+        log.info(f"[HIGH_FIDELITY] {mesh_type}: Merged {voxel_matrix.shape[0]} layers -> {len(layer_groups)} groups")
 
         layer_rects = []
         for start_z, end_z, mask in layer_groups:
@@ -375,7 +381,7 @@ class HighFidelityMesher(BaseMesher):
         mesh = self._build_mesh_from_layer_rects(layer_rects, height_px)
         if mesh is not None:
             total_rects = sum(r.shape[0] for _, _, r in layer_rects)
-            print(
+            log.info(
                 f"[HIGH_FIDELITY] {mesh_type}: {total_rects} rects -> "
                 f"{len(mesh.vertices):,} verts, {len(mesh.faces):,} faces"
             )
@@ -442,19 +448,19 @@ def get_mesher(mode_name: ModelingMode):
     """
     # High-Fidelity mode (replaces Vector and Woodblock)
     if mode_name == ModelingMode.HIGH_FIDELITY:
-        print("[MESHER_FACTORY] Selected: HighFidelityMesher (RLE-based with Dilation)")
+        log.info("[MESHER_FACTORY] Selected: HighFidelityMesher (RLE-based with Dilation)")
         return HighFidelityMesher()
 
     # Vector mode uses same algorithm as High-Fidelity
     if mode_name == ModelingMode.VECTOR:
-        print("[MESHER_FACTORY] Selected: HighFidelityMesher (Vector mode)")
+        log.info("[MESHER_FACTORY] Selected: HighFidelityMesher (Vector mode)")
         return HighFidelityMesher()
 
     # Pixel Art mode (legacy voxel)
     if mode_name == ModelingMode.PIXEL:
-        print("[MESHER_FACTORY] Selected: VoxelMesher (Blocky)")
+        log.info("[MESHER_FACTORY] Selected: VoxelMesher (Blocky)")
         return VoxelMesher()
 
     # Default fallback to High-Fidelity
-    print(f"[MESHER_FACTORY] Unknown mode '{mode_name}', defaulting to HighFidelityMesher")
+    log.info(f"[MESHER_FACTORY] Unknown mode '{mode_name}', defaulting to HighFidelityMesher")
     return HighFidelityMesher()

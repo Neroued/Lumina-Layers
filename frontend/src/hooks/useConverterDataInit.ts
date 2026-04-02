@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useConverterStore } from '../stores/converterStore';
+import { useConverterStore } from '../stores/converter';
 
 /**
  * Initialize converter data on app startup.

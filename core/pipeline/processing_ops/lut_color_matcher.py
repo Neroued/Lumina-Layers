@@ -9,9 +9,12 @@ Extracted from _process_high_fidelity_mode Step 5.
 """
 
 import time
+import logging
 import numpy as np
 import cv2
 from scipy.spatial import KDTree
+
+_log = logging.getLogger(__name__)
 
 
 def _rgb_to_lab(rgb_array: np.ndarray) -> np.ndarray:
@@ -36,9 +39,9 @@ def _rgb_to_lab(rgb_array: np.ndarray) -> np.ndarray:
     return lab
 
 
-def match_colors_to_lut(unique_colors: np.ndarray, lut_rgb: np.ndarray,
-                        lut_lab: np.ndarray, kdtree: 'KDTree',
-                        hue_matcher=None) -> np.ndarray:
+def match_colors_to_lut(
+    unique_colors: np.ndarray, lut_rgb: np.ndarray, lut_lab: np.ndarray, kdtree: "KDTree", hue_matcher=None
+) -> np.ndarray:
     """LUT 颜色匹配：将唯一颜色匹配到 LUT 条目。
     Match unique colors to LUT entries using CIELAB KDTree or hue-aware matcher.
 
@@ -54,19 +57,25 @@ def match_colors_to_lut(unique_colors: np.ndarray, lut_rgb: np.ndarray,
     """
     t0 = time.time()
     if hue_matcher is not None:
-        print(f"[IMAGE_PROCESSOR] 🎨 Hue-aware matching enabled")
+        _log.info(f"[IMAGE_PROCESSOR] 🎨 Hue-aware matching enabled")
         unique_indices = hue_matcher.match_colors_batch(unique_colors, k=32)
     else:
         unique_lab = _rgb_to_lab(unique_colors)
         _, unique_indices = kdtree.query(unique_lab)
-    print(f"[IMAGE_PROCESSOR] ⏱️ LUT matching: {time.time() - t0:.2f}s")
+    _log.info(f"[IMAGE_PROCESSOR] ⏱️ LUT matching: {time.time() - t0:.2f}s")
     return unique_indices
 
 
-def map_pixels_to_lut(quantized_image: np.ndarray, unique_colors: np.ndarray,
-                      unique_indices: np.ndarray, lut_rgb: np.ndarray,
-                      ref_stacks: np.ndarray, target_h: int, target_w: int,
-                      layer_count: int) -> tuple:
+def map_pixels_to_lut(
+    quantized_image: np.ndarray,
+    unique_colors: np.ndarray,
+    unique_indices: np.ndarray,
+    lut_rgb: np.ndarray,
+    ref_stacks: np.ndarray,
+    target_h: int,
+    target_w: int,
+    layer_count: int,
+) -> tuple:
     """像素映射：将所有像素映射到 LUT。
     Map all pixels to LUT entries using optimized color encoding lookup.
 
@@ -89,12 +98,14 @@ def map_pixels_to_lut(quantized_image: np.ndarray, unique_colors: np.ndarray,
     # 把 RGB 编码成单个整数：R*65536 + G*256 + B
     # 这样可以用 NumPy 向量化操作一次性完成映射
     t0 = time.time()
-    print(f"[IMAGE_PROCESSOR] Building color lookup table...")
+    _log.info(f"[IMAGE_PROCESSOR] Building color lookup table...")
 
     # 为每个 unique_color 计算编码
-    unique_codes = (unique_colors[:, 0].astype(np.int32) * 65536 +
-                    unique_colors[:, 1].astype(np.int32) * 256 +
-                    unique_colors[:, 2].astype(np.int32))
+    unique_codes = (
+        unique_colors[:, 0].astype(np.int32) * 65536
+        + unique_colors[:, 1].astype(np.int32) * 256
+        + unique_colors[:, 2].astype(np.int32)
+    )
 
     # 构建编码 → 索引的映射数组（用于 np.searchsorted）
     sort_idx = np.argsort(unique_codes)
@@ -102,11 +113,13 @@ def map_pixels_to_lut(quantized_image: np.ndarray, unique_colors: np.ndarray,
     sorted_lut_indices = unique_indices[sort_idx]
 
     # 计算所有像素的颜色编码
-    print(f"[IMAGE_PROCESSOR] Mapping to full image (optimized)...")
+    _log.info(f"[IMAGE_PROCESSOR] Mapping to full image (optimized)...")
     flat_quantized = quantized_image.reshape(-1, 3)
-    pixel_codes = (flat_quantized[:, 0].astype(np.int32) * 65536 +
-                   flat_quantized[:, 1].astype(np.int32) * 256 +
-                   flat_quantized[:, 2].astype(np.int32))
+    pixel_codes = (
+        flat_quantized[:, 0].astype(np.int32) * 65536
+        + flat_quantized[:, 1].astype(np.int32) * 256
+        + flat_quantized[:, 2].astype(np.int32)
+    )
 
     # 使用 searchsorted 找到每个像素对应的 unique_color 索引
     insert_positions = np.searchsorted(sorted_codes, pixel_codes)
@@ -115,9 +128,7 @@ def map_pixels_to_lut(quantized_image: np.ndarray, unique_colors: np.ndarray,
 
     # 一次性映射所有像素
     matched_rgb = lut_rgb[lut_indices_for_pixels].reshape(target_h, target_w, 3)
-    material_matrix = ref_stacks[lut_indices_for_pixels].reshape(
-        target_h, target_w, layer_count
-    )
-    print(f"[IMAGE_PROCESSOR] ⏱️ Color mapping (optimized): {time.time() - t0:.2f}s")
+    material_matrix = ref_stacks[lut_indices_for_pixels].reshape(target_h, target_w, layer_count)
+    _log.info(f"[IMAGE_PROCESSOR] ⏱️ Color mapping (optimized): {time.time() - t0:.2f}s")
 
     return matched_rgb, material_matrix

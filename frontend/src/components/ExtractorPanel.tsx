@@ -189,13 +189,13 @@ export default function ExtractorPanel() {
               <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("ext_page_label")}</p>
             </div>
             <div className="grid gap-2 text-sm lg:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-              <div className="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-white/55 px-3 py-2 dark:border-slate-700/80 dark:bg-slate-900/55">
+              <div className="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-slate-100/70 px-3 py-2 dark:border-slate-700/80 dark:bg-slate-900/55">
                 <span className="text-slate-600 dark:text-slate-300">{t("ext_page_1_label")}</span>
                 <span className={p1Done ? "text-emerald-600 dark:text-emerald-400" : "text-slate-400 dark:text-slate-500"}>
                   {p1Done ? t("ext_page_extracted") : t("ext_page_not_extracted")}
                 </span>
               </div>
-              <div className="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-white/55 px-3 py-2 dark:border-slate-700/80 dark:bg-slate-900/55">
+              <div className="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-slate-100/70 px-3 py-2 dark:border-slate-700/80 dark:bg-slate-900/55">
                 <span className="text-slate-600 dark:text-slate-300">{t("ext_page_2_label")}</span>
                 <span className={p2Done ? "text-emerald-600 dark:text-emerald-400" : "text-slate-400 dark:text-slate-500"}>
                   {p2Done ? t("ext_page_extracted") : t("ext_page_not_extracted")}
@@ -260,7 +260,7 @@ export default function ExtractorPanel() {
               {defaultPalette.map((entry, idx) => (
                 <div
                   key={`${entry.color}-${idx}`}
-                  className="grid gap-3 rounded-[22px] border border-slate-200/80 bg-white/55 px-3 py-3 dark:border-slate-700/80 dark:bg-slate-900/55 sm:grid-cols-[auto,1fr]"
+                  className="grid gap-3 rounded-[22px] border border-slate-200/80 bg-slate-100/70 px-3 py-3 dark:border-slate-700/80 dark:bg-slate-900/55 sm:grid-cols-[auto,1fr]"
                 >
                   <div className="flex items-center gap-3">
                     <span
@@ -313,7 +313,7 @@ export default function ExtractorPanel() {
               data-testid="lut-download-link"
               href={lut_download_url}
               download
-              className="inline-flex min-h-11 items-center justify-center rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-[0_12px_24px_rgba(37,99,235,0.22)] transition-colors hover:bg-blue-700"
+              className="inline-flex min-h-11 items-center justify-center rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-[var(--shadow-control-hover)] transition-colors hover:bg-blue-700"
             >
               {t("ext_download_lut")}
             </a>

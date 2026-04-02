@@ -1,6 +1,6 @@
 import { useRef, useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { useConverterStore, ACCEPT_IMAGE_FORMATS } from "../../stores/converterStore";
+import { useConverterStore, ACCEPT_IMAGE_FORMATS } from "../../stores/converter";
 import {
   ColorMode,
   ModelingMode,
@@ -18,15 +18,15 @@ import { useI18n } from "../../i18n/context";
 import { useWorkspaceMode } from "../../hooks/useWorkspaceMode";
 
 const COLOR_MODE_DOTS: Record<string, string[]> = {
-  [ColorMode.BW]: ["#000000", "#ffffff"],
-  [ColorMode.FOUR_COLOR_RYBW]: ["#dc143c", "#ffe600", "#0064f0", "#ffffff"],
-  [ColorMode.FOUR_COLOR_CMYW]: ["#0086d6", "#ec008c", "#f4ee2a", "#ffffff"],
-  [ColorMode.FIVE_COLOR_EXT]: ["#ffffff", "#dc143c", "#ffe600", "#0064f0", "#141414"],
-  [ColorMode.SIX_COLOR]: ["#ffffff", "#0086d6", "#ec008c", "#00ae42", "#f4ee2a", "#000000"],
-  [ColorMode.SIX_COLOR_RYBW]: ["#ffffff", "#dc143c", "#ffe600", "#0064f0", "#00ae42", "#000000"],
+  [ColorMode.BW]: ["var(--palette-black)", "var(--palette-white)"],
+  [ColorMode.FOUR_COLOR_RYBW]: ["var(--palette-crimson)", "var(--palette-yellow)", "var(--palette-blue)", "var(--palette-white)"],
+  [ColorMode.FOUR_COLOR_CMYW]: ["var(--palette-cyan)", "var(--palette-magenta)", "var(--palette-yellow-soft)", "var(--palette-white)"],
+  [ColorMode.FIVE_COLOR_EXT]: ["var(--palette-white)", "var(--palette-crimson)", "var(--palette-yellow)", "var(--palette-blue)", "var(--palette-charcoal)"],
+  [ColorMode.SIX_COLOR]: ["var(--palette-white)", "var(--palette-cyan)", "var(--palette-magenta)", "var(--palette-green)", "var(--palette-yellow-soft)", "var(--palette-black)"],
+  [ColorMode.SIX_COLOR_RYBW]: ["var(--palette-white)", "var(--palette-crimson)", "var(--palette-yellow)", "var(--palette-blue)", "var(--palette-green)", "var(--palette-black)"],
   [ColorMode.EIGHT_COLOR]: [
-    "#ffffff", "#0086d6", "#ec008c", "#f4ee2a",
-    "#000000", "#c12e1f", "#0a2989", "#00ae42",
+    "var(--palette-white)", "var(--palette-cyan)", "var(--palette-magenta)", "var(--palette-yellow-soft)",
+    "var(--palette-black)", "var(--palette-brick)", "var(--palette-indigo)", "var(--palette-green)",
   ],
 };
 
@@ -39,7 +39,7 @@ function ColorModeDots({ mode }: { mode: string }) {
         className={`${DOT_CLS} animate-spin [animation-duration:3s]`}
         style={{
           background:
-            "conic-gradient(#dc143c, #f4ee2a, #00ae42, #0086d6, #ec008c, #dc143c)",
+            "conic-gradient(var(--palette-crimson), var(--palette-yellow-soft), var(--palette-green), var(--palette-cyan), var(--palette-magenta), var(--palette-crimson))",
         }}
       />
     );
@@ -196,7 +196,7 @@ export default function BasicSettings() {
         <button
           type="button"
           onClick={() => setUploaderExpanded(true)}
-          className="flex items-center gap-2 rounded-2xl border border-slate-200/80 bg-white/60 px-3 py-2 text-left transition-colors hover:bg-white/90 dark:border-slate-700/60 dark:bg-slate-900/50 dark:hover:bg-slate-900/80"
+          className="flex items-center gap-2 rounded-2xl border border-slate-200/80 bg-slate-100/70 px-3 py-2 text-left transition-colors hover:bg-slate-100/90 dark:border-slate-700/60 dark:bg-slate-900/50 dark:hover:bg-slate-900/80"
         >
           {imagePreviewUrl && (
             <img

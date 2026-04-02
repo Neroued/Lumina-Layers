@@ -4,7 +4,7 @@ import {
   useConverterStore,
   clampValue,
   isValidImageType,
-} from "../stores/converterStore";
+} from "../stores/converter";
 
 // ========== Helpers ==========
 

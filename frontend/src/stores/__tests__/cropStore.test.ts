@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { useConverterStore } from '../converterStore';
+import { useConverterStore } from '../converter';
 
 /**
  * cropStore 单元测试

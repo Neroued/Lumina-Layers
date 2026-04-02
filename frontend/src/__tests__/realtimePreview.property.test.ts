@@ -140,7 +140,7 @@ describe("Feature: realtime-3d-parameter-preview, Property 1: 厚度缩放比例
 
 // ========== Property 2: 浮雕与掐丝珐琅互斥不变量 ==========
 
-import { useConverterStore } from "../stores/converterStore";
+import { useConverterStore } from "../stores/converter";
 
 /** Operation type for mutual exclusion test */
 type MutualExclusionOp = "relief" | "cloisonne";

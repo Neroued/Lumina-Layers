@@ -94,8 +94,7 @@ class TestOpenAPIJSON:
 
         for expected_path in EXPECTED_PATHS:
             assert expected_path in paths, (
-                f"Missing endpoint {expected_path!r} in OpenAPI paths. "
-                f"Found: {sorted(paths.keys())}"
+                f"Missing endpoint {expected_path!r} in OpenAPI paths. " f"Found: {sorted(paths.keys())}"
             )
 
     def test_openapi_json_has_correct_title(self, client: TestClient) -> None:
@@ -151,9 +150,7 @@ class TestCORSHeaders:
             },
         )
         allow_origin = resp.headers.get("access-control-allow-origin")
-        assert allow_origin in ("*", origin), (
-            f"Expected '*' or '{origin}', got {allow_origin!r}"
-        )
+        assert allow_origin in ("*", origin), f"Expected '*' or '{origin}', got {allow_origin!r}"
 
     def test_cors_allows_all_methods(self, client: TestClient) -> None:
         """CORS preflight should indicate all HTTP methods are allowed.
@@ -196,3 +193,18 @@ class TestCORSHeaders:
             },
         )
         assert resp.headers.get("access-control-allow-credentials") == "true"
+
+
+class TestRequestIdHeader:
+    """Verify request id generation/propagation contract."""
+
+    def test_request_id_is_generated_when_missing(self, client: TestClient) -> None:
+        resp = client.get("/openapi.json")
+        request_id = resp.headers.get("x-request-id")
+        assert request_id is not None
+        assert len(request_id) >= 8
+
+    def test_request_id_is_echoed_when_provided(self, client: TestClient) -> None:
+        req_id = "test-request-id-123"
+        resp = client.get("/openapi.json", headers={"X-Request-ID": req_id})
+        assert resp.headers.get("x-request-id") == req_id

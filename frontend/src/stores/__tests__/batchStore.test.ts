@@ -15,7 +15,7 @@ vi.mock("../../api/converter", () => ({
   cropImage: vi.fn(),
 }));
 
-import { useConverterStore } from "../converterStore";
+import { useConverterStore } from "../converter";
 import { convertBatch } from "../../api/converter";
 
 const mockedConvertBatch = vi.mocked(convertBatch);

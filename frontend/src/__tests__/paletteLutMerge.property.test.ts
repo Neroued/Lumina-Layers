@@ -10,6 +10,16 @@ import * as fc from 'fast-check';
 import { useWidgetStore, DEFAULT_LAYOUT } from '../stores/widgetStore';
 import type { TabId } from '../types/widget';
 
+type PersistMigrate = (persistedState: unknown, version: number) => unknown;
+type PersistWithOptions = { getOptions: () => { migrate?: PersistMigrate } };
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (typeof value === "object" && value !== null) {
+    return value as Record<string, unknown>;
+  }
+  return {};
+}
+
 describe('Palette-LUT Merge Property-Based Tests', () => {
   beforeEach(() => {
     useWidgetStore.setState({
@@ -143,10 +153,8 @@ describe('Palette-LUT Merge Property-Based Tests', () => {
   // Feature: palette-lut-merge, Property 4: 持久化迁移正确性
   describe('Property 4: 持久化迁移正确性', () => {
     // Access the migrate function from Zustand persist options
-    const migrate = (useWidgetStore.persist as any).getOptions().migrate as (
-      persistedState: unknown,
-      version: number
-    ) => Record<string, unknown>;
+    const persistApi = useWidgetStore.persist as unknown as PersistWithOptions;
+    const migrate = persistApi.getOptions().migrate as PersistMigrate;
 
     // Generator for a single widget layout entry (simulates old persisted data)
     const widgetLayoutArb = fc.record({
@@ -208,7 +216,7 @@ describe('Palette-LUT Merge Property-Based Tests', () => {
           persistedStateArb,
           (version: number, persistedState: Record<string, unknown>) => {
             const result = migrate(persistedState, version);
-            const resultWidgets = (result as any).widgets as Record<string, unknown>;
+            const resultWidgets = asRecord(asRecord(result).widgets);
 
             // Core invariant: old WidgetIds must never exist after migration
             expect(resultWidgets).not.toHaveProperty('palette-panel');
@@ -230,7 +238,7 @@ describe('Palette-LUT Merge Property-Based Tests', () => {
           persistedStateArb,
           (version: number, persistedState: Record<string, unknown>) => {
             const result = migrate(persistedState, version);
-            const resultWidgets = (result as any).widgets as Record<string, unknown>;
+            const resultWidgets = asRecord(asRecord(result).widgets);
 
             // Should match DEFAULT_LAYOUT keys exactly
             const defaultKeys = Object.keys(DEFAULT_LAYOUT).sort();
@@ -255,20 +263,20 @@ describe('Palette-LUT Merge Property-Based Tests', () => {
         fc.property(
           persistedStateArb,
           (persistedState: Record<string, unknown>) => {
-            const inputWidgets = (persistedState as any).widgets as Record<string, unknown>;
+            const inputWidgets = asRecord(persistedState.widgets);
             const inputKeysWithoutOld = Object.keys(inputWidgets)
               .filter((k) => k !== 'palette-panel' && k !== 'lut-color-grid')
               .sort();
 
             const result = migrate(persistedState, 3);
-            const resultWidgets = (result as any).widgets as Record<string, unknown>;
+            const resultWidgets = asRecord(asRecord(result).widgets);
             const resultKeys = Object.keys(resultWidgets).sort();
 
             // All non-old widgets should be preserved
             expect(resultKeys).toEqual(inputKeysWithoutOld);
 
             // colorWorkstationCollapsed should be set to true
-            expect((result as any).colorWorkstationCollapsed).toBe(true);
+            expect(asRecord(result).colorWorkstationCollapsed).toBe(true);
           }
         ),
         { numRuns: 100 }

@@ -1,5 +1,6 @@
 import type { BatchResponse } from "../../api/types";
 import { useI18n } from "../../i18n/context";
+import { normalizeResourceUrl } from "../../utils/resourceUrl";
 
 interface BatchResultSummaryProps {
   result: BatchResponse;
@@ -7,6 +8,7 @@ interface BatchResultSummaryProps {
 
 export default function BatchResultSummary({ result }: BatchResultSummaryProps) {
   const { t } = useI18n();
+  const downloadUrl = normalizeResourceUrl(result.download_url) ?? result.download_url;
   const successCount = result.results.filter(
     (r) => r.status === "success",
   ).length;
@@ -35,7 +37,7 @@ export default function BatchResultSummary({ result }: BatchResultSummaryProps) 
       {/* Download button */}
       {successCount > 0 && (
         <a
-          href={`${result.download_url}`}
+          href={downloadUrl}
           download
           className="inline-flex items-center justify-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
           aria-label={t("batch_download_zip_aria")}

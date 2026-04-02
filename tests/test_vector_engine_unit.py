@@ -23,10 +23,8 @@ sys.path.insert(0, _ROOT)
 from config import PrinterConfig
 
 # Load core.vector_engine directly from its file to avoid the heavy
-# core.__init__ import chain (which pulls in gradio, etc.).
-_spec = importlib.util.spec_from_file_location(
-    "core.vector_engine", os.path.join(_ROOT, "core", "vector_engine.py")
-)
+# core.__init__ import chain.
+_spec = importlib.util.spec_from_file_location("core.vector_engine", os.path.join(_ROOT, "core", "vector_engine.py"))
 _ve = importlib.util.module_from_spec(_spec)
 # Provide a minimal 'core' parent package so relative imports resolve
 if "core" not in sys.modules:
@@ -43,6 +41,7 @@ VectorAnalysis = _ve.VectorAnalysis
 # Helpers
 # =====================================================================
 
+
 def _rect(x0, y0, x1, y1, color=(255, 0, 0)):
     """Create a shape_data dict compatible with _clip_occlusion input."""
     return {"poly": box(x0, y0, x1, y1), "color": color}
@@ -58,6 +57,7 @@ def _make_parse_only_processor(sampling_precision=0.05):
 # =====================================================================
 # 1. Occlusion clipping
 # =====================================================================
+
 
 class TestClipOcclusion:
     """Verify ChromaPrint3D-style reverse-order occlusion clipping."""
@@ -76,8 +76,8 @@ class TestClipOcclusion:
     def test_later_shape_covers_earlier(self):
         """Later shape fully covering earlier → earlier completely removed."""
         shapes = [
-            _rect(0, 0, 10, 10, color=(255, 0, 0)),   # bottom (draw order 0)
-            _rect(0, 0, 10, 10, color=(0, 255, 0)),    # top    (draw order 1)
+            _rect(0, 0, 10, 10, color=(255, 0, 0)),  # bottom (draw order 0)
+            _rect(0, 0, 10, 10, color=(0, 255, 0)),  # top    (draw order 1)
         ]
         result = VectorProcessor._clip_occlusion(shapes)
         top = [r for r in result if r["color"] == (0, 255, 0)]
@@ -90,7 +90,7 @@ class TestClipOcclusion:
         """Partial overlap: earlier shape trimmed, later shape full."""
         shapes = [
             _rect(0, 0, 20, 10, color=(255, 0, 0)),  # bottom, wider
-            _rect(5, 0, 15, 10, color=(0, 255, 0)),   # top, narrower overlap
+            _rect(5, 0, 15, 10, color=(0, 255, 0)),  # top, narrower overlap
         ]
         result = VectorProcessor._clip_occlusion(shapes)
 
@@ -148,7 +148,7 @@ class TestClipOcclusion:
     def test_no_small_feature_exemption(self):
         """Even tiny shapes are subject to occlusion — no special exemption."""
         shapes = [
-            _rect(0, 0, 1, 1, color=(255, 0, 0)),     # tiny bottom
+            _rect(0, 0, 1, 1, color=(255, 0, 0)),  # tiny bottom
             _rect(0, 0, 100, 100, color=(0, 255, 0)),  # large top covering it
         ]
         result = VectorProcessor._clip_occlusion(shapes)
@@ -160,10 +160,11 @@ class TestClipOcclusion:
 # 2. Run-length extrusion
 # =====================================================================
 
+
 class TestRunLengthExtrude:
     """Verify consecutive same-channel layers are merged into single volumes."""
 
-    LAYER_H = PrinterConfig.LAYER_HEIGHT   # 0.08
+    LAYER_H = PrinterConfig.LAYER_HEIGHT  # 0.08
     SLOT_NAMES = ["White", "Cyan", "Magenta", "Yellow"]
 
     def _make_matched(self, geometry, recipe):
@@ -175,8 +176,12 @@ class TestRunLengthExtrude:
         matched = self._make_matched(geom, [1, 1, 1, 1, 1])
 
         result = VectorProcessor._run_length_extrude(
-            matched, num_layers=5, layer_h=self.LAYER_H,
-            num_channels=4, slot_names=self.SLOT_NAMES, scale_factor=1.0,
+            matched,
+            num_layers=5,
+            layer_h=self.LAYER_H,
+            num_channels=4,
+            slot_names=self.SLOT_NAMES,
+            scale_factor=1.0,
         )
 
         assert "Cyan" in result
@@ -188,14 +193,18 @@ class TestRunLengthExtrude:
         matched = self._make_matched(geom, [0, 1, 0, 1, 0])
 
         result = VectorProcessor._run_length_extrude(
-            matched, num_layers=5, layer_h=self.LAYER_H,
-            num_channels=4, slot_names=self.SLOT_NAMES, scale_factor=1.0,
+            matched,
+            num_layers=5,
+            layer_h=self.LAYER_H,
+            num_channels=4,
+            slot_names=self.SLOT_NAMES,
+            scale_factor=1.0,
         )
 
         white_count = len(result.get("White", {}).get("meshes", []))
         cyan_count = len(result.get("Cyan", {}).get("meshes", []))
         assert white_count == 3  # layers 0, 2, 4 → three separate runs
-        assert cyan_count == 2   # layers 1, 3 → two separate runs
+        assert cyan_count == 2  # layers 1, 3 → two separate runs
 
     def test_run_merges_consecutive(self):
         """Recipe [2,2,2,0,0] → channel 2 gets one run (layers 0-2),
@@ -204,8 +213,12 @@ class TestRunLengthExtrude:
         matched = self._make_matched(geom, [2, 2, 2, 0, 0])
 
         result = VectorProcessor._run_length_extrude(
-            matched, num_layers=5, layer_h=self.LAYER_H,
-            num_channels=4, slot_names=self.SLOT_NAMES, scale_factor=1.0,
+            matched,
+            num_layers=5,
+            layer_h=self.LAYER_H,
+            num_channels=4,
+            slot_names=self.SLOT_NAMES,
+            scale_factor=1.0,
         )
 
         assert len(result["Magenta"]["meshes"]) == 1
@@ -217,8 +230,12 @@ class TestRunLengthExtrude:
         matched = self._make_matched(geom, [3, 3, 3, 3, 3])
 
         result = VectorProcessor._run_length_extrude(
-            matched, num_layers=5, layer_h=self.LAYER_H,
-            num_channels=4, slot_names=self.SLOT_NAMES, scale_factor=1.0,
+            matched,
+            num_layers=5,
+            layer_h=self.LAYER_H,
+            num_channels=4,
+            slot_names=self.SLOT_NAMES,
+            scale_factor=1.0,
         )
 
         assert result["Yellow"]["mat_id"] == 3
@@ -229,8 +246,12 @@ class TestRunLengthExtrude:
         matched = self._make_matched(geom, [0, 0, 0, 0, 0])
 
         result = VectorProcessor._run_length_extrude(
-            matched, num_layers=5, layer_h=self.LAYER_H,
-            num_channels=4, slot_names=self.SLOT_NAMES, scale_factor=1.0,
+            matched,
+            num_layers=5,
+            layer_h=self.LAYER_H,
+            num_channels=4,
+            slot_names=self.SLOT_NAMES,
+            scale_factor=1.0,
         )
 
         assert len(result) == 0
@@ -240,6 +261,7 @@ class TestRunLengthExtrude:
 # 3. Output ordering
 # =====================================================================
 
+
 class TestOutputOrdering:
     """Verify meshes_by_slot is sorted by material ID when assembling scene."""
 
@@ -247,8 +269,8 @@ class TestOutputOrdering:
         """Simulated meshes_by_slot should sort by mat_id."""
         meshes_by_slot = {
             "Yellow": {"meshes": ["m"], "mat_id": 3},
-            "White":  {"meshes": ["m"], "mat_id": 0},
-            "Cyan":   {"meshes": ["m"], "mat_id": 1},
+            "White": {"meshes": ["m"], "mat_id": 0},
+            "Cyan": {"meshes": ["m"], "mat_id": 1},
         }
         sorted_items = sorted(meshes_by_slot.items(), key=lambda x: x[1]["mat_id"])
         names = [name for name, _ in sorted_items]
@@ -258,6 +280,7 @@ class TestOutputOrdering:
 # =====================================================================
 # 4. Extrude geometry helper
 # =====================================================================
+
 
 class TestExtrudeGeometry:
 
@@ -269,6 +292,7 @@ class TestExtrudeGeometry:
 
     def test_multipolygon(self):
         from shapely.ops import unary_union
+
         mp = unary_union([box(0, 0, 5, 5), box(10, 0, 15, 5)])
         meshes = VectorProcessor._extrude_geometry(mp, height=0.5, z_offset=0, scale=1.0)
         assert len(meshes) == 2
@@ -295,12 +319,8 @@ class TestExtrudeGeometry:
             return real_box(extents=[1, 1, max(height, 1e-6)])
 
         with patch.object(_ve.trimesh.creation, "extrude_polygon", side_effect=fake_extrude_polygon):
-            meshes1 = VectorProcessor._extrude_geometry(
-                poly, height=1.0, z_offset=0.0, scale=1.0, extrude_cache=cache
-            )
-            meshes2 = VectorProcessor._extrude_geometry(
-                poly, height=1.0, z_offset=2.0, scale=1.0, extrude_cache=cache
-            )
+            meshes1 = VectorProcessor._extrude_geometry(poly, height=1.0, z_offset=0.0, scale=1.0, extrude_cache=cache)
+            meshes2 = VectorProcessor._extrude_geometry(poly, height=1.0, z_offset=2.0, scale=1.0, extrude_cache=cache)
 
         assert len(meshes1) == 1
         assert len(meshes2) == 1
@@ -310,6 +330,7 @@ class TestExtrudeGeometry:
 # =====================================================================
 # 5. SVG parse regression (multi-subpath)
 # =====================================================================
+
 
 class TestParseSvgSubpaths:
 
@@ -321,9 +342,9 @@ class TestParseSvgSubpaths:
             (
                 '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 120">\n'
                 '  <path fill="#ff0000" d="'
-                'M0,0 L100,0 L100,100 L0,100 Z '
+                "M0,0 L100,0 L100,100 L0,100 Z "
                 'M200,0 L300,0 L300,100 L200,100 Z"/>\n'
-                '</svg>\n'
+                "</svg>\n"
             ),
             encoding="utf-8",
         )
@@ -345,7 +366,7 @@ class TestParseSvgSubpaths:
             (
                 '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">\n'
                 '  <path fill="#00ff00" d="M0,0 L100,0 L100,100 L0,100 Z"/>\n'
-                '</svg>\n'
+                "</svg>\n"
             ),
             encoding="utf-8",
         )
@@ -364,10 +385,10 @@ class TestParseSvgSubpaths:
             (
                 '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 120">\n'
                 '  <path fill="#ff0000" d="'
-                'M0,0 L100,0 L100,100 L0,100 Z '
+                "M0,0 L100,0 L100,100 L0,100 Z "
                 'M200,0 L300,0 L300,100 L200,100 Z"/>\n'
                 '  <path fill="#0000ff" d="M0,0 L100,0 L100,100 L0,100 Z"/>\n'
-                '</svg>\n'
+                "</svg>\n"
             ),
             encoding="utf-8",
         )
@@ -376,12 +397,8 @@ class TestParseSvgSubpaths:
         shapes, _, _ = vp._parse_svg(str(svg_file), target_width_mm=100.0)
         clipped = VectorProcessor._clip_occlusion(shapes)
 
-        red_area = sum(
-            item["geometry"].area for item in clipped if item["color"] == (255, 0, 0)
-        )
-        blue_area = sum(
-            item["geometry"].area for item in clipped if item["color"] == (0, 0, 255)
-        )
+        red_area = sum(item["geometry"].area for item in clipped if item["color"] == (255, 0, 0))
+        blue_area = sum(item["geometry"].area for item in clipped if item["color"] == (0, 0, 255))
 
         assert abs(red_area - 10000.0) < 5.0
         assert abs(blue_area - 10000.0) < 5.0

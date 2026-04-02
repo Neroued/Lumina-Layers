@@ -41,6 +41,9 @@ def worker_vectorize(image_path: str, params: dict) -> dict:
     import tempfile
 
     import neroued_vectorizer as nv
+    from api.structured_logging import get_logger
+
+    log = get_logger(__name__)
 
     try:
         config = nv.VectorizerConfig()
@@ -48,7 +51,14 @@ def worker_vectorize(image_path: str, params: dict) -> dict:
             if hasattr(config, key):
                 setattr(config, key, value)
 
-        print(f"[Worker vectorize] image={image_path}, params={params}")
+        log.info(
+            "Worker vectorization started",
+            extra={
+                "event": "worker_vectorize_started",
+                "image_path": image_path,
+                "params": params,
+            },
+        )
 
         result = nv.vectorize(image_path, config)
 

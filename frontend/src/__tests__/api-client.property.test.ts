@@ -25,10 +25,10 @@ describe("Feature: thread-separation-upgrade, API 客户端 baseURL 验证", () 
    */
   it("apiClient.getUri({ url: path }) always starts with baseURL", () => {
     const baseURL = "/api";
-    const pathChars = "/abcdefghijklmnopqrstuvwxyz0123456789-_".split("");
+    const segmentArb = fc.stringMatching(/^[a-z0-9_-]{1,12}$/);
     const pathArb = fc
-      .array(fc.constantFrom(...pathChars), { minLength: 1, maxLength: 50 })
-      .map((chars) => chars.join(""));
+      .array(segmentArb, { minLength: 1, maxLength: 6 })
+      .map((segments) => `/${segments.join("/")}`);
 
     fc.assert(
       fc.property(

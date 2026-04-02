@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { useConverterStore } from '../../stores/converterStore';
+import { useConverterStore } from '../../stores/converter';
 
 /**
  * Converter_Store 单元测试

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { useConverterStore } from '../stores/converterStore';
+import { useConverterStore } from '../stores/converter';
 import type { PaletteEntry, LutColorEntry } from '../api/types';
 
 // Mock API module to prevent real network calls

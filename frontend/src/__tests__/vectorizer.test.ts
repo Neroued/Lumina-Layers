@@ -10,7 +10,7 @@ import { buildFileUrl } from "../components/VectorizerPanel";
 // Mock apiClient for buildFileUrl tests
 vi.mock("../api/client", () => ({
   default: {
-    defaults: { baseURL: "http://localhost:8000/api" },
+    defaults: { baseURL: "/api" },
     post: vi.fn(),
     get: vi.fn(),
   },
@@ -22,7 +22,7 @@ vi.mock("../api/vectorizer", () => ({
 }));
 
 // Mock converterStore and widgetStore for send-to-converter tests
-vi.mock("../stores/converterStore", () => ({
+vi.mock("../stores/converter", () => ({
   useConverterStore: {
     getState: vi.fn(() => ({
       setImageFile: vi.fn(),
@@ -157,11 +157,11 @@ describe("vectorizerStore", () => {
 describe("buildFileUrl", () => {
   it("prepends apiClient baseURL to relative path", () => {
     const url = buildFileUrl("/files/test.svg");
-    expect(url).toBe("http://localhost:8000/api/files/test.svg");
+    expect(url).toBe("/api/files/test.svg");
   });
 
   it("handles empty relative path", () => {
     const url = buildFileUrl("");
-    expect(url).toBe("http://localhost:8000/api");
+    expect(url).toBe("/api");
   });
 });

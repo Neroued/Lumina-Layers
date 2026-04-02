@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useSlicerStore } from "../../stores/slicerStore";
-import { useConverterStore } from "../../stores/converterStore";
+import { useConverterStore } from "../../stores/converter";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useI18n } from "../../i18n/context";
 import {
@@ -372,7 +372,7 @@ export default function SlicerSelector({
                 left: `${dropdownPos.left}px`,
                 width: `${Math.max(dropdownPos.width, 200)}px`,
               }}
-              className="z-[9999] rounded-md border border-gray-200 bg-white dark:border-gray-600 dark:bg-gray-800 py-1 shadow-lg"
+              className="z-[9999] rounded-md border border-gray-200 bg-slate-100 dark:border-gray-600 dark:bg-gray-800 py-1 shadow-lg"
               role="listbox"
             >
               {orderedSlicers.map((slicer) => {

@@ -8,8 +8,9 @@
 
 import { useMemo, useState, useRef, useCallback, useEffect } from "react";
 import { useThree } from "@react-three/fiber";
+import type { ThreeEvent } from "@react-three/fiber";
 import * as THREE from "three";
-import { useConverterStore } from "../stores/converterStore";
+import { useConverterStore } from "../stores/converter";
 
 /** Shared raycaster for window-level pointer tracking during drag. */
 const _raycaster = new THREE.Raycaster();
@@ -191,7 +192,7 @@ function KeychainRing3D({
   // 使用 window 级别的 pointermove/pointerup 防止快速拖拽时丢失跟踪。
 
   const handlePointerDown = useCallback(
-    (e: THREE.Event & { stopPropagation: () => void; ray: THREE.Ray }) => {
+    (e: ThreeEvent<PointerEvent>) => {
       e.stopPropagation();
       setIsDragging(true);
       isDraggingRef.current = true;
@@ -261,7 +262,7 @@ function KeychainRing3D({
   // --- Hover handlers (Req 7.7) ---
 
   const handlePointerOver = useCallback(
-    (e: THREE.Event & { stopPropagation: () => void }) => {
+    (e: ThreeEvent<PointerEvent>) => {
       e.stopPropagation();
       setIsHovered(true);
       if (!isDragging) {
@@ -272,7 +273,7 @@ function KeychainRing3D({
   );
 
   const handlePointerOut = useCallback(
-    (e: THREE.Event & { stopPropagation: () => void }) => {
+    (e: ThreeEvent<PointerEvent>) => {
       e.stopPropagation();
       setIsHovered(false);
       if (!isDragging) {
@@ -303,9 +304,9 @@ function KeychainRing3D({
       geometry={geometry}
       position={[posX, posY, posZ]}
       rotation={[0, 0, angleRad]}
-      onPointerDown={handlePointerDown as unknown as (e: any) => void}
-      onPointerOver={handlePointerOver as unknown as (e: any) => void}
-      onPointerOut={handlePointerOut as unknown as (e: any) => void}
+      onPointerDown={handlePointerDown}
+      onPointerOver={handlePointerOver}
+      onPointerOut={handlePointerOut}
     >
       <meshStandardMaterial
         color={visual.color}

@@ -82,17 +82,17 @@ const ColorWorkstation = forwardRef<HTMLDivElement, ColorWorkstationProps>(funct
         zIndex: 35,
         overflow: 'hidden',
       }}
-      className={cx(
+        className={cx(
         workstationShellClass,
         "border-x border-t border-slate-200/80 dark:border-slate-800/80",
-        "bg-slate-50/98 shadow-[var(--shadow-panel-top)] dark:bg-slate-950/98",
+        "bg-slate-100/98 shadow-[var(--shadow-panel-top)] dark:bg-slate-950/98",
         enableBlur && "backdrop-blur-[2px]"
       )}
     >
       {/* iOS-Style Drag Handle Area */}
       <div
         onClick={toggle}
-        className="flex w-full cursor-pointer select-none items-center justify-center border-b border-slate-200/70 bg-slate-50 transition-colors hover:bg-white dark:border-slate-800/80 dark:bg-slate-950 dark:hover:bg-slate-900"
+        className="flex w-full cursor-pointer select-none items-center justify-center border-b border-slate-200/70 bg-slate-100 transition-colors hover:bg-slate-100/90 dark:border-slate-800/80 dark:bg-slate-950 dark:hover:bg-slate-900"
         style={{ height: COLOR_WORKSTATION_TITLE_BAR_HEIGHT }}
         aria-expanded={!collapsed}
         aria-label={t('widget.colorWorkstation')}

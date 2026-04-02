@@ -5,6 +5,7 @@ Extracts color data from printed calibration boards.
 """
 
 import os
+import logging
 import numpy as np
 import cv2
 from config import (
@@ -18,6 +19,18 @@ from config import (
 )
 from utils import Stats
 from utils.lut_manager import LUTManager
+from core.errors import CoreProcessingError
+
+log = logging.getLogger(__name__)
+EXTRACTOR_HANDLED_ERRORS = (
+    ValueError,
+    TypeError,
+    KeyError,
+    IndexError,
+    AttributeError,
+    OSError,
+    RuntimeError,
+)
 
 
 def _srgb_to_linear(arr: np.ndarray) -> np.ndarray:
@@ -142,8 +155,15 @@ def _generate_recipes(color_mode: str, total_cells: int, page_choice: str = "Pag
             start = page_idx * per_page
             stacks = all_stacks[start : start + per_page]
             return stacks[:total_cells].astype(np.int32)
-        except Exception as e:
-            print(f"[EXTRACTOR] Failed to load 8-color stacks: {e}")
+        except (OSError, ValueError, ImportError) as exc:
+            log.warning(
+                "Failed to load 8-color stacks, using zeros fallback",
+                extra={
+                    "event": "core_extractor_generate_recipes_8color_fallback",
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc),
+                },
+            )
             return np.zeros((total_cells, 5), dtype=np.int32)
 
     if "6-Color" in color_mode:
@@ -151,11 +171,18 @@ def _generate_recipes(color_mode: str, total_cells: int, page_choice: str = "Pag
             from core.calibration import get_top_1296_colors
 
             top_stacks = get_top_1296_colors()
-            # get_top_1296_colors* 返回底到顶约定，需反转为顶到底（与校色板生成一致）
+            # get_top_1296_colors 返回底到顶约定，需反转为顶到底（与校色板生成一致）
             stacks = [list(reversed(s)) for s in top_stacks[:total_cells]]
             return np.array(stacks, dtype=np.int32)
-        except Exception as e:
-            print(f"[EXTRACTOR] Failed to generate 6-color stacks: {e}")
+        except (OSError, ValueError, ImportError) as exc:
+            log.warning(
+                "Failed to generate 6-color stacks, using zeros fallback",
+                extra={
+                    "event": "core_extractor_generate_recipes_6color_fallback",
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc),
+                },
+            )
             return np.zeros((total_cells, 5), dtype=np.int32)
 
     if "5-Color Extended" in color_mode:
@@ -167,8 +194,15 @@ def _generate_recipes(color_mode: str, total_cells: int, page_choice: str = "Pag
                 top_stacks = get_top_5color_extended_page2_stacks()
                 stacks = [list(s) for s in top_stacks[:total_cells]]
                 return np.array(stacks, dtype=np.int32)
-            except Exception as e:
-                print(f"[EXTRACTOR] Failed to generate 5-color ext stacks: {e}")
+            except (OSError, ValueError, ImportError) as exc:
+                log.warning(
+                    "Failed to generate 5-color-extended stacks, using zeros fallback",
+                    extra={
+                        "event": "core_extractor_generate_recipes_5c_fallback",
+                        "error_type": type(exc).__name__,
+                        "error_message": str(exc),
+                    },
+                )
                 return np.zeros((total_cells, 6), dtype=np.int32)
         else:
             # Page 1: 4^5 = 1024 combinations (same as 4-color)
@@ -182,7 +216,7 @@ def _generate_recipes(color_mode: str, total_cells: int, page_choice: str = "Pag
                 stacks.append(digits[::-1])
             return np.array(stacks, dtype=np.int32)
 
-    # Default: 4-Color (RYBW/CMYW) — 4^5 = 1024 combinations, 5 layers
+    # Default: 4-Color (RYBW/CMYW) 鈥?4^5 = 1024 combinations, 5 layers
     stacks = []
     for i in range(total_cells):
         digits = []
@@ -354,7 +388,7 @@ def apply_auto_white_balance(img: np.ndarray) -> np.ndarray:
     lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB).astype(np.float64)
     a_ch = lab[:, :, 1] - 128.0
     b_ch = lab[:, :, 2] - 128.0
-    chroma = np.sqrt(a_ch ** 2 + b_ch ** 2)
+    chroma = np.sqrt(a_ch**2 + b_ch**2)
 
     # Near-neutral: chroma < 15 (fairly desaturated)
     neutral_mask = bright_mask & (chroma < 15)
@@ -379,13 +413,17 @@ def apply_auto_white_balance(img: np.ndarray) -> np.ndarray:
         return img
 
     gains = 255.0 / white_ref
-    print(f"[AUTO_WB] white_ref=[{white_ref[0]:.1f}, {white_ref[1]:.1f}, {white_ref[2]:.1f}], "
-          f"gains=[{gains[0]:.3f}, {gains[1]:.3f}, {gains[2]:.3f}], neutral_pixels={count}")
+    log.info(
+        f"[AUTO_WB] white_ref=[{white_ref[0]:.1f}, {white_ref[1]:.1f}, {white_ref[2]:.1f}], "
+        f"gains=[{gains[0]:.3f}, {gains[1]:.3f}, {gains[2]:.3f}], neutral_pixels={count}"
+    )
     balanced = np.clip(img_f * gains, 0, 255).astype(np.uint8)
     return balanced
 
 
-def run_extraction(img, points, offset_x, offset_y, zoom, barrel, bright, color_mode="CMYW", page_choice="Page 1", auto_wb=False):
+def run_extraction(
+    img, points, offset_x, offset_y, zoom, barrel, bright, color_mode="CMYW", page_choice="Page 1", auto_wb=False
+):
     """
     Main extraction pipeline with dynamic grid size support.
 
@@ -407,11 +445,11 @@ def run_extraction(img, points, offset_x, offset_y, zoom, barrel, bright, color_
     if img is None:
         return None, None, None, "[ERROR] 请先上传图片"
     if len(points) != 4:
-        return None, None, None, "[ERROR] 请点击4个角点"
+        return None, None, None, "[ERROR] Please select 4 corner points"
 
     # 动态确定网格大小
     if color_mode == "BW (Black & White)" or color_mode == "BW":
-        grid_size = 6  # Data: 6x6 (32色，只用前32个)
+        grid_size = 6  # Data: 6x6 (32色，可用前 32 个)
         physical_grid = 8  # Physical: 8x8 (含边框)
         total_cells = 32
     elif "8-Color" in color_mode:
@@ -439,7 +477,9 @@ def run_extraction(img, points, offset_x, offset_y, zoom, barrel, bright, color_
         physical_grid = PHYSICAL_GRID_SIZE  # 34
         total_cells = 1024
 
-    print(f"[EXTRACTOR] Mode: {color_mode}, Logic: {grid_size}x{grid_size} inside {physical_grid}x{physical_grid}, auto_wb={auto_wb}, bright={bright}")
+    log.info(
+        f"[EXTRACTOR] Mode: {color_mode}, Logic: {grid_size}x{grid_size} inside {physical_grid}x{physical_grid}, auto_wb={auto_wb}, bright={bright}"
+    )
 
     # Perspective transform
     half = DST_SIZE / physical_grid / 2.0
@@ -461,7 +501,7 @@ def run_extraction(img, points, offset_x, offset_y, zoom, barrel, bright, color_
     extracted = np.zeros((grid_size, grid_size, 3), dtype=np.uint8)
     vis = warped.copy()
 
-    # BW模式特殊处理：只提取前32个色块
+    # BW模式特殊处理：只提取前 32 个色块
     if color_mode == "BW (Black & White)" or color_mode == "BW":
         cells_to_extract = 32
     else:
@@ -470,7 +510,7 @@ def run_extraction(img, points, offset_x, offset_y, zoom, barrel, bright, color_
     extracted_count = 0
     for r in range(grid_size):
         for c in range(grid_size):
-            # BW模式：只提取前32个
+            # BW模式：只提取前 32 个
             if extracted_count >= cells_to_extract:
                 break
 
@@ -505,7 +545,7 @@ def run_extraction(img, points, offset_x, offset_y, zoom, barrel, bright, color_
             extracted[r, c] = avg
             extracted_count += 1
 
-        # BW模式：提取够32个就退出外层循环
+        # BW模式：提取够 32 个就退出外层循环
         if extracted_count >= cells_to_extract:
             break
 
@@ -525,7 +565,12 @@ def run_extraction(img, points, offset_x, offset_y, zoom, barrel, bright, color_
 
     Stats.increment("extractions")
 
-    return vis, prev, LUT_FILE_PATH, f"[OK] 提取完成！({grid_size}x{grid_size}, {total_cells}色) LUT已保存"
+    return (
+        vis,
+        prev,
+        LUT_FILE_PATH,
+        f"[OK] Extraction complete: {grid_size}x{grid_size}, {total_cells} colors, LUT saved",
+    )
 
 
 def probe_lut_cell(
@@ -551,14 +596,14 @@ def probe_lut_cell(
         actual_path = lut_path.name
 
     if not actual_path or not os.path.exists(actual_path):
-        return "[WARNING] 无数据", None, None
+        return "[WARNING] No LUT data", None, None
     try:
         rgb, _stacks, _metadata = LUTManager.load_lut_with_metadata(actual_path)
-    except Exception:
+    except (OSError, ValueError, KeyError):
         return "[WARNING] 数据损坏", None, None
 
     if len(rgb) == 0:
-        return "[WARNING] 无数据", None, None
+        return "[WARNING] No LUT data", None, None
 
     # 从 1D rgb 数组推断 2D 网格尺寸
     n = len(rgb)
@@ -602,15 +647,15 @@ def manual_fix_cell(coord, color_input, lut_path=None):
         actual_path = lut_path.name
 
     if not coord or not actual_path or not os.path.exists(actual_path):
-        print(
+        log.info(
             f"[MANUAL_FIX] Error: coord={coord}, actual_path={actual_path}, exists={os.path.exists(actual_path) if actual_path else False}"
         )
         return None, "[WARNING] 错误"
 
     try:
-        print(f"[MANUAL_FIX] Loading LUT from: {actual_path}")
+        log.info(f"[MANUAL_FIX] Loading LUT from: {actual_path}")
         rgb, stacks, metadata = LUTManager.load_lut_with_metadata(actual_path)
-        print(f"[MANUAL_FIX] RGB shape: {rgb.shape}")
+        log.info(f"[MANUAL_FIX] RGB shape: {rgb.shape}")
         r, c = coord
 
         # 从 1D rgb 数组推断 2D 网格尺寸
@@ -624,7 +669,7 @@ def manual_fix_cell(coord, color_input, lut_path=None):
         if idx >= n:
             return None, "[WARNING] 索引超出范围"
 
-        print(f"[MANUAL_FIX] Fixing cell ({r}, {c}), idx={idx}")
+        log.info(f"[MANUAL_FIX] Fixing cell ({r}, {c}), idx={idx}")
         new_color = [0, 0, 0]
 
         color_str = str(color_input)
@@ -639,14 +684,14 @@ def manual_fix_cell(coord, color_input, lut_path=None):
         else:
             new_color = [int(color_str[i : i + 2], 16) for i in (0, 2, 4)]
 
-        print(f"[MANUAL_FIX] Old color: {rgb[idx]}, New color: {new_color}")
+        log.info(f"[MANUAL_FIX] Old color: {rgb[idx]}, New color: {new_color}")
         rgb[idx] = new_color
 
         # 通过 save_keyed_json 保存修改后的 LUT
         if stacks is None:
             stacks = np.zeros((n, 0), dtype=np.int32)
         LUTManager.save_keyed_json(actual_path, rgb, stacks, metadata)
-        print(f"[MANUAL_FIX] Saved to: {actual_path}")
+        log.info(f"[MANUAL_FIX] Saved to: {actual_path}")
 
         # For 8-color mode: also ensure we save to the correct assets path
         # Check if the path is a temp_8c_page file
@@ -667,16 +712,22 @@ def manual_fix_cell(coord, color_input, lut_path=None):
 
                 if os.path.abspath(actual_path) != os.path.abspath(assets_path):
                     LUTManager.save_keyed_json(assets_path, rgb, stacks, metadata)
-                    print(f"[MANUAL_FIX] Also saved to assets: {assets_path}")
+                    log.info(f"[MANUAL_FIX] Also saved to assets: {assets_path}")
 
         # 将 1D rgb reshape 回 2D grid 用于预览
         lut_2d = rgb[: side * side].reshape(side, side, 3) if n >= side * side else rgb.reshape(-1, 1, 3)
         preview = cv2.resize(lut_2d, (512, 512), interpolation=cv2.INTER_NEAREST)
-        print(f"[MANUAL_FIX] Preview shape: {preview.shape}")
-        return preview, "[OK] 已修正"
-    except Exception as e:
-        print(f"[MANUAL_FIX] Exception: {e}")
-        import traceback
-
-        traceback.print_exc()
+        log.info(f"[MANUAL_FIX] Preview shape: {preview.shape}")
+        return preview, "[OK] Cell updated"
+    except (TypeError, ValueError) as exc:
+        log.warning(
+            "Manual fix failed due to invalid input",
+            extra={
+                "event": "core_extractor_manual_fix_validation_failed",
+                "error_type": type(exc).__name__,
+                "error_message": str(exc),
+            },
+        )
         return None, f"[ERROR] 格式错误: {color_input}"
+    except EXTRACTOR_HANDLED_ERRORS as exc:
+        raise CoreProcessingError(f"manual_fix_cell failed for path={actual_path}, coord={coord}: {exc}") from exc

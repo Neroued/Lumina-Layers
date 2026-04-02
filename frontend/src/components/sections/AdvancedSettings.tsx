@@ -1,4 +1,4 @@
-import { useConverterStore } from "../../stores/converterStore";
+import { useConverterStore } from "../../stores/converter";
 import { useI18n } from "../../i18n/context";
 import Slider from "../ui/Slider";
 import Checkbox from "../ui/Checkbox";

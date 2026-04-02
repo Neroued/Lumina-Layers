@@ -50,6 +50,7 @@ class _MockWorkerPool:
 
 _mock_pool = _MockWorkerPool()
 
+
 def setup_module(module):
     """Re-apply dependency overrides before this module's tests run.
     在本模块测试运行前重新设置依赖覆盖，确保跨文件测试隔离。
@@ -101,7 +102,7 @@ class TestBatchLutNotFound:
 
     def test_batch_unknown_lut_returns_404(self) -> None:
         with patch(
-            "api.routers.converter.LUTManager.get_lut_path",
+            "api.routers.converter.generate.LUTManager.get_lut_path",
             return_value=None,
         ):
             response = client.post(
@@ -134,12 +135,15 @@ class TestBatchPartialFailure:
 
         _mock_pool.submit = AsyncMock(side_effect=_mock_submit)
 
-        with patch(
-            "api.routers.converter.LUTManager.get_lut_path",
-            return_value="/tmp/fake.npy",
-        ), patch(
-            "api.routers.converter.upload_to_tempfile",
-            return_value="/tmp/uploaded.png",
+        with (
+            patch(
+                "api.routers.converter.generate.LUTManager.get_lut_path",
+                return_value="/tmp/fake.npy",
+            ),
+            patch(
+                "api.routers.converter.generate.ensure_png_tempfile",
+                new=AsyncMock(return_value="/tmp/uploaded.png"),
+            ),
         ):
             response = client.post(
                 "/api/convert/batch",
@@ -183,12 +187,15 @@ class TestBatchAllSuccess:
             return_value={"threemf_path": fake_3mf, "status_msg": "OK"},
         )
 
-        with patch(
-            "api.routers.converter.LUTManager.get_lut_path",
-            return_value="/tmp/fake.npy",
-        ), patch(
-            "api.routers.converter.upload_to_tempfile",
-            return_value="/tmp/uploaded.png",
+        with (
+            patch(
+                "api.routers.converter.generate.LUTManager.get_lut_path",
+                return_value="/tmp/fake.npy",
+            ),
+            patch(
+                "api.routers.converter.generate.ensure_png_tempfile",
+                new=AsyncMock(return_value="/tmp/uploaded.png"),
+            ),
         ):
             response = client.post(
                 "/api/convert/batch",
@@ -221,12 +228,15 @@ class TestBatchAllFailed:
             side_effect=RuntimeError("boom"),
         )
 
-        with patch(
-            "api.routers.converter.LUTManager.get_lut_path",
-            return_value="/tmp/fake.npy",
-        ), patch(
-            "api.routers.converter.upload_to_tempfile",
-            return_value="/tmp/uploaded.png",
+        with (
+            patch(
+                "api.routers.converter.generate.LUTManager.get_lut_path",
+                return_value="/tmp/fake.npy",
+            ),
+            patch(
+                "api.routers.converter.generate.ensure_png_tempfile",
+                new=AsyncMock(return_value="/tmp/uploaded.png"),
+            ),
         ):
             response = client.post(
                 "/api/convert/batch",
@@ -255,12 +265,15 @@ class TestBatchTimeout:
             side_effect=asyncio.TimeoutError(),
         )
 
-        with patch(
-            "api.routers.converter.LUTManager.get_lut_path",
-            return_value="/tmp/fake.npy",
-        ), patch(
-            "api.routers.converter.upload_to_tempfile",
-            return_value="/tmp/uploaded.png",
+        with (
+            patch(
+                "api.routers.converter.generate.LUTManager.get_lut_path",
+                return_value="/tmp/fake.npy",
+            ),
+            patch(
+                "api.routers.converter.generate.ensure_png_tempfile",
+                new=AsyncMock(return_value="/tmp/uploaded.png"),
+            ),
         ):
             response = client.post(
                 "/api/convert/batch",
@@ -290,13 +303,16 @@ class TestBatchWorkerPoolSubmit:
             return_value={"threemf_path": fake_3mf, "status_msg": "OK"},
         )
 
-        with patch(
-            "api.routers.converter.LUTManager.get_lut_path",
-            return_value="/tmp/fake.npy",
-        ), patch(
-            "api.routers.converter.ensure_png_tempfile",
-            new_callable=AsyncMock,
-            return_value="/tmp/uploaded.png",
+        with (
+            patch(
+                "api.routers.converter.generate.LUTManager.get_lut_path",
+                return_value="/tmp/fake.npy",
+            ),
+            patch(
+                "api.routers.converter.generate.ensure_png_tempfile",
+                new_callable=AsyncMock,
+                return_value="/tmp/uploaded.png",
+            ),
         ):
             response = client.post(
                 "/api/convert/batch",
@@ -315,10 +331,11 @@ class TestBatchWorkerPoolSubmit:
 
         # Verify the first argument is the worker function
         from api.workers.converter_workers import worker_batch_convert_item
+
         call_args = _mock_pool.submit.call_args
         assert call_args[0][0] is worker_batch_convert_item
 
         # Verify file path and lut_path are passed as scalars
         assert call_args[0][1] == "/tmp/uploaded.png"  # image_path
-        assert call_args[0][2] == "/tmp/fake.npy"      # lut_path
-        assert call_args[0][3] == 80.0                  # target_width_mm
+        assert call_args[0][2] == "/tmp/fake.npy"  # lut_path
+        assert call_args[0][3] == 80.0  # target_width_mm

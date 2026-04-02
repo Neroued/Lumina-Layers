@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import LutManagerPanel from "../components/LutManagerPanel";
 import { useLutManagerStore } from "../stores/lutManagerStore";
+import type { ColorMode } from "../api/types";
 
 vi.mock("../api/lut", () => ({
   fetchLutInfo: vi.fn(),
@@ -17,7 +18,11 @@ vi.mock("../api/converter", () => ({
 beforeEach(() => {
   useLutManagerStore.setState({
     lutList: [
-      { name: "Test LUT", color_mode: "8-Color Max" as any, path: "/fake/path.npy" },
+      {
+        name: "Test LUT",
+        color_mode: "8-Color Max" as unknown as ColorMode,
+        path: "/fake/path.npy",
+      },
     ],
     lutListLoading: false,
     primaryName: "",

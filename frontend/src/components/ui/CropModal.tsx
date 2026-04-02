@@ -221,7 +221,7 @@ export function CropModal({
         aria-modal="true"
         aria-label={t("crop_modal_title")}
         onClick={(e) => e.stopPropagation()}
-        className="relative flex max-h-[90vh] w-full max-w-3xl flex-col rounded-lg bg-white shadow-2xl outline-none dark:bg-gray-800"
+        className="relative flex max-h-[90vh] w-full max-w-3xl flex-col rounded-lg bg-slate-50 shadow-2xl outline-none dark:bg-gray-800"
       >
         {/* Title bar */}
         <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-700">
@@ -263,10 +263,10 @@ export function CropModal({
         {/* Info bar */}
         <div className="flex flex-wrap items-center gap-4 border-t border-gray-200 px-4 py-2 text-xs text-gray-600 dark:border-gray-700 dark:text-gray-400">
           <span>
-            {t("crop_modal_original")}: {naturalWidth} x {naturalHeight} px
+            {t("crop_modal_original")}: {naturalWidth} × {naturalHeight} {t("common_unit_px")}
           </span>
           <span>
-            {t("crop_modal_selection")}: {cropW} x {cropH} px
+            {t("crop_modal_selection")}: {cropW} × {cropH} {t("common_unit_px")}
           </span>
         </div>
 
@@ -297,8 +297,8 @@ export function CropModal({
         <div className="flex flex-wrap gap-3 px-4 py-2">
           {(
             [
-              { label: "X", value: cropX, field: "x" },
-              { label: "Y", value: cropY, field: "y" },
+              { label: t("crop_modal_axis_x"), value: cropX, field: "x" },
+              { label: t("crop_modal_axis_y"), value: cropY, field: "y" },
               { label: t("crop_width"), value: cropW, field: "width" },
               { label: t("crop_height"), value: cropH, field: "height" },
             ] as const
@@ -312,7 +312,7 @@ export function CropModal({
                 min={0}
                 value={item.value}
                 onChange={(e) => syncManualInput(item.field, e.target.value)}
-                className="w-20 rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 outline-none focus:border-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
+                className="w-20 rounded border border-gray-300 bg-slate-50 px-2 py-1 text-xs text-gray-800 outline-none focus:border-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
               />
             </label>
           ))}

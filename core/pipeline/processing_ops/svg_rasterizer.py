@@ -11,8 +11,11 @@ Native RGBA transparency support — no dual-pass hack needed.
 import os
 import io
 import time
+import logging
 import numpy as np
 import cv2
+
+_log = logging.getLogger(__name__)
 
 try:
     import resvg_py
@@ -47,12 +50,12 @@ def rasterize_svg(svg_path: str, target_width_mm: float, pixels_per_mm: float = 
         cache_key = (svg_abs, round(float(target_width_mm), 4), round(float(pixels_per_mm), 2), svg_mtime)
         cached = _SVG_RASTER_CACHE.get(cache_key)
         if cached is not None:
-            print(f"[SVG] Cache hit: {os.path.basename(svg_abs)} @ {pixels_per_mm}px/mm")
+            _log.info("[SVG] Cache hit: %s @ %spx/mm", os.path.basename(svg_abs), pixels_per_mm)
             return cached.copy()
-    except Exception:
+    except (OSError, ValueError, TypeError):
         cache_key = None
 
-    print(f"[SVG] Rasterizing (resvg): {svg_path}")
+    _log.info("[SVG] Rasterizing (resvg): %s", svg_path)
     _t0_total = time.perf_counter()
 
     target_width_px = max(1, int(target_width_mm * pixels_per_mm))
@@ -67,7 +70,7 @@ def rasterize_svg(svg_path: str, target_width_mm: float, pixels_per_mm: float = 
 
     img_pil = Image.open(io.BytesIO(bytes(png_bytes)))
     img_final = np.array(img_pil.convert("RGBA"))
-    print(f"[SVG] Rendered: {img_final.shape[1]}x{img_final.shape[0]} px")
+    _log.info("[SVG] Rendered: %sx%s px", img_final.shape[1], img_final.shape[0])
 
     _t0 = time.perf_counter()
     alpha_channel = img_final[:, :, 3]
@@ -84,22 +87,24 @@ def rasterize_svg(svg_path: str, target_width_mm: float, pixels_per_mm: float = 
         y_max = min(h_arr - 1, row_idx[-1] + BORDER)
         x_max = min(w_arr - 1, col_idx[-1] + BORDER)
         img_final = img_final[y_min : y_max + 1, x_min : x_max + 1]
-    print(f"[SVG] Content-aware crop: {img_final.shape[1]}x{img_final.shape[0]} px")
+    _log.info("[SVG] Content-aware crop: %sx%s px", img_final.shape[1], img_final.shape[0])
 
     if render_width_px > target_width_px and target_width_px > 0:
         scale_back = target_width_px / render_width_px
         out_w = max(1, round(img_final.shape[1] * scale_back))
         out_h = max(1, round(img_final.shape[0] * scale_back))
         img_final = cv2.resize(img_final, (out_w, out_h), interpolation=cv2.INTER_AREA)
-        print(f"[SVG] Scaled to target: {out_w}x{out_h} px")
+        _log.info("[SVG] Scaled to target: %sx%s px", out_w, out_h)
     _t_postprocess = time.perf_counter() - _t0
 
     _t_total = time.perf_counter() - _t0_total
-    print(
-        f"[SVG] Timing: render={_t_render:.2f}s, "
-        f"postprocess={_t_postprocess:.2f}s, total={_t_total:.2f}s"
+    _log.info(
+        "[SVG] Timing: render=%.2fs, postprocess=%.2fs, total=%.2fs",
+        _t_render,
+        _t_postprocess,
+        _t_total,
     )
-    print(f"[SVG] Final resolution: {img_final.shape[1]}x{img_final.shape[0]} px")
+    _log.info("[SVG] Final resolution: %sx%s px", img_final.shape[1], img_final.shape[0])
 
     if cache_key is not None:
         _SVG_RASTER_CACHE[cache_key] = img_final.copy()

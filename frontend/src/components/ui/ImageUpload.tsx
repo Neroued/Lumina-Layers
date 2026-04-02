@@ -63,7 +63,7 @@ export default function ImageUpload({
 
   const borderClass = isDragging
     ? "border-blue-400 bg-blue-500/10 shadow-[0_0_0_6px_var(--focus-ring)]"
-    : "border-slate-300/80 dark:border-slate-700/80 border-dashed bg-white/40 dark:bg-slate-900/35";
+    : "border-slate-300/80 border-dashed bg-slate-100/55 dark:border-slate-700/80 dark:bg-slate-900/35";
 
   return (
     <div
@@ -88,7 +88,7 @@ export default function ImageUpload({
       {preview ? (
         <div
           data-testid="checkerboard-bg"
-          className="rounded-[20px] border border-white/70 bg-white/80 p-3 shadow-[var(--shadow-control)] dark:border-slate-700/70 dark:bg-slate-950/70"
+          className="rounded-[20px] border border-slate-200/70 bg-slate-100/80 p-3 shadow-[var(--shadow-control)] dark:border-slate-700/70 dark:bg-slate-950/70"
           style={{
             backgroundImage:
               "linear-gradient(45deg, #e0e0e0 25%, transparent 25%), " +
@@ -101,7 +101,7 @@ export default function ImageUpload({
         >
           <img
             src={preview}
-            alt="preview"
+            alt={t("common_preview_alt")}
             className="max-h-[180px] max-w-full rounded-2xl object-contain"
           />
         </div>

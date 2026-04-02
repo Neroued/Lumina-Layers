@@ -14,8 +14,9 @@ import {
   rotateExtractorImage,
 } from "../api/extractor";
 import type { ExtractorPaletteEntry } from "../api/types";
-import { clampValue } from "./converterStore";
+import { clampValue } from "./converter";
 import { uploadImagePreview } from "../api/system";
+import { normalizeResourceUrl } from "../utils/resourceUrl";
 
 export const RAW_EXTENSIONS = new Set([
   ".dng",
@@ -84,11 +85,11 @@ export interface ExtractorState {
   mergeLoading: boolean;
   mergeError: string | null;
 
-  // 5色扩展双页状态
+  // 5 色扩展双页状态
   page1Extracted_5c: boolean;
   page2Extracted_5c: boolean;
 
-  // 调色板确认
+  // 调色板与元数据（厂商、类型、默认板与确认状态）
   manufacturer: string;
   type: string;
   defaultPalette: ExtractorPaletteEntry[];
@@ -348,7 +349,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
       }
 
       if (value) {
-        // 开启白平衡：保存原始预览，调后端获取白平衡预览
+        // Enable auto white-balance: save original preview and fetch adjusted preview
         set({ isLoading: true, error: null, auto_wb: true });
         try {
           const saved = originalPreviewUrl ?? imagePreviewUrl;
@@ -366,7 +367,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
         } catch (err) {
           set({
             auto_wb: false,
-            error: err instanceof Error ? err.message : "白平衡预览失败",
+            error: err instanceof Error ? err.message : "White balance preview failed",
             isLoading: false,
           });
         }
@@ -405,8 +406,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
           vignette_correction: state.vignette_correction,
           auto_wb: state.auto_wb,
         });
-        const BASE = "";
-
+        
         // Track 8-color page extraction status
         const pageUpdate: Partial<ExtractorState> = {};
         if (state.color_mode === ExtractorColorModeEnum.EIGHT_COLOR) {
@@ -428,13 +428,13 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
         set({
           session_id: response.session_id,
           lut_download_url: response.lut_download_url
-            ? `${BASE}${response.lut_download_url}`
+            ? normalizeResourceUrl(response.lut_download_url)
             : null,
           warp_view_url: response.warp_view_url
-            ? `${BASE}${response.warp_view_url}`
+            ? normalizeResourceUrl(response.warp_view_url)
             : null,
           lut_preview_url: response.lut_preview_url
-            ? `${BASE}${response.lut_preview_url}`
+            ? normalizeResourceUrl(response.lut_preview_url)
             : null,
           isLoading: false,
           defaultPalette: response.default_palette ?? [],
@@ -463,7 +463,7 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
         );
         set({
           lut_preview_url: response.lut_preview_url
-            ? `${response.lut_preview_url}`
+            ? normalizeResourceUrl(response.lut_preview_url)
             : null,
           manualFixLoading: false,
         });
@@ -491,17 +491,16 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
         const response = is5c
           ? await mergeFiveColorExtended()
           : await mergeEightColor();
-        const BASE = "";
-        set({
+                set({
           session_id: response.session_id,
           lut_download_url: response.lut_download_url
-            ? `${BASE}${response.lut_download_url}`
+            ? normalizeResourceUrl(response.lut_download_url)
             : null,
           warp_view_url: response.warp_view_url
-            ? `${BASE}${response.warp_view_url}`
+            ? normalizeResourceUrl(response.warp_view_url)
             : null,
           lut_preview_url: response.lut_preview_url
-            ? `${BASE}${response.lut_preview_url}`
+            ? normalizeResourceUrl(response.lut_preview_url)
             : null,
           defaultPalette: response.default_palette ?? [],
           paletteConfirmed: false,
@@ -549,10 +548,12 @@ export const useExtractorStore = create<ExtractorState & ExtractorActions>(
       } catch (err) {
         set({
           paletteConfirmError:
-            err instanceof Error ? err.message : "调色板确认失败，请重试",
+            err instanceof Error ? err.message : "Palette confirmation failed",
           paletteConfirmLoading: false,
         });
       }
     },
   }),
 );
+
+

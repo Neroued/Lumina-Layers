@@ -232,7 +232,7 @@ export default function SettingsPanel() {
         {selectedPrinter && (
           <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
             <span>
-              {t("settings.bed_size")}: {selectedPrinter.bed_width}&times;{selectedPrinter.bed_depth} mm
+              {t("settings.bed_size")}: {selectedPrinter.bed_width}&times;{selectedPrinter.bed_depth} {t("common_unit_mm")}
             </span>
             <span className="text-slate-300 dark:text-slate-600">|</span>
             <span>

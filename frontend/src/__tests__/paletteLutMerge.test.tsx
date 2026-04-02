@@ -8,6 +8,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import type { ReactNode, HTMLAttributes } from 'react';
 import { I18nProvider } from '../i18n/context';
 import { translations } from '../i18n/translations';
 import {
@@ -29,14 +30,21 @@ vi.mock('../components/sections/LutColorGrid', () => ({
 // Mock framer-motion to avoid animation complexity in tests
 vi.mock('framer-motion', () => ({
   motion: {
-    div: ({ children, ...props }: any) => <div {...props}>{children}</div>,
+    div: ({
+      children,
+      ...props
+    }: HTMLAttributes<HTMLDivElement> & { children?: ReactNode }) => (
+      <div {...props}>{children}</div>
+    ),
   },
-  AnimatePresence: ({ children }: any) => <>{children}</>,
+  AnimatePresence: ({ children }: { children?: ReactNode }) => <>{children}</>,
 }));
 
 // Mock settingsStore for enableBlur
 vi.mock('../stores/settingsStore', () => ({
-  useSettingsStore: (selector: any) => {
+  useSettingsStore: (
+    selector?: (state: { language: "zh"; enableBlur: boolean }) => unknown,
+  ) => {
     const state = { language: 'zh' as const, enableBlur: true };
     return selector ? selector(state) : state;
   },
@@ -100,7 +108,9 @@ describe('Palette-LUT Merge Unit Tests', () => {
   describe('Persist version', () => {
     it('persist version is 4', () => {
       // Requirements 5.3
-      const options = (useWidgetStore.persist as any).getOptions();
+      const options = (
+        useWidgetStore.persist as unknown as { getOptions: () => { version: number } }
+      ).getOptions();
       expect(options.version).toBe(4);
     });
   });

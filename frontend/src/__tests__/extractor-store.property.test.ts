@@ -1,7 +1,7 @@
 import { describe, it, vi, beforeEach, expect } from "vitest";
 import * as fc from "fast-check";
 import { useExtractorStore } from "../stores/extractorStore";
-import { useConverterStore } from "../stores/converterStore";
+import { useConverterStore } from "../stores/converter";
 import { useCalibrationStore } from "../stores/calibrationStore";
 import {
   ExtractorColorMode,

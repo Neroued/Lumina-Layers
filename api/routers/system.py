@@ -9,6 +9,7 @@ endpoint (endpoint registered in a later task).
 
 import json
 import os
+import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
@@ -37,6 +38,7 @@ router = APIRouter(prefix="/api/system", tags=["System"])
 
 CLEANABLE_EXTENSIONS: set[str] = {".3mf", ".glb", ".png", ".jpg", ".txt"}
 PROTECTED_FILES: set[str] = {"lumina_stats.txt", "lumina_lut.json"}
+EPHEMERAL_PREVIEW_TTL_SECONDS = 600
 
 
 def _purge_subdir(subdir: str) -> tuple[int, int]:
@@ -151,7 +153,12 @@ async def image_preview(
             width, height = img.size
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"无法读取图片尺寸: {e}")
-    file_id = file_registry.register_path("image-preview", png_path, "preview.png")
+    file_id = file_registry.register_path(
+        str(uuid.uuid4()),
+        png_path,
+        "preview.png",
+        ttl_seconds=EPHEMERAL_PREVIEW_TTL_SECONDS,
+    )
     return {"preview_url": f"/api/files/{file_id}", "width": width, "height": height}
 
 

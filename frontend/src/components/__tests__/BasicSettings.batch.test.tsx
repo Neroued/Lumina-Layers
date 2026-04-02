@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { useConverterStore } from "../../stores/converterStore";
+import { useConverterStore } from "../../stores/converter";
 import BasicSettings from "../sections/BasicSettings";
 
 // Mock heavy child components to isolate conditional rendering logic

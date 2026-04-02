@@ -13,11 +13,14 @@ import json
 from unittest.mock import patch
 
 import numpy as np
+import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
 from api.app import app
-from api.dependencies import session_store
+from api.dependencies import get_file_registry, get_session_store
+from api.file_registry import FileRegistry
+from api.session_store import SessionStore
 
 client: TestClient = TestClient(app)
 
@@ -25,6 +28,20 @@ client: TestClient = TestClient(app)
 _mock_vis: np.ndarray = np.zeros((10, 10, 3), dtype=np.uint8)
 _mock_preview: np.ndarray = np.zeros((10, 10, 3), dtype=np.uint8)
 _mock_return = (_mock_vis, _mock_preview, "/tmp/test.npy", "OK")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_dependency_overrides():
+    """Isolate extractor integration tests from global override pollution."""
+    test_store = SessionStore()
+    test_registry = FileRegistry()
+    app.dependency_overrides[get_session_store] = lambda: test_store
+    app.dependency_overrides[get_file_registry] = lambda: test_registry
+    try:
+        yield {"store": test_store, "registry": test_registry}
+    finally:
+        app.dependency_overrides.pop(get_session_store, None)
+        app.dependency_overrides.pop(get_file_registry, None)
 
 
 def _make_test_image_buf() -> io.BytesIO:
@@ -69,7 +86,7 @@ class TestCornerPointsValidation:
 class TestSessionStatePersistence:
     """Verify extraction stores session state with lut_path and color_mode."""
 
-    def test_extract_stores_session_state(self) -> None:
+    def test_extract_stores_session_state(self, _isolate_dependency_overrides) -> None:
         """Mock run_extraction, verify session contains lut_path and color_mode."""
         buf = _make_test_image_buf()
         with patch(
@@ -92,7 +109,7 @@ class TestSessionStatePersistence:
         assert session_id
 
         # Verify session data in store
-        session_data = session_store.get(session_id)
+        session_data = _isolate_dependency_overrides["store"].get(session_id)
         assert session_data is not None
         assert session_data["lut_path"] == "/tmp/test.npy"
         assert session_data["color_mode"] == "4-Color"

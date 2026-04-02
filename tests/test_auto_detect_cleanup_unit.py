@@ -20,7 +20,6 @@ from PIL import Image
 
 from api.app import app
 
-
 client: TestClient = TestClient(app)
 
 
@@ -54,13 +53,16 @@ class TestAutoDetectCleanupOnSuccess:
             "complexity_score": 42,
         }
 
-        with patch(
-            "api.routers.converter.ensure_png_tempfile",
-            new_callable=AsyncMock,
-            return_value=temp_path,
-        ), patch(
-            "api.routers.converter.ImagePreprocessor.analyze_recommended_colors",
-            return_value=mock_result,
+        with (
+            patch(
+                "api.routers.converter.preview.ensure_png_tempfile",
+                new_callable=AsyncMock,
+                return_value=temp_path,
+            ),
+            patch(
+                "api.routers.converter.preview.ImagePreprocessor.analyze_recommended_colors",
+                return_value=mock_result,
+            ),
         ):
             buf = _make_test_image_buf()
             response = client.post(
@@ -70,9 +72,7 @@ class TestAutoDetectCleanupOnSuccess:
             )
 
         assert response.status_code == 200
-        assert not os.path.exists(temp_path), (
-            f"Temp file {temp_path} still exists after successful auto-detect"
-        )
+        assert not os.path.exists(temp_path), f"Temp file {temp_path} still exists after successful auto-detect"
 
 
 class TestAutoDetectCleanupOnFailure:
@@ -81,13 +81,16 @@ class TestAutoDetectCleanupOnFailure:
     def test_temp_file_removed_on_analysis_error(self) -> None:
         temp_path = _make_real_tempfile()
 
-        with patch(
-            "api.routers.converter.ensure_png_tempfile",
-            new_callable=AsyncMock,
-            return_value=temp_path,
-        ), patch(
-            "api.routers.converter.ImagePreprocessor.analyze_recommended_colors",
-            side_effect=RuntimeError("synthetic analysis failure"),
+        with (
+            patch(
+                "api.routers.converter.preview.ensure_png_tempfile",
+                new_callable=AsyncMock,
+                return_value=temp_path,
+            ),
+            patch(
+                "api.routers.converter.preview.ImagePreprocessor.analyze_recommended_colors",
+                side_effect=RuntimeError("synthetic analysis failure"),
+            ),
         ):
             buf = _make_test_image_buf()
             response = client.post(
@@ -97,6 +100,4 @@ class TestAutoDetectCleanupOnFailure:
             )
 
         assert response.status_code == 422
-        assert not os.path.exists(temp_path), (
-            f"Temp file {temp_path} still exists after failed auto-detect"
-        )
+        assert not os.path.exists(temp_path), f"Temp file {temp_path} still exists after failed auto-detect"

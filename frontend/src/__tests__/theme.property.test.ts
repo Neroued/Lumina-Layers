@@ -48,7 +48,7 @@ describe("Feature: dark-light-mode, Property 1: 主题配置结构完整性", ()
 
   it("light and dark configs have the exact same set of keys", () => {
     fc.assert(
-      fc.property(arbThemeMode, (_mode) => {
+      fc.property(arbThemeMode, () => {
         const lightKeys = Object.keys(THEME_CONFIG.light).sort();
         const darkKeys = Object.keys(THEME_CONFIG.dark).sort();
         expect(lightKeys).toEqual(darkKeys);

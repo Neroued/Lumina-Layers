@@ -359,6 +359,12 @@ class I18n:
         "merge_error_same_lut": {"zh": "❌ 请选择不同的LUT文件", "en": "❌ Please select different LUT files"},
         "merge_error_incompatible": {"zh": "❌ 不兼容的LUT组合: {msg}", "en": "❌ Incompatible LUT combination: {msg}"},
         "merge_error_failed": {"zh": "❌ 合并失败: {msg}", "en": "❌ Merge failed: {msg}"},
+        # ==================== About / Cache ====================
+        "about_cache_clear_success": {
+            "zh": "已清理 {deleted_files} 个缓存文件，释放 {freed}",
+            "en": "Cleared {deleted_files} cached files, freed {freed}",
+        },
+        "about_cache_clear_failed": {"zh": "缓存清理失败", "en": "Cache clear failed"},
         # ==================== About Page Content ====================
         "about_content": {
             "zh": """## 🌟 Lumina Studio v1.6.3

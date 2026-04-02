@@ -18,7 +18,7 @@ vi.mock("../api/converter", () => ({
 }));
 
 import { useLutManagerStore } from "../stores/lutManagerStore";
-import { useConverterStore } from "../stores/converterStore";
+import { useConverterStore } from "../stores/converter";
 
 // ========== Tests ==========
 

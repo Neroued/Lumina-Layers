@@ -19,7 +19,7 @@ def test_invalid_click_returns_none_hex():
 
 
 def test_resolve_click_selection_hexes_rejects_non_string_default():
-    """dict default_hex (e.g. gr.update payload) should be normalized away."""
+    """dict default_hex payload should be normalized away."""
     display_hex, state_hex = _resolve_click_selection_hexes({}, {"value": "bad"})
     assert display_hex is None
     assert state_hex is None

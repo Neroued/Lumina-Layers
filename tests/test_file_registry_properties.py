@@ -12,6 +12,7 @@ Uses Hypothesis to verify:
 import os
 import tempfile
 import uuid
+from unittest.mock import patch
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -45,6 +46,7 @@ filenames = st.builds(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _create_temp_file() -> str:
     """Create a real temporary file and return its path."""
@@ -115,9 +117,7 @@ def test_resolve_unknown_id_returns_none(unknown_id: str) -> None:
     file_data=st.lists(filenames, min_size=1, max_size=5),
 )
 @settings(max_examples=50)
-def test_cleanup_session_invalidates_file_ids(
-    sid: str, file_data: list[str]
-) -> None:
+def test_cleanup_session_invalidates_file_ids(sid: str, file_data: list[str]) -> None:
     """After cleanup_session(), all file_ids for that session resolve to None."""
     registry = FileRegistry()
     temp_paths: list[str] = []
@@ -143,5 +143,51 @@ def test_cleanup_session_invalidates_file_ids(
             assert registry.resolve(fid) is None
     finally:
         for p in temp_paths:
+            if os.path.exists(p):
+                os.unlink(p)
+
+
+# **Validates: Requirements 1.2**
+@given(sid=session_ids, filename=filenames)
+@settings(max_examples=50)
+def test_ttl_entry_expires_and_resolve_invalidates_file_id(sid: str, filename: str) -> None:
+    """TTL entry should become inaccessible after expiry and be removed from disk."""
+    registry = FileRegistry()
+    path = _create_temp_file()
+    with patch("api.file_registry.time.time", return_value=100.0):
+        file_id = registry.register_path(sid, path, filename, ttl_seconds=1)
+
+    with patch("api.file_registry.time.time", return_value=102.0):
+        assert registry.resolve(file_id) is None
+
+    assert not os.path.exists(path)
+
+
+# **Validates: Requirements 1.2**
+@given(sid=session_ids, filename=filenames)
+@settings(max_examples=50)
+def test_cleanup_expired_removes_only_expired_entries(sid: str, filename: str) -> None:
+    """cleanup_expired removes expired entries but preserves active and session-bound entries."""
+    registry = FileRegistry()
+    expired_path = _create_temp_file()
+    active_path = _create_temp_file()
+    session_bound_path = _create_temp_file()
+
+    try:
+        with patch("api.file_registry.time.time", return_value=100.0):
+            expired_id = registry.register_path(sid, expired_path, f"expired-{filename}", ttl_seconds=1)
+            active_id = registry.register_path(sid, active_path, f"active-{filename}", ttl_seconds=100)
+            session_bound_id = registry.register_path(sid, session_bound_path, f"bound-{filename}")
+
+        with patch("api.file_registry.time.time", return_value=102.0):
+            removed = registry.cleanup_expired()
+
+        assert removed == 1
+        with patch("api.file_registry.time.time", return_value=102.0):
+            assert registry.resolve(expired_id) is None
+            assert registry.resolve(active_id) is not None
+            assert registry.resolve(session_bound_id) is not None
+    finally:
+        for p in (expired_path, active_path, session_bound_path):
             if os.path.exists(p):
                 os.unlink(p)

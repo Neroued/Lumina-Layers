@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { useConverterStore } from "../stores/converterStore";
+import { useConverterStore } from "../stores/converter";
 
 /**
  * Auto-trigger preview when preconditions are met.

@@ -230,7 +230,7 @@ st_any_schema = (
 
 # ===========================================================================
 # Property 1: Schema Serialization Round-Trip
-# Feature: fastapi-backend-scaffold, Property 1: Schema 序列化 Round-Trip
+# Feature: fastapi-backend-scaffold, Property 1: Schema 搴忓垪鍖?Round-Trip
 # ===========================================================================
 
 
@@ -253,7 +253,7 @@ def test_schema_serialization_round_trip(instance: BaseModel) -> None:
 
 # ===========================================================================
 # Property 2: Valid Data Passes Validation
-# Feature: fastapi-backend-scaffold, Property 2: 有效数据验证通过
+# Feature: fastapi-backend-scaffold, Property 2: 鏈夋晥鏁版嵁楠岃瘉閫氳繃
 # ===========================================================================
 
 
@@ -284,7 +284,7 @@ def test_valid_data_passes_validation(instance: BaseModel) -> None:
 
 # Table of (Model, field_name, min_val, max_val) for constrained numeric fields
 CONSTRAINED_FIELDS: List[Tuple[Type[BaseModel], str, float, float]] = [
-    (ConvertPreviewRequest, "target_width_mm", 10, 400),
+    (ConvertPreviewRequest, "target_width_mm", 10, 9999),
     (ConvertPreviewRequest, "bg_tol", 0, 150),
     (ConvertPreviewRequest, "quantize_colors", 8, 256),
     (ConvertGenerateRequest, "spacer_thick", 0.2, 3.5),

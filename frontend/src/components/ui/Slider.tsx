@@ -94,7 +94,7 @@ export default function Slider({
           {label}
         </label>
       )}
-      <div className="flex items-center gap-2 rounded-2xl border border-slate-200/80 bg-white/58 px-2 py-1.5 shadow-[var(--shadow-control)] dark:border-slate-700/80 dark:bg-slate-900/48">
+      <div className="flex items-center gap-2 rounded-2xl border border-slate-200/80 bg-slate-100/70 px-2 py-1.5 shadow-[var(--shadow-control)] dark:border-slate-700/80 dark:bg-slate-900/48">
         <input
           type="range"
           min={min}
@@ -120,7 +120,7 @@ export default function Slider({
             onBlur={handleBlur}
             onKeyDown={handleKeyDown}
             style={{ width: inputWidth }}
-            className="rounded-lg border border-slate-200/80 bg-white/90 px-1.5 py-1 text-center text-sm tabular-nums text-slate-700 shadow-[var(--shadow-control)] focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400/20 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700/80 dark:bg-slate-900 dark:text-slate-100"
+            className="rounded-lg border border-slate-200/80 bg-slate-100/90 px-1.5 py-1 text-center text-sm tabular-nums text-slate-700 shadow-[var(--shadow-control)] focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400/20 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700/80 dark:bg-slate-900 dark:text-slate-100"
             aria-label={`${label} value`}
           />
           {unit && (

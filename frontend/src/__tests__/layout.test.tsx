@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import App from "../App";
 import { useWidgetStore } from "../stores/widgetStore";
 
@@ -48,12 +48,35 @@ describe("Widget Workspace Layout", () => {
     expect(screen.getByTestId("panel-controls-toggle")).toBeInTheDocument();
   });
 
-  it("renders TabNavBar with tab buttons", () => {
+  it("renders grouped top-level tabs in TabNavBar", () => {
     render(<App />);
     expect(screen.getByTestId("tab-converter")).toBeInTheDocument();
-    expect(screen.getByTestId("tab-calibration")).toBeInTheDocument();
-    expect(screen.getByTestId("tab-extractor")).toBeInTheDocument();
-    expect(screen.getByTestId("tab-lut-manager")).toBeInTheDocument();
-    expect(screen.getByTestId("tab-five-color")).toBeInTheDocument();
+    expect(screen.getByTestId("tab-lut-management")).toBeInTheDocument();
+    expect(screen.getByTestId("tab-vectorizer")).toBeInTheDocument();
+    expect(screen.getByTestId("tab-settings")).toBeInTheDocument();
+
+    expect(screen.queryByTestId("tab-calibration")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("tab-extractor")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("tab-lut-manager")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("tab-five-color")).not.toBeInTheDocument();
+  });
+
+  it("shows LUT sub-tabs and switches to original target tabs", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId("tab-lut-management"));
+    expect(screen.getByTestId("subtab-calibration")).toBeInTheDocument();
+    expect(screen.getByTestId("subtab-extractor")).toBeInTheDocument();
+    expect(screen.getByTestId("subtab-lut-manager")).toBeInTheDocument();
+    expect(screen.getByTestId("subtab-five-color")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("subtab-extractor"));
+    expect(useWidgetStore.getState().activeTab).toBe("extractor");
+
+    fireEvent.click(screen.getByTestId("subtab-lut-manager"));
+    expect(useWidgetStore.getState().activeTab).toBe("lut-manager");
+
+    fireEvent.click(screen.getByTestId("subtab-five-color"));
+    expect(useWidgetStore.getState().activeTab).toBe("five-color");
   });
 });

@@ -117,14 +117,16 @@ export default function Dropdown({
             open && "rotate-180"
           )}
         >
-          v
+          <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.1 1.02l-4.25 4.52a.75.75 0 01-1.1 0L5.21 8.25a.75.75 0 01.02-1.04z" />
+          </svg>
         </span>
       </button>
 
       {open && menuPos && createPortal(
         <div
           ref={menuRef}
-          className="z-[1200] overflow-hidden rounded-[24px] border border-slate-200/85 bg-white/96 shadow-[var(--shadow-control)] backdrop-blur-xl dark:border-slate-700/85 dark:bg-slate-950/96"
+          className="z-[1200] overflow-hidden rounded-[24px] border border-slate-200/85 bg-slate-100/96 shadow-[var(--shadow-control)] backdrop-blur-xl dark:border-slate-700/85 dark:bg-slate-950/96"
           style={{
             position: "fixed",
             top: `${menuPos.top}px`,

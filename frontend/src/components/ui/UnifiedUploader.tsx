@@ -179,7 +179,7 @@ export default function UnifiedUploader({
         <div className="rounded-2xl p-2 bg-[length:16px_16px] bg-[image:linear-gradient(45deg,_#e0e0e0_25%,_transparent_25%),linear-gradient(-45deg,_#e0e0e0_25%,_transparent_25%),linear-gradient(45deg,_transparent_75%,_#e0e0e0_75%),linear-gradient(-45deg,_transparent_75%,_#e0e0e0_75%)] dark:bg-[image:linear-gradient(45deg,_#374151_25%,_transparent_25%),linear-gradient(-45deg,_#374151_25%,_transparent_25%),linear-gradient(45deg,_transparent_75%,_#374151_75%),linear-gradient(-45deg,_transparent_75%,_#374151_75%)] bg-[position:0_0,0_8px,8px_-8px,-8px_0px]">
           <img
             src={singlePreview}
-            alt="preview"
+            alt={t("common_preview_alt")}
             className="max-w-full rounded-2xl object-contain"
               style={{ maxHeight: "clamp(10rem, 22vh, 18rem)" }}
           />

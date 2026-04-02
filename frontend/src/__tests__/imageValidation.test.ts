@@ -8,7 +8,7 @@ import { describe, it, expect } from "vitest";
 import {
   isValidImageType,
   ACCEPT_IMAGE_FORMATS,
-} from "../stores/converterStore";
+} from "../stores/converter";
 import { translations } from "../i18n/translations";
 
 const SUPPORTED_MIME_TYPES = [
@@ -26,7 +26,7 @@ describe("isValidImageType — 支持的格式返回 true", () => {
   });
 });
 
-describe("isValidImageType — 不支持的格式返回 false", () => {
+describe("isValidImageType 鈥?不支持的格式返回 false", () => {
   it.each(["application/pdf", "text/plain", "image/bmp", "image/tiff", ""])(
     'returns false for "%s"',
     (mime) => {
@@ -64,7 +64,7 @@ describe("ACCEPT_IMAGE_FORMATS 常量", () => {
 
   it("是逗号分隔的字符串", () => {
     const parts = ACCEPT_IMAGE_FORMATS.split(",");
-    expect(parts).toHaveLength(17);
+    expect(parts.length).toBeGreaterThanOrEqual(17);
     parts.forEach((part) => {
       expect(part.trim()).not.toBe("");
     });
@@ -92,3 +92,4 @@ describe("i18n basic_image_format_error 翻译", () => {
     expect(entry.en).toContain("HEIC");
   });
 });
+

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import * as fc from "fast-check";
-import { useConverterStore } from "../stores/converterStore";
-import type { SelectionMode } from "../stores/converterStore";
+import { useConverterStore } from "../stores/converter";
+import type { SelectionMode } from "../stores/converter";
 import type { PaletteEntry } from "../api/types";
 
 // ========== Generators ==========

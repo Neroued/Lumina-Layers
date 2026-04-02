@@ -9,8 +9,11 @@ Extracted from _process_high_fidelity_mode Step 2.
 """
 
 import time
+import logging
 import numpy as np
 import cv2
+
+_log = logging.getLogger(__name__)
 
 
 def apply_median_filter(rgb: np.ndarray, kernel_size: int) -> np.ndarray:
@@ -27,10 +30,10 @@ def apply_median_filter(rgb: np.ndarray, kernel_size: int) -> np.ndarray:
     t0 = time.time()
     if kernel_size > 0:
         kernel_size = kernel_size if kernel_size % 2 == 1 else kernel_size + 1
-        print(f"[IMAGE_PROCESSOR] Applying median blur (kernel={kernel_size})...")
+        _log.info(f"[IMAGE_PROCESSOR] Applying median blur (kernel={kernel_size})...")
         rgb_processed = cv2.medianBlur(rgb, kernel_size)
     else:
-        print(f"[IMAGE_PROCESSOR] Median blur disabled (kernel=0)")
+        _log.info(f"[IMAGE_PROCESSOR] Median blur disabled (kernel=0)")
         rgb_processed = rgb
-    print(f"[IMAGE_PROCESSOR] ⏱️ Median blur: {time.time() - t0:.2f}s")
+    _log.info(f"[IMAGE_PROCESSOR] ⏱️ Median blur: {time.time() - t0:.2f}s")
     return rgb_processed

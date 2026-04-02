@@ -1,4 +1,4 @@
-import { useConverterStore } from "../../stores/converterStore";
+import { useConverterStore } from "../../stores/converter";
 import { useI18n } from "../../i18n/context";
 
 export default function BedSizeSelector() {
@@ -6,7 +6,7 @@ export default function BedSizeSelector() {
   const bed_label = useConverterStore((s) => s.bed_label);
 
   return (
-    <div className="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-white/60 px-3 py-2 dark:border-slate-700/60 dark:bg-slate-900/50">
+    <div className="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-slate-100/70 px-3 py-2 dark:border-slate-700/60 dark:bg-slate-900/50">
       <span className="text-[clamp(0.65rem,0.85vw,0.75rem)] font-medium text-slate-500 dark:text-slate-400">
         {t("bed_size_label")}
       </span>

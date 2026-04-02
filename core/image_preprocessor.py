@@ -7,12 +7,15 @@ Independent module that doesn't modify existing image_processing.py.
 
 import os
 import tempfile
+import logging
 from dataclasses import dataclass
 from typing import Tuple, Optional
 
 import cv2
 import numpy as np
 from PIL import Image
+
+log = logging.getLogger(__name__)
 
 # HEIC/HEIF support (optional dependency)
 try:
@@ -22,7 +25,7 @@ try:
     HAS_HEIF = True
 except ImportError:
     HAS_HEIF = False
-    print("[WARN] [HEIC] pillow-heif not installed. HEIC/HEIF support disabled.")
+    log.info("[WARN] [HEIC] pillow-heif not installed. HEIC/HEIF support disabled.")
 
 # RAW support (optional dependency)
 try:
@@ -31,11 +34,20 @@ try:
     HAS_RAW = True
 except ImportError:
     HAS_RAW = False
-    print("[WARN] [RAW] rawpy not installed. Camera RAW support disabled.")
+    log.info("[WARN] [RAW] rawpy not installed. Camera RAW support disabled.")
 
 RAW_EXTENSIONS: set[str] = {
-    ".dng", ".cr2", ".cr3", ".nef", ".arw",
-    ".orf", ".rw2", ".raf", ".pef", ".srw", ".raw",
+    ".dng",
+    ".cr2",
+    ".cr3",
+    ".nef",
+    ".arw",
+    ".orf",
+    ".rw2",
+    ".raf",
+    ".pef",
+    ".srw",
+    ".raw",
 }
 
 
@@ -83,8 +95,25 @@ class ImagePreprocessor:
 
     # Supported formats
     SUPPORTED_FORMATS = {
-        "JPEG", "JPG", "PNG", "GIF", "BMP", "WEBP", "HEIF", "HEIC",
-        "DNG", "CR2", "CR3", "NEF", "ARW", "ORF", "RW2", "RAF", "PEF", "SRW", "RAW",
+        "JPEG",
+        "JPG",
+        "PNG",
+        "GIF",
+        "BMP",
+        "WEBP",
+        "HEIF",
+        "HEIC",
+        "DNG",
+        "CR2",
+        "CR3",
+        "NEF",
+        "ARW",
+        "ORF",
+        "RW2",
+        "RAF",
+        "PEF",
+        "SRW",
+        "RAW",
     }
 
     @staticmethod
@@ -109,8 +138,7 @@ class ImagePreprocessor:
         if os.path.splitext(image_path)[1].lower() in RAW_EXTENSIONS:
             if not HAS_RAW:
                 raise ValueError(
-                    "RAW format detected but rawpy is not installed. "
-                    "Please install it: pip install rawpy"
+                    "RAW format detected but rawpy is not installed. " "Please install it: pip install rawpy"
                 )
             return ext_upper if ext_upper else "RAW"
 
@@ -128,7 +156,7 @@ class ImagePreprocessor:
                         return "HEIF"
                     raise ValueError(f"Cannot detect image format: {image_path}")
                 return fmt.upper()
-        except Exception as e:
+        except (OSError, ValueError, TypeError) as e:
             # Check if it's a HEIC file that can't be opened due to missing pillow-heif
             ext = os.path.splitext(image_path)[1].upper().lstrip(".")
             if ext in ("HEIC", "HEIF") and not HAS_HEIF:
@@ -168,7 +196,7 @@ class ImagePreprocessor:
         try:
             with Image.open(image_path) as img:
                 return img.size  # (width, height)
-        except Exception as e:
+        except (OSError, ValueError, TypeError) as e:
             raise ValueError(f"Cannot read image dimensions: {e}")
 
     @staticmethod
@@ -228,7 +256,7 @@ class ImagePreprocessor:
                 img.save(output_path, "PNG")
                 return output_path
 
-        except Exception as e:
+        except (OSError, ValueError, TypeError) as e:
             raise ValueError(f"Cannot convert image to PNG: {e}")
 
     @staticmethod
@@ -306,7 +334,7 @@ class ImagePreprocessor:
                 cropped.save(output_path, "PNG")
                 return output_path
 
-        except Exception as e:
+        except (OSError, ValueError, TypeError) as e:
             raise ValueError(f"Cannot crop image: {e}")
 
     @staticmethod
@@ -374,7 +402,7 @@ class ImagePreprocessor:
         """
         分析图片，推荐最佳量化颜色数。
 
-        委托给 ColorAnalyzer 模块处理。
+        使用 ColorAnalyzer 进行分析
 
         Args:
             image_path: 图片路径
@@ -382,9 +410,9 @@ class ImagePreprocessor:
 
         Returns:
             dict: {
-                'recommended': 推荐颜色数,
-                'max_safe': 最大安全颜色数（超过会有噪点）,
-                'unique_colors': 独特颜色数,
+                'recommended': 推荐颜色
+                'max_safe': 最大安全颜色
+                'unique_colors': 独立颜色
                 'complexity_score': 复杂度评分 (0-100)
             }
         """

@@ -64,11 +64,22 @@ def worker_generate_preview(
 
     from config import ModelingMode
     from core.converter import generate_preview_cached
+    from api.structured_logging import get_logger
+
+    log = get_logger(__name__)
 
     # Convert string modeling_mode to enum
     mode_enum = ModelingMode(modeling_mode)
 
-    print(f"[Worker preview] hue_weight={hue_weight}, chroma_gate={chroma_gate}, lut_path={lut_path}")
+    log.info(
+        "Worker preview started",
+        extra={
+            "event": "worker_preview_started",
+            "hue_weight": hue_weight,
+            "chroma_gate": chroma_gate,
+            "lut_path": lut_path,
+        },
+    )
     try:
         preview_img, cache_data, status_msg = generate_preview_cached(
             image_path=image_path,
@@ -84,11 +95,15 @@ def worker_generate_preview(
             hue_weight=hue_weight,
             chroma_gate=chroma_gate,
         )
-    except Exception as e:
-        import traceback
-
-        print(f"[Worker preview] ERROR: {e}")
-        traceback.print_exc()
+    except (ValueError, TypeError, KeyError, OSError, RuntimeError) as e:
+        log.exception(
+            "Worker preview failed",
+            extra={
+                "event": "worker_preview_failed",
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+            },
+        )
         raise
 
     result: dict = {
@@ -125,10 +140,14 @@ def worker_generate_preview(
         result["cache_data_path"] = cache_path
     _t_pkl = _time.perf_counter() - _t
 
-    print(
-        f"[Worker preview] Serialization: png_save={_t_png:.2f}s, "
-        f"pickle_dump={_t_pkl:.2f}s, "
-        f"total={_time.perf_counter() - _t_serial_start:.2f}s"
+    log.info(
+        "Worker preview serialization complete",
+        extra={
+            "event": "worker_preview_serialization_done",
+            "png_save_ms": round(_t_png * 1000, 3),
+            "pickle_dump_ms": round(_t_pkl * 1000, 3),
+            "duration_ms": round((_time.perf_counter() - _t_serial_start) * 1000, 3),
+        },
     )
 
     return result

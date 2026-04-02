@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { useConverterStore } from "../../stores/converterStore";
+import { useConverterStore } from "../../stores/converter";
 import type { AutoHeightMode } from "../../api/types";
 import { ModelingMode } from "../../api/types";
 import Checkbox from "../ui/Checkbox";

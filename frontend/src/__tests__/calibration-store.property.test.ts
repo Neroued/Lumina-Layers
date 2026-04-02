@@ -1,6 +1,6 @@
 import { describe, it } from "vitest";
 import * as fc from "fast-check";
-import { clampValue } from "../stores/converterStore";
+import { clampValue } from "../stores/converter";
 
 // **Validates: Requirements 6.3**
 describe("Feature: calibration-tab-integration, Property 4: clampValue 通用正确性", () => {
@@ -63,7 +63,7 @@ describe("Feature: calibration-tab-integration, Property 5: Store setter 钳制�
   });
 });
 
-import { useConverterStore } from "../stores/converterStore";
+import { useConverterStore } from "../stores/converter";
 import {
   CalibrationColorMode,
   BackingColor,

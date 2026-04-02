@@ -226,10 +226,14 @@ def merge_luts_endpoint(request: MergeRequest) -> MergeResponse:
                 # 回退：使用主 LUT 的 metadata
                 _, _, merged_metadata = LUTManager.load_lut_with_metadata(primary_path)
             entry_sources = stats.get("entry_sources")
+            json_stacks = LUTMerger.reindex_canonical_stacks_for_palette(
+                merged_stacks,
+                merged_metadata.palette,
+            )
             LUTManager.save_keyed_json(
                 output_path,
                 merged_rgb,
-                merged_stacks,
+                json_stacks,
                 merged_metadata,
                 sources=entry_sources,
             )

@@ -36,8 +36,8 @@ vi.stubGlobal("Image", class {
   naturalHeight = 100;
 });
 
-import { useConverterStore } from "../stores/converterStore";
-import type { PendingReplacement, SelectionMode } from "../stores/converterStore";
+import { useConverterStore } from "../stores/converter";
+import type { PendingReplacement, SelectionMode } from "../stores/converter";
 
 // ========== Generators ==========
 

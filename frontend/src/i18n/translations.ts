@@ -1179,6 +1179,10 @@ export const translations: Record<string, Record<"zh" | "en", string>> = {
     zh: "图像转换",
     en: "Converter",
   },
+  "tab.lutManagement": {
+    zh: "LUT管理",
+    en: "LUT Management",
+  },
   "tab.calibration": {
     zh: "校准",
     en: "Calibration",
@@ -1429,6 +1433,14 @@ export const translations: Record<string, Record<"zh" | "en", string>> = {
   about_close_notification: {
     zh: "关闭通知",
     en: "Close notification",
+  },
+  about_cache_clear_success: {
+    zh: "已清理 {deleted_files} 个缓存文件，释放 {freed}",
+    en: "Cleared {deleted_files} cached files, freed {freed}",
+  },
+  about_cache_clear_failed: {
+    zh: "缓存清理失败",
+    en: "Cache clear failed",
   },
 
   // ==================== Calibration Panel ====================
@@ -2847,5 +2859,86 @@ export const translations: Record<string, Record<"zh" | "en", string>> = {
   "vec.hint_min_hole_area": {
     zh: "面积小于此值的孔洞会被填充。用于去除区域内的微小空洞。",
     en: "Holes smaller than this area are filled in. Used to remove tiny voids inside regions.",
+  },
+
+  app_logo_alt: {
+    zh: "Lumina Studio 标志",
+    en: "Lumina Studio logo",
+  },
+  common_preview_alt: {
+    zh: "预览图片",
+    en: "Preview image",
+  },
+  common_unit_mm: {
+    zh: "毫米",
+    en: "mm",
+  },
+  common_unit_px: {
+    zh: "像素",
+    en: "px",
+  },
+  crop_modal_axis_x: {
+    zh: "X 轴",
+    en: "X",
+  },
+  crop_modal_axis_y: {
+    zh: "Y 轴",
+    en: "Y",
+  },
+  action_generate_model_title: {
+    zh: "生成 3D 模型",
+    en: "Generate 3D Model",
+  },
+  action_generate_model_desc: {
+    zh: "根据当前图像和 LUT 生成可打印的 3MF 模型文件。",
+    en: "Generate a printable 3MF model from current image and LUT.",
+  },
+  action_zoom_icon: {
+    zh: "缩放",
+    en: "Zoom",
+  },
+  action_layer_prev_arrow: {
+    zh: "<",
+    en: "<",
+  },
+  action_layer_next_arrow: {
+    zh: ">",
+    en: ">",
+  },
+  action_close_overlay: {
+    zh: "关闭预览",
+    en: "Close preview",
+  },
+  action_close_icon: {
+    zh: "✕",
+    en: "✕",
+  },
+  five_color_combinations_loaded: {
+    zh: "已加载 {count} 个有效组合",
+    en: "{count} valid combinations loaded",
+  },
+  five_color_combinations_hint: {
+    zh: "灰色选项表示当前选择路径下不可用的组合。",
+    en: "Gray items are unavailable for the current selection path.",
+  },
+  five_color_error_close_icon: {
+    zh: "✕",
+    en: "✕",
+  },
+  five_color_not_found_suggestions_title: {
+    zh: "建议操作：",
+    en: "Suggestions:",
+  },
+  five_color_not_found_tip_reverse: {
+    zh: "尝试使用反转操作来反转颜色顺序。",
+    en: "Try the reverse order with the reverse action.",
+  },
+  five_color_not_found_tip_change: {
+    zh: "尝试不同的颜色组合。",
+    en: "Try a different color combination.",
+  },
+  five_color_not_found_tip_gray: {
+    zh: "灰色选项表示该位置上的无效组合。",
+    en: "Gray options indicate invalid combinations at that position.",
   },
 };

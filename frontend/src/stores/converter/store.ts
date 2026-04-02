@@ -8,12 +8,12 @@ import type {
   PaletteEntry,
   AutoHeightMode,
   BatchResponse,
-} from "../api/types";
+} from "../../api/types";
 import {
   ColorMode as ColorModeEnum,
   ModelingMode as ModelingModeEnum,
   StructureMode as StructureModeEnum,
-} from "../api/types";
+} from "../../api/types";
 import {
   fetchLutList as apiFetchLutList,
   convertPreview as apiConvertPreview,
@@ -32,14 +32,17 @@ import {
   cleanupSessionFiles as apiCleanupSessionFiles,
   beaconCleanupSessionFiles,
   uploadLut as apiUploadLut,
-} from "../api/converter";
-import type { LutColorEntry, LutInfo } from "../api/types";
+} from "../../api/converter";
+import type { LutColorEntry, LutInfo } from "../../api/types";
 import {
   computeAutoHeightMap,
   colorRemapToReplacementRegions,
-} from "../utils/colorUtils";
-import { useSettingsStore } from "./settingsStore";
-import { uploadImagePreview } from "../api/system";
+} from "../../utils/colorUtils";
+import { normalizeResourceUrl } from "../../utils/resourceUrl";
+import { useSettingsStore } from "../settingsStore";
+import { uploadImagePreview } from "../../api/system";
+
+type LuminaWindow = Window & { __luminaGenerateStart?: number };
 
 export const RAW_EXTENSIONS_CONVERTER = new Set([
   ".dng",
@@ -81,7 +84,7 @@ export interface RegionData {
 // ========== Pending Replacement Types ==========
 
 export interface PendingReplacement {
-  sourceHex: string; // 原色 hex（不带 #）
+  sourceHex: string; // 原色 hex锛堜笉甯?#锛?
   targetHex: string; // 目标色 hex（不带 #）
   mode: SelectionMode; // 触发时的选择模式
   sourceColors?: string[]; // select-all 批量模式下的多个源色
@@ -450,7 +453,7 @@ function loadLutName(): string {
 
 // ========== Default State ==========
 
-const DEFAULT_STATE: ConverterState = {
+export const DEFAULT_STATE: ConverterState = {
   imageFile: null,
   imagePreviewUrl: null,
   aspectRatio: null,
@@ -522,7 +525,7 @@ const DEFAULT_STATE: ConverterState = {
   lutColors: [],
   lutColorsLoading: false,
   lutColorsLutName: "",
-  bed_label: "256×256 mm",
+  bed_label: "256脳256 mm",
   bedSizes: [],
   bedSizesLoading: false,
   batchMode: false,
@@ -551,6 +554,40 @@ let _previewAbortController: AbortController | null = null;
 
 // ========== Client-side timing log (writes to server log) ==========
 let _generateStartTime: number | null = null;
+const _GENERATE_TIMER_LABEL = "[LUMINA] generate";
+let _generateTimerActive = false;
+
+function _startGenerateTimer(): void {
+  if (_generateTimerActive) {
+    try {
+      console.timeEnd(_GENERATE_TIMER_LABEL);
+    } catch {
+      // Ignore missing timer in non-browser/test environments.
+    }
+  }
+  console.time(_GENERATE_TIMER_LABEL);
+  _generateTimerActive = true;
+}
+
+function _logGenerateTimer(message: string): void {
+  if (!_generateTimerActive) return;
+  try {
+    console.timeLog(_GENERATE_TIMER_LABEL, message);
+  } catch {
+    // Ignore when console.timeLog is unavailable.
+  }
+}
+
+function _endGenerateTimer(): void {
+  if (!_generateTimerActive) return;
+  try {
+    console.timeEnd(_GENERATE_TIMER_LABEL);
+  } catch {
+    // Ignore missing timer in non-browser/test environments.
+  }
+  _generateTimerActive = false;
+}
+
 function _clientLog(label: string) {
   const elapsed = _generateStartTime != null ? performance.now() - _generateStartTime : null;
   const msg = elapsed != null ? `${label} (+${elapsed.toFixed(0)}ms)` : label;
@@ -737,7 +774,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
     setSeparateBacking: (enabled: boolean) =>
       set({ separate_backing: enabled }),
 
-    // --- 挂件环 ---
+    // --- 鎸備欢鐜?---
     setAddLoop: (enabled: boolean) =>
       set({ add_loop: enabled, threemfDiskPath: null, downloadUrl: null }),
     setLoopWidth: (width: number) =>
@@ -873,7 +910,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
     setPalette: (entries: PaletteEntry[]) => set({ palette: entries }),
 
     // --- 颜色选择模式 ---
-    // current: 单区域替换（3D 点击 → region-detect → 只替换该连通区域）
+    // current: 单区域替换（3D 点击 → region-detect → 可替换该连通区域）
     // select-all: 全局单色替换（选一个颜色 → 全图该颜色都替换）
     // multi-select: 多区域替换（3D 点击累积多个连通区域 → 批量替换）
     // region: 保留的局部区域模式
@@ -983,17 +1020,17 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
             regionId: response.region_id,
             colorHex: response.color_hex,
             pixelCount: response.pixel_count,
-            previewUrl: response.preview_url,
+            previewUrl: normalizeResourceUrl(response.preview_url) ?? response.preview_url,
             contours: response.contours ?? null,
             clickX: x,
             clickY: y,
           },
           selectedColor: response.color_hex.replace(/^#/, ""),
-          previewImageUrl: `${response.preview_url}`,
+          previewImageUrl: normalizeResourceUrl(response.preview_url),
         });
       } catch (err) {
         set({
-          error: err instanceof Error ? err.message : "连通区域检测失败",
+          error: err instanceof Error ? err.message : "Region detect failed",
         });
       }
     },
@@ -1011,7 +1048,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           regionId: response.region_id,
           colorHex: response.color_hex,
           pixelCount: response.pixel_count,
-          previewUrl: response.preview_url,
+          previewUrl: normalizeResourceUrl(response.preview_url) ?? response.preview_url,
           contours: response.contours ?? null,
           clickX: x,
           clickY: y,
@@ -1037,25 +1074,9 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         }
       } catch (err) {
         set({
-          error: err instanceof Error ? err.message : "连通区域检测失败",
+          error: err instanceof Error ? err.message : "Region detect failed",
         });
       }
-    },
-
-    // --- 移除已选区域 ---
-    removeRegionFromSelection: (regionId: string) => {
-      set((state) => {
-        const next = state.selectedRegions.filter(
-          (r) => r.regionId !== regionId,
-        );
-        const lastRegion = next.length > 0 ? next[next.length - 1] : null;
-        return {
-          selectedRegions: next,
-          selectedColor: lastRegion
-            ? lastRegion.colorHex.replace(/^#/, "")
-            : null,
-        };
-      });
     },
 
     // --- 连通区域替换 ---
@@ -1066,14 +1087,14 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         return;
       }
       if (!state.regionData) {
-        set({ error: "请先选择一个连通区域" });
+        set({ error: "Please select a connected region first" });
         return;
       }
       set({ replacePreviewLoading: true, error: null });
       try {
         const response = await apiRegionReplace(state.sessionId, `#${newHex}`);
         const updates: Partial<ConverterState> = {
-          previewImageUrl: `${response.preview_url}`,
+          previewImageUrl: normalizeResourceUrl(response.preview_url),
           regionData: null,
           replacePreviewLoading: false,
           threemfDiskPath: null,
@@ -1082,7 +1103,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
 
         // 更新 3D 预览 GLB URL（仅当后端返回非空 URL 时）
         if (response.preview_glb_url) {
-          updates.previewGlbUrl = `${response.preview_glb_url}`;
+          updates.previewGlbUrl = normalizeResourceUrl(response.preview_glb_url);
         }
         // preview_glb_url 为 null 时不清除现有 previewGlbUrl
 
@@ -1143,10 +1164,10 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
                 `#${pending.targetHex}`,
               );
               const updates: Partial<ConverterState> = {
-                previewImageUrl: `${response.preview_url}`,
+                previewImageUrl: normalizeResourceUrl(response.preview_url),
               };
               if (response.preview_glb_url) {
-                updates.previewGlbUrl = `${response.preview_glb_url}`;
+                updates.previewGlbUrl = normalizeResourceUrl(response.preview_glb_url);
               }
               if (response.color_contours) {
                 updates.colorContours = response.color_contours;
@@ -1162,7 +1183,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           } catch (err) {
             set({
               replacePreviewLoading: false,
-              error: err instanceof Error ? err.message : "多区域颜色替换失败",
+              error: err instanceof Error ? err.message : "Multi-region color replacement failed",
             });
           }
           break;
@@ -1312,7 +1333,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       } catch (err) {
         set({
           isLoading: false,
-          error: err instanceof Error ? err.message : "高度图上传失败",
+          error: err instanceof Error ? err.message : "Heightmap upload failed",
         });
       }
     },
@@ -1472,9 +1493,9 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           signal,
         );
         // 后端返回 JSON，preview_url 是相对路径如 /api/files/xxx
-        const previewUrl = `${response.preview_url}`;
+        const previewUrl = normalizeResourceUrl(response.preview_url) ?? response.preview_url;
         const glbUrl = response.preview_glb_url
-          ? `${response.preview_glb_url}`
+          ? normalizeResourceUrl(response.preview_glb_url)
           : null;
         // Normalize palette hex values: strip leading '#' for frontend consistency
         const normalizedPalette = (response.palette ?? []).map((e) => ({
@@ -1536,9 +1557,9 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
 
       set({ isGenerating: true, error: null });
       _generateStartTime = performance.now();
-      (window as any).__luminaGenerateStart = _generateStartTime;
+      (window as LuminaWindow).__luminaGenerateStart = _generateStartTime;
       _clientLog('generate: click');
-      console.time('[LUMINA] generate');
+      _startGenerateTimer();
       try {
         // 合并 colorRemapMap 转换的 replacement_regions 与已有的 replacement_regions
         let mergedReplacements: ColorReplacementItem[] | undefined =
@@ -1627,10 +1648,10 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           return null;
         }
 
-        console.timeLog('[LUMINA] generate', 'request sent');
+        _logGenerateTimer('request sent');
         _clientLog('generate: request sent');
         const response = await apiConvertGenerate(state.sessionId, baseParams);
-        console.timeLog('[LUMINA] generate', 'response received');
+        _logGenerateTimer('response received');
         _clientLog('generate: response received');
         const modelUrl = response.preview_3d_url
           ? `${response.preview_3d_url}`
@@ -1643,7 +1664,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
             ? `${response.download_url}`
             : null,
         });
-        console.timeLog('[LUMINA] generate', 'UI unlocked (isGenerating=false, modelUrl set)');
+        _logGenerateTimer('UI unlocked (isGenerating=false, modelUrl set)');
         _clientLog('generate: UI unlocked');
         return modelUrl;
       } catch (err) {
@@ -1652,6 +1673,8 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           error: err instanceof Error ? err.message : "生成失败",
         });
         return null;
+      } finally {
+        _endGenerateTimer();
       }
     },
 
@@ -1738,7 +1761,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       } catch (err) {
         set({
           autoDetectColorsLoading: false,
-          error: err instanceof Error ? err.message : "自动检测失败",
+          error: err instanceof Error ? err.message : "Auto color detection failed",
         });
       }
     },
@@ -1982,14 +2005,14 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           `#${origHex}`,
           `#${newHex}`,
         );
-        const updates: Record<string, unknown> = {
+        const updates: Partial<ConverterState> = {
           replacePreviewLoading: false,
-          previewImageUrl: `${response.preview_url}`,
+          previewImageUrl: normalizeResourceUrl(response.preview_url),
         };
         if (response.preview_3d_url) {
-          updates.previewGlbUrl = `${response.preview_3d_url}`;
+          updates.previewGlbUrl = normalizeResourceUrl(response.preview_3d_url);
         }
-        set(updates as any);
+        set(updates);
       } catch (err) {
         // 回滚 colorRemapMap 到操作前状态
         const currentHistory = _get().remapHistory;
@@ -2033,19 +2056,19 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
             selectedColor,
             replacementColor,
           );
-          lastPreviewUrl = `${response.preview_url}`;
+          lastPreviewUrl = normalizeResourceUrl(response.preview_url);
           if (response.preview_3d_url) {
-            lastGlbUrl = `${response.preview_3d_url}`;
+            lastGlbUrl = normalizeResourceUrl(response.preview_3d_url);
           }
         }
-        const updates: Record<string, unknown> = {
+        const updates: Partial<ConverterState> = {
           replacePreviewLoading: false,
           previewImageUrl: lastPreviewUrl,
         };
         if (lastGlbUrl) {
           updates.previewGlbUrl = lastGlbUrl;
         }
-        set(updates as any);
+        set(updates);
       } catch (err) {
         set({
           replacePreviewLoading: false,
@@ -2054,7 +2077,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       }
     },
 
-    // --- 完整流水线（preview → generate） ---
+    // --- 完整流水线（preview → generate）---
     submitFullPipeline: async () => {
       const state = _get();
 
@@ -2107,7 +2130,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       if (!sessionId) return;
       set({ layerImagesLoading: true });
       try {
-        const { fetchLayerImages: apiFetch } = await import("../api/converter");
+          const { fetchLayerImages: apiFetch } = await import("../../api/converter");
         const res = await apiFetch(sessionId);
         set({
           layerImages: res.layers,
@@ -2142,3 +2165,5 @@ if (typeof window !== "undefined") {
     }
   });
 }
+
+

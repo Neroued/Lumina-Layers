@@ -1,80 +1,76 @@
-import { motion } from "framer-motion";
-import { useEffect, useMemo } from "react";
-import { useFiveColorStore } from "../stores/fiveColorStore";
-import { useConverterStore } from "../stores/converterStore";
-import Dropdown from "./ui/Dropdown";
-import { useWorkspaceMode } from "../hooks/useWorkspaceMode";
-import { useI18n } from "../i18n/context";
-import FiveColorCanvas from "./FiveColorCanvas";
-import Button from "./ui/Button";
+import { motion } from "framer-motion"
+import { useEffect, useMemo } from "react"
+import { useFiveColorStore } from "../stores/fiveColorStore"
+import { useConverterStore } from "../stores/converter"
+import Dropdown from "./ui/Dropdown"
+import { useWorkspaceMode } from "../hooks/useWorkspaceMode"
+import { useI18n } from "../i18n/context"
+import FiveColorCanvas from "./FiveColorCanvas"
+import Button from "./ui/Button"
+import { UI_COLOR_TOKENS } from "../theme/uiTokens"
 import {
   PanelIntro,
   StatusBanner,
   resolvePanelSurfaceClass,
   resolveSectionCardClass,
-  resolveDesktopSplitLayoutClass,
-  desktopPrimaryColumnClass,
-  desktopSecondaryColumnClass,
-} from "./ui/panelPrimitives";
+} from "./ui/panelPrimitives"
 
 export default function FiveColorQueryPanel() {
-  const { t } = useI18n();
-  const workspace = useWorkspaceMode();
+  const { t } = useI18n()
+  const workspace = useWorkspaceMode()
   const {
     lutName, baseColors, combinations, selectedIndices, queryResult,
     isLoading, error,
     loadBaseColors, addSelection, removeLastSelection,
     clearSelection, reverseSelection, submitQuery, clearError,
-  } = useFiveColorStore();
+  } = useFiveColorStore()
 
-  const lutList = useConverterStore((s) => s.lutList);
-  const fetchLutList = useConverterStore((s) => s.fetchLutList);
+  const lutList = useConverterStore((s) => s.lutList)
+  const fetchLutList = useConverterStore((s) => s.fetchLutList)
 
   useEffect(() => {
-    if (lutList.length === 0) void fetchLutList();
-  }, [fetchLutList, lutList.length]);
+    if (lutList.length === 0) void fetchLutList()
+  }, [fetchLutList, lutList.length])
 
   const handleLutChange = (name: string) => {
     if (name) {
-      clearError();
-      void loadBaseColors(name);
+      clearError()
+      void loadBaseColors(name)
     }
-  };
+  }
 
-  const hasSelection = selectedIndices.length > 0;
-  const isFull = selectedIndices.length === 5;
+  const hasSelection = selectedIndices.length > 0
+  const isFull = selectedIndices.length === 5
 
   const validNextIndices = useMemo(() => {
-    if (isFull) return null;
-    // 如果 combinations 还没加载或者为空（说明不支持预判或者全可选），直接允许所有
-    if (!combinations || combinations.length === 0) return null;
-    
-    const len = selectedIndices.length;
-    const valid = new Set<number>();
-    
+    if (isFull) return null
+    if (!combinations || combinations.length === 0) return null
+
+    const len = selectedIndices.length
+    const valid = new Set<number>()
+
     for (const combo of combinations) {
-      let match = true;
+      let match = true
       for (let i = 0; i < len; i++) {
         if (combo[i] !== selectedIndices[i]) {
-          match = false;
-          break;
+          match = false
+          break
         }
       }
-      // 如果前面选的都匹配，就把这个组合在当前要选的位置（索引为 len）的颜色设为合法
       if (match && len < 5) {
-        valid.add(combo[len]);
+        valid.add(combo[len])
       }
     }
-    return Array.from(valid);
-  }, [combinations, selectedIndices, isFull]);
+    return Array.from(valid)
+  }, [combinations, selectedIndices, isFull])
 
   const canvasSlices = useMemo(
     () => selectedIndices.map((idx) => {
-      const c = baseColors.find((b) => b.index === idx);
-      return c ? { hex: c.hex, name: c.name } : { hex: "#666666", name: "?" };
+      const c = baseColors.find((b) => b.index === idx)
+      return c ? { hex: c.hex, name: c.name } : { hex: UI_COLOR_TOKENS.fiveColorFallbackHex, name: "?" }
     }),
     [selectedIndices, baseColors],
-  );
+  )
 
   return (
     <motion.div
@@ -109,19 +105,19 @@ export default function FiveColorQueryPanel() {
                   {combinations && combinations.length > 0 && (
                     <div className="flex flex-col gap-1 px-2">
                       <div className="text-xs text-blue-600 dark:text-blue-400 font-medium">
-                        ✓ 已加载 {combinations.length} 种有效组合
+                        {t("five_color_combinations_loaded").replace("{count}", String(combinations.length))}
                       </div>
                       <div className="text-xs text-slate-500 dark:text-slate-400">
-                        灰色颜色表示无法形成有效组合（智能过滤已启用）
+                        {t("five_color_combinations_hint")}
                       </div>
                     </div>
                   )}
                   <div className={`grid gap-2 ${workspace.isCompact ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-3 xl:grid-cols-2 2xl:grid-cols-3"}`}>
                     {baseColors.map((color) => {
-                      const isSelected = selectedIndices.includes(color.index);
-                      const selOrder = selectedIndices.indexOf(color.index);
-                      const isValidNext = validNextIndices === null || validNextIndices.includes(color.index);
-                      const disabled = isFull || !isValidNext;
+                      const isSelected = selectedIndices.includes(color.index)
+                      const selOrder = selectedIndices.indexOf(color.index)
+                      const isValidNext = validNextIndices === null || validNextIndices.includes(color.index)
+                      const disabled = isFull || !isValidNext
 
                       return (
                         <button
@@ -134,7 +130,7 @@ export default function FiveColorQueryPanel() {
                                 ? "border-blue-400/50 bg-blue-500/5 ring-2 ring-blue-500/10 opacity-60"
                                 : "border-blue-400 bg-blue-500/10 ring-2 ring-blue-500/20"
                               : isValidNext
-                                ? "border-transparent bg-white/45 hover:border-slate-300 hover:bg-white/75 dark:bg-slate-900/45 dark:hover:border-slate-600 dark:hover:bg-slate-900/75"
+                                ? "border-transparent bg-slate-100/60 hover:border-slate-300 hover:bg-slate-100/80 dark:bg-slate-900/45 dark:hover:border-slate-600 dark:hover:bg-slate-900/75"
                                 : "border-transparent bg-slate-100/30 opacity-40 grayscale"
                           } ${disabled ? "cursor-not-allowed" : "cursor-pointer"}`}
                           aria-label={t("five_color_select_color").replace("{name}", color.name).replace("{hex}", color.hex)}
@@ -152,7 +148,7 @@ export default function FiveColorQueryPanel() {
                             {color.name}
                           </span>
                         </button>
-                      );
+                      )
                     })}
                   </div>
                 </div>
@@ -199,9 +195,8 @@ export default function FiveColorQueryPanel() {
       </aside>
 
       <div className={`relative min-h-0 flex-1 overflow-hidden border-slate-200/70 dark:border-slate-800/80 flex flex-col bg-slate-50 dark:bg-slate-950 ${workspace.isWide ? "border-t 2xl:border-l 2xl:border-t-0" : "border-t"}`}>
-        {/* Top bar for results (similar to action bar or result banner) */}
         {(error || queryResult) && (
-          <div className="flex-none p-4 sm:p-5 lg:p-7 border-b border-slate-200/70 dark:border-slate-800/80 bg-white/50 dark:bg-slate-900/50">
+          <div className="flex-none border-b border-slate-200/70 bg-slate-100/70 p-4 sm:p-5 lg:p-7 dark:border-slate-800/80 dark:bg-slate-900/50">
             {error && (
               <StatusBanner
                 tone="error"
@@ -211,7 +206,7 @@ export default function FiveColorQueryPanel() {
                     aria-label={t("five_color_close_error")}
                     className="rounded-full border border-current/20 px-2 py-1 text-xs text-red-600 transition-colors hover:bg-red-500/10 dark:text-red-300"
                   >
-                    ×
+                    {t("five_color_error_close_icon")}
                   </button>
                 }
               >
@@ -224,8 +219,8 @@ export default function FiveColorQueryPanel() {
                 <StatusBanner tone="success" className="w-full sm:w-auto flex-1">
                   {t("five_color_result_panel")}
                 </StatusBanner>
-                
-                <div className="flex items-center gap-3 bg-white dark:bg-slate-900 rounded-2xl p-2.5 border border-slate-200 dark:border-slate-700 shadow-sm shrink-0">
+
+                <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-100/80 p-2.5 shadow-sm shrink-0 dark:border-slate-700 dark:bg-slate-900">
                   <div
                     className="h-10 w-16 sm:w-20 rounded-[12px] border border-slate-200 dark:border-slate-700 shadow-[var(--shadow-control)]"
                     style={{ backgroundColor: queryResult.result_hex ?? undefined }}
@@ -246,11 +241,11 @@ export default function FiveColorQueryPanel() {
                   {t("five_color_not_found")}
                 </StatusBanner>
                 <div className="text-xs text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/50 rounded-lg p-3 border border-slate-200 dark:border-slate-700">
-                  <div className="font-medium mb-1">💡 建议尝试：</div>
+                  <div className="font-medium mb-1">{t("five_color_not_found_suggestions_title")}</div>
                   <ul className="list-disc list-inside space-y-0.5 ml-1">
-                    <li>点击"反转"按钮尝试相反的颜色顺序</li>
-                    <li>更换不同的颜色组合</li>
-                    <li>注意灰色颜色表示该位置无法形成有效组合</li>
+                    <li>{t("five_color_not_found_tip_reverse")}</li>
+                    <li>{t("five_color_not_found_tip_change")}</li>
+                    <li>{t("five_color_not_found_tip_gray")}</li>
                   </ul>
                 </div>
               </div>
@@ -258,7 +253,6 @@ export default function FiveColorQueryPanel() {
           </div>
         )}
 
-        {/* Main Canvas Area */}
         <div className="relative flex-1 min-h-0 flex flex-col items-center justify-center overflow-hidden p-4 sm:p-8 pt-12 sm:pt-16">
           <div className="absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-blue-500/5 to-transparent pointer-events-none" />
           <div className="relative flex w-full max-w-2xl flex-1 items-center justify-center translate-y-4">
@@ -278,5 +272,6 @@ export default function FiveColorQueryPanel() {
         </div>
       </div>
     </motion.div>
-  );
+  )
 }
+

@@ -3,8 +3,10 @@ import { useThree } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 
+type LuminaWindow = Window & { __luminaGenerateStart?: number };
+
 function _clog(label: string) {
-  const start = (window as any).__luminaGenerateStart as number | undefined;
+  const start = (window as LuminaWindow).__luminaGenerateStart;
   const elapsed_ms = start != null ? performance.now() - start : null;
   fetch('/api/client-log', {
     method: 'POST',

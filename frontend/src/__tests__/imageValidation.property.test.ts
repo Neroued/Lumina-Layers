@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
-import { isValidImageType } from "../stores/converterStore";
+import { isValidImageType } from "../stores/converter";
 
 const SUPPORTED_MIME_TYPES = [
   "image/jpeg",
@@ -95,7 +95,7 @@ describe("Feature: alpha-channel-support, Property 2: 裁剪后文件类型为 P
       fc.property(
         fc.constantFrom(...ALL_MIME_TYPES),
         fc.constantFrom(...ALL_MIME_TYPES),
-        (blobType, originalFileType) => {
+        (blobType) => {
           // Simulate the blob returned by fetch (could have any type)
           const blob = new Blob(["fake-image-data"], { type: blobType });
 

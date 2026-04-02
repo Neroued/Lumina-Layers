@@ -13,6 +13,7 @@ S11 — GLB 3D 预览导出。
 
 import os
 import time
+import logging
 from typing import Optional
 
 import cv2
@@ -21,6 +22,45 @@ import trimesh
 
 from config import PrinterConfig, OUTPUT_DIR, BedManager
 from core.naming import generate_preview_filename
+
+_log = logging.getLogger(__name__)
+
+
+def _iter_valid_polygons(geometry_obj, min_area: float = 1e-4):
+    """Yield valid Polygon geometries from Polygon/MultiPolygon-like objects."""
+    if geometry_obj is None:
+        return
+
+    geom_type = getattr(geometry_obj, "geom_type", "")
+    if geom_type == "Polygon":
+        polygons = [geometry_obj]
+    elif geom_type == "MultiPolygon":
+        polygons = list(getattr(geometry_obj, "geoms", []))
+    else:
+        return
+
+    for poly in polygons:
+        if poly is None:
+            continue
+        if not getattr(poly, "is_valid", False):
+            try:
+                poly = poly.buffer(0)
+            except (ValueError, TypeError, RuntimeError):
+                continue
+        if getattr(poly, "is_empty", True):
+            continue
+        area = float(getattr(poly, "area", 0.0) or 0.0)
+        if area < min_area:
+            continue
+        if getattr(poly, "geom_type", "") == "Polygon":
+            yield poly
+        elif getattr(poly, "geom_type", "") == "MultiPolygon":
+            for sub in getattr(poly, "geoms", []):
+                if sub is None or getattr(sub, "is_empty", True):
+                    continue
+                sub_area = float(getattr(sub, "area", 0.0) or 0.0)
+                if sub_area >= min_area:
+                    yield sub
 
 
 def _create_preview_mesh(
@@ -55,7 +95,7 @@ def _create_preview_mesh(
         scale_factor = int(np.sqrt(total_pixels / TARGET_PIXELS))
         scale_factor = max(2, min(scale_factor, 16))
 
-        print(f"[PREVIEW] Downsampling by {scale_factor}x ({total_pixels:,} -> ~{TARGET_PIXELS:,} pixels)")
+        _log.info(f"[PREVIEW] Downsampling by {scale_factor}x ({total_pixels:,} -> ~{TARGET_PIXELS:,} pixels)")
 
         new_height = height // scale_factor
         new_width = width // scale_factor
@@ -71,20 +111,29 @@ def _create_preview_mesh(
         shrink = 0.0
 
     # --- numpy vectorized mesh build ---
-    _CUBE_FACES = np.array([
-        [0,2,1],[0,3,2],
-        [4,5,6],[4,6,7],
-        [0,1,5],[0,5,4],
-        [1,2,6],[1,6,5],
-        [2,3,7],[2,7,6],
-        [3,0,4],[3,4,7],
-    ], dtype=np.int64)  # (12, 3)
+    _CUBE_FACES = np.array(
+        [
+            [0, 2, 1],
+            [0, 3, 2],
+            [4, 5, 6],
+            [4, 6, 7],
+            [0, 1, 5],
+            [0, 5, 4],
+            [1, 2, 6],
+            [1, 6, 5],
+            [2, 3, 7],
+            [2, 7, 6],
+            [3, 0, 4],
+            [3, 4, 7],
+        ],
+        dtype=np.int64,
+    )  # (12, 3)
 
     def _boxes_np(px, py, z0_scalar, z1_scalar, colors_rgba):
         """Build voxel boxes for N pixels, all at same z range."""
         n = len(px)
         if n == 0:
-            return np.empty((0,3)), np.empty((0,3),dtype=np.int64), np.empty((0,4),dtype=np.uint8)
+            return np.empty((0, 3)), np.empty((0, 3), dtype=np.int64), np.empty((0, 4), dtype=np.uint8)
         x0 = px + shrink
         x1 = px + 1 - shrink
         y0 = py + shrink
@@ -92,21 +141,24 @@ def _create_preview_mesh(
         z0 = np.full(n, z0_scalar, dtype=np.float64)
         z1 = np.full(n, z1_scalar, dtype=np.float64)
         # verts: (n,8,3)
-        verts = np.stack([
-            np.column_stack([x0,y0,z0]),
-            np.column_stack([x1,y0,z0]),
-            np.column_stack([x1,y1,z0]),
-            np.column_stack([x0,y1,z0]),
-            np.column_stack([x0,y0,z1]),
-            np.column_stack([x1,y0,z1]),
-            np.column_stack([x1,y1,z1]),
-            np.column_stack([x0,y1,z1]),
-        ], axis=1)  # (n,8,3)
+        verts = np.stack(
+            [
+                np.column_stack([x0, y0, z0]),
+                np.column_stack([x1, y0, z0]),
+                np.column_stack([x1, y1, z0]),
+                np.column_stack([x0, y1, z0]),
+                np.column_stack([x0, y0, z1]),
+                np.column_stack([x1, y0, z1]),
+                np.column_stack([x1, y1, z1]),
+                np.column_stack([x0, y1, z1]),
+            ],
+            axis=1,
+        )  # (n,8,3)
         all_verts = verts.reshape(-1, 3)
-        offsets = (np.arange(n, dtype=np.int64) * 8)[:,None,None]
+        offsets = (np.arange(n, dtype=np.int64) * 8)[:, None, None]
         all_faces = (_CUBE_FACES[None] + offsets).reshape(-1, 3)
         if colors_rgba.ndim == 1:
-            all_colors = np.tile(colors_rgba, (n*12, 1))
+            all_colors = np.tile(colors_rgba, (n * 12, 1))
         else:
             all_colors = np.repeat(colors_rgba, 12, axis=0)
         return all_verts, all_faces, all_colors
@@ -121,38 +173,44 @@ def _create_preview_mesh(
     if backing_z_range is not None and preview_colors is not None:
         backing_start, backing_end = backing_z_range
         backing_color_rgba = np.array(preview_colors[backing_color_id], dtype=np.uint8)[:4]
-        pixel_colors = np.column_stack([
-            matched_rgb[ys_all, xs_all].astype(np.uint8),
-            np.full(len(ys_all), 255, dtype=np.uint8)
-        ])  # (N,4)
+        pixel_colors = np.column_stack(
+            [matched_rgb[ys_all, xs_all].astype(np.uint8), np.full(len(ys_all), 255, dtype=np.uint8)]
+        )  # (N,4)
 
         # backing box
-        v, f, c = _boxes_np(xs_f, world_ys, float(backing_start), float(backing_end+1), backing_color_rgba)
+        v, f, c = _boxes_np(xs_f, world_ys, float(backing_start), float(backing_end + 1), backing_color_rgba)
         if len(v):
-            all_v_list.append(v); all_f_list.append(f + face_offset); all_c_list.append(c)
+            all_v_list.append(v)
+            all_f_list.append(f + face_offset)
+            all_c_list.append(c)
             face_offset += len(v)
 
         # bottom box (z 0 -> backing_start)
         if backing_start > 0:
             v, f, c = _boxes_np(xs_f, world_ys, 0.0, float(backing_start), pixel_colors)
             if len(v):
-                all_v_list.append(v); all_f_list.append(f + face_offset); all_c_list.append(c)
+                all_v_list.append(v)
+                all_f_list.append(f + face_offset)
+                all_c_list.append(c)
                 face_offset += len(v)
 
         # top box (backing_end+1 -> total_layers)
         if backing_end + 1 < total_layers:
-            v, f, c = _boxes_np(xs_f, world_ys, float(backing_end+1), float(total_layers), pixel_colors)
+            v, f, c = _boxes_np(xs_f, world_ys, float(backing_end + 1), float(total_layers), pixel_colors)
             if len(v):
-                all_v_list.append(v); all_f_list.append(f + face_offset); all_c_list.append(c)
+                all_v_list.append(v)
+                all_f_list.append(f + face_offset)
+                all_c_list.append(c)
                 face_offset += len(v)
     else:
-        pixel_colors = np.column_stack([
-            matched_rgb[ys_all, xs_all].astype(np.uint8),
-            np.full(len(ys_all), 255, dtype=np.uint8)
-        ])
+        pixel_colors = np.column_stack(
+            [matched_rgb[ys_all, xs_all].astype(np.uint8), np.full(len(ys_all), 255, dtype=np.uint8)]
+        )
         v, f, c = _boxes_np(xs_f, world_ys, 0.0, float(total_layers), pixel_colors)
         if len(v):
-            all_v_list.append(v); all_f_list.append(f); all_c_list.append(c)
+            all_v_list.append(v)
+            all_f_list.append(f)
+            all_c_list.append(c)
 
     if not all_v_list:
         return None
@@ -163,7 +221,7 @@ def _create_preview_mesh(
 
     mesh = trimesh.Trimesh(vertices=vertices_np, faces=faces_np, process=False)
     mesh.visual.face_colors = face_colors_np
-    print(f"[PREVIEW] Generated: {len(mesh.vertices):,} vertices, {len(mesh.faces):,} faces")
+    _log.info(f"[PREVIEW] Generated: {len(mesh.vertices):,} vertices, {len(mesh.faces):,} faces")
     return mesh
 
 
@@ -233,12 +291,18 @@ def _build_color_voxel_mesh(
 
     _FACE_TPL = np.array(
         [
-            [0, 2, 1], [0, 3, 2],
-            [4, 5, 6], [4, 6, 7],
-            [0, 1, 5], [0, 5, 4],
-            [1, 2, 6], [1, 6, 5],
-            [2, 3, 7], [2, 7, 6],
-            [3, 0, 4], [3, 4, 7],
+            [0, 2, 1],
+            [0, 3, 2],
+            [4, 5, 6],
+            [4, 6, 7],
+            [0, 1, 5],
+            [0, 5, 4],
+            [1, 2, 6],
+            [1, 6, 5],
+            [2, 3, 7],
+            [2, 7, 6],
+            [3, 0, 4],
+            [3, 4, 7],
         ],
         dtype=np.int64,
     )
@@ -252,14 +316,30 @@ def _build_color_voxel_mesh(
     z1 = np.full(n_pixels, float(total_layers), dtype=np.float64)
 
     v = np.empty((n_pixels, 8, 3), dtype=np.float64)
-    v[:, 0, 0] = x0;  v[:, 0, 1] = y0;  v[:, 0, 2] = z0
-    v[:, 1, 0] = x1;  v[:, 1, 1] = y0;  v[:, 1, 2] = z0
-    v[:, 2, 0] = x1;  v[:, 2, 1] = y1;  v[:, 2, 2] = z0
-    v[:, 3, 0] = x0;  v[:, 3, 1] = y1;  v[:, 3, 2] = z0
-    v[:, 4, 0] = x0;  v[:, 4, 1] = y0;  v[:, 4, 2] = z1
-    v[:, 5, 0] = x1;  v[:, 5, 1] = y0;  v[:, 5, 2] = z1
-    v[:, 6, 0] = x1;  v[:, 6, 1] = y1;  v[:, 6, 2] = z1
-    v[:, 7, 0] = x0;  v[:, 7, 1] = y1;  v[:, 7, 2] = z1
+    v[:, 0, 0] = x0
+    v[:, 0, 1] = y0
+    v[:, 0, 2] = z0
+    v[:, 1, 0] = x1
+    v[:, 1, 1] = y0
+    v[:, 1, 2] = z0
+    v[:, 2, 0] = x1
+    v[:, 2, 1] = y1
+    v[:, 2, 2] = z0
+    v[:, 3, 0] = x0
+    v[:, 3, 1] = y1
+    v[:, 3, 2] = z0
+    v[:, 4, 0] = x0
+    v[:, 4, 1] = y0
+    v[:, 4, 2] = z1
+    v[:, 5, 0] = x1
+    v[:, 5, 1] = y0
+    v[:, 5, 2] = z1
+    v[:, 6, 0] = x1
+    v[:, 6, 1] = y1
+    v[:, 6, 2] = z1
+    v[:, 7, 0] = x0
+    v[:, 7, 1] = y1
+    v[:, 7, 2] = z1
 
     offsets = (np.arange(n_pixels, dtype=np.int64) * 8).reshape(-1, 1, 1)
     all_faces = (_FACE_TPL.reshape(1, 12, 3) + offsets).reshape(-1, 3)
@@ -268,7 +348,6 @@ def _build_color_voxel_mesh(
     mesh = trimesh.Trimesh(vertices=v.reshape(-1, 3), faces=all_faces, process=False)
     mesh.visual.face_colors = all_colors
     return mesh
-
 
 
 def _build_backing_plate_mesh(
@@ -281,6 +360,7 @@ def _build_backing_plate_mesh(
     顶点数从 ~3M 降至 <5k，节省约 2.5s。
     """
     from shapely.geometry import Polygon
+
     mask_u8 = mask_solid.astype(np.uint8) * 255
     contours, _ = cv2.findContours(mask_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_KCOS)
     if not contours:
@@ -288,30 +368,63 @@ def _build_backing_plate_mesh(
 
     extrude_h = float(PrinterConfig.LAYER_HEIGHT)
     meshes = []
+    skipped_short = 0
+    skipped_tiny = 0
+    skipped_invalid = 0
+    extrude_fail = 0
     for cnt in contours:
         if len(cnt) < 3:
+            skipped_short += 1
             continue
         pts = cnt.squeeze(1).astype(np.float64)
-        world_pts = np.column_stack([
-            pts[:, 0] * pixel_scale,
-            (height - pts[:, 1]) * pixel_scale,
-        ])
+        world_pts = np.column_stack(
+            [
+                pts[:, 0] * pixel_scale,
+                (height - pts[:, 1]) * pixel_scale,
+            ]
+        )
         try:
-            poly = Polygon(world_pts)
-            if not poly.is_valid:
-                poly = poly.buffer(0)
-            if poly.is_empty or poly.area < 1e-4:
+            base_poly = Polygon(world_pts)
+            if not base_poly.is_valid:
+                try:
+                    base_poly = base_poly.buffer(0)
+                except (ValueError, TypeError, RuntimeError):
+                    skipped_invalid += 1
+                    continue
+            if float(getattr(base_poly, "area", 0.0) or 0.0) < 1e-4:
+                skipped_tiny += 1
                 continue
-            m = trimesh.creation.extrude_polygon(poly, height=extrude_h)
-            meshes.append(m)
-        except Exception:
+
+            valid_polygons = list(_iter_valid_polygons(base_poly, min_area=1e-4))
+            if not valid_polygons:
+                skipped_invalid += 1
+                continue
+
+            for poly in valid_polygons:
+                try:
+                    m = trimesh.creation.extrude_polygon(poly, height=extrude_h)
+                    meshes.append(m)
+                except (ValueError, TypeError, RuntimeError, AttributeError):
+                    # Keep pipeline alive on isolated geometry fragments.
+                    extrude_fail += 1
+                    continue
+        except (ValueError, TypeError, RuntimeError, AttributeError):
+            skipped_invalid += 1
             continue
 
     if not meshes:
+        _log.warning(
+            f"[SEGMENTED_GLB] Backing plate skipped: short={skipped_short}, invalid={skipped_invalid}, "
+            f"tiny={skipped_tiny}, extrude_fail={extrude_fail}"
+        )
         return None
 
     result = trimesh.util.concatenate(meshes) if len(meshes) > 1 else meshes[0]
     result.visual.face_colors = np.tile(rgba, (len(result.faces), 1))
+    _log.info(
+        f"[SEGMENTED_GLB] Backing plate contour stats: short={skipped_short}, invalid={skipped_invalid}, "
+        f"tiny={skipped_tiny}, extrude_fail={extrude_fail}, kept={len(meshes)}"
+    )
     return result
 
 
@@ -345,8 +458,8 @@ def generate_empty_bed_glb(
         glb_path = os.path.join(OUTPUT_DIR, f"empty_bed_{bed_w}x{bed_h}.glb")
         glb_scene.export(glb_path)
         return glb_path
-    except Exception as e:
-        print(f"[EMPTY_BED] Failed: {e}")
+    except (OSError, ImportError, ValueError, TypeError, RuntimeError) as e:
+        _log.warning(f"[EMPTY_BED] Failed: {e}")
         return None
 
 
@@ -389,7 +502,7 @@ def generate_segmented_glb(cache: dict, max_meshes: int = 64, output_path: Optio
         if total_pixels > SIMPLIFY_THRESHOLD:
             scale_factor = int(np.sqrt(total_pixels / TARGET_PIXELS))
             scale_factor = max(2, min(scale_factor, 16))
-            print(f"[SEGMENTED_GLB] Downsampling by {scale_factor}x")
+            _log.info(f"[SEGMENTED_GLB] Downsampling by {scale_factor}x")
 
             new_h = height // scale_factor
             new_w = width // scale_factor
@@ -407,38 +520,57 @@ def generate_segmented_glb(cache: dict, max_meshes: int = 64, output_path: Optio
 
         # 2. Extract unique colors and pixel counts (solid pixels only)
         _t = time.perf_counter()
-        solid_pixels = matched_rgb[mask_solid]  # (N, 3)
+        flat_mask = mask_solid.reshape(-1)
+        solid_idx = np.flatnonzero(flat_mask)
+        flat_rgb = matched_rgb.reshape(-1, 3).astype(np.uint32, copy=False)
+        solid_pixels = flat_rgb[solid_idx]  # (N, 3)
         if len(solid_pixels) == 0:
-            print("[SEGMENTED_GLB] No solid pixels, returning None")
+            _log.warning("[SEGMENTED_GLB] No solid pixels, returning None")
             return None
 
-        unique_colors, inverse, pixel_counts = np.unique(
-            solid_pixels,
-            axis=0,
+        solid_codes = (solid_pixels[:, 0] << 16) | (solid_pixels[:, 1] << 8) | solid_pixels[:, 2]
+        unique_codes, inverse, pixel_counts = np.unique(
+            solid_codes,
             return_inverse=True,
             return_counts=True,
         )
-        n_unique = len(unique_colors)
-        print(f"[SEGMENTED_GLB] Found {n_unique} unique colors")
+        n_unique = len(unique_codes)
+        _log.info(f"[SEGMENTED_GLB] Found {n_unique} unique colors")
         _t_unique = time.perf_counter() - _t
 
         # 3. Merge low-frequency colors if exceeding max_meshes
         _t = time.perf_counter()
         if n_unique > max_meshes:
-            print(f"[SEGMENTED_GLB] Merging {n_unique} colors down to {max_meshes}")
+            _log.info(f"[SEGMENTED_GLB] Merging {n_unique} colors down to {max_meshes}")
+            unique_colors = np.column_stack(
+                [
+                    (unique_codes >> 16) & 0xFF,
+                    (unique_codes >> 8) & 0xFF,
+                    unique_codes & 0xFF,
+                ]
+            ).astype(np.uint8)
             merged_colors = _merge_low_frequency_colors(unique_colors, pixel_counts, max_meshes)
-            new_solid = merged_colors[inverse]
-            matched_rgb_work = matched_rgb.copy()
-            matched_rgb_work[mask_solid] = new_solid
-            solid_pixels = matched_rgb_work[mask_solid]
-            unique_colors, _, pixel_counts = np.unique(
-                solid_pixels,
-                axis=0,
+            merged_codes = (
+                (merged_colors[:, 0].astype(np.uint32) << 16)
+                | (merged_colors[:, 1].astype(np.uint32) << 8)
+                | merged_colors[:, 2].astype(np.uint32)
+            )
+            code_map = merged_codes[inverse]
+            updated_flat = matched_rgb.reshape(-1, 3).copy()
+            updated_flat[solid_idx, 0] = (code_map >> 16) & 0xFF
+            updated_flat[solid_idx, 1] = (code_map >> 8) & 0xFF
+            updated_flat[solid_idx, 2] = code_map & 0xFF
+            matched_rgb = updated_flat.reshape(matched_rgb.shape).astype(np.uint8, copy=False)
+
+            unique_codes, inverse, pixel_counts = np.unique(
+                code_map,
                 return_inverse=True,
                 return_counts=True,
             )
-            matched_rgb = matched_rgb_work
-            print(f"[SEGMENTED_GLB] After merge: {len(unique_colors)} colors")
+            _log.info(f"[SEGMENTED_GLB] After merge: {len(unique_codes)} colors")
+        color_indices: dict[int, np.ndarray] = {}
+        for code_idx in range(len(unique_codes)):
+            color_indices[code_idx] = solid_idx[inverse == code_idx]
         _t_merge = time.perf_counter() - _t
 
         # 4. Build per-color Meshes + Extract 2D contours (single pass)
@@ -453,12 +585,23 @@ def generate_segmented_glb(cache: dict, max_meshes: int = 64, output_path: Optio
         scale_transform[1, 1] = pixel_scale
         scale_transform[2, 2] = PrinterConfig.LAYER_HEIGHT
 
-        for color_rgb in unique_colors:
-            r, g, b = int(color_rgb[0]), int(color_rgb[1]), int(color_rgb[2])
+        flat_total = width * height
+        color_match_flat = np.zeros(flat_total, dtype=bool)
+        _t_mask_build = 0.0
+        for code_idx, code in enumerate(unique_codes):
+            r = int((code >> 16) & 0xFF)
+            g = int((code >> 8) & 0xFF)
+            b = int(code & 0xFF)
             hex_name = f"{r:02x}{g:02x}{b:02x}"
             rgba = np.array([r, g, b, 255], dtype=np.uint8)
 
-            color_match = np.all(matched_rgb == color_rgb, axis=2) & mask_solid
+            idxs = color_indices.get(code_idx)
+            if idxs is None or len(idxs) == 0:
+                continue
+            _mask_t0 = time.perf_counter()
+            color_match_flat[idxs] = True
+            color_match = color_match_flat.reshape(height, width)
+            _t_mask_build += time.perf_counter() - _mask_t0
 
             mesh = _build_color_voxel_mesh(
                 color_match,
@@ -484,18 +627,16 @@ def generate_segmented_glb(cache: dict, max_meshes: int = 64, output_path: Optio
                     if len(cnt) < 3:
                         continue
                     pts = cnt.squeeze(1).astype(float)
-                    world_pts = [
-                        [float(px * pixel_scale), float((height - py) * pixel_scale)]
-                        for px, py in pts
-                    ]
+                    world_pts = [[float(px * pixel_scale), float((height - py) * pixel_scale)] for px, py in pts]
                     color_contour_list.append(world_pts)
                 if color_contour_list:
                     contours_data[hex_name] = color_contour_list
+            color_match_flat[idxs] = False
 
         _t_mesh_loop = time.perf_counter() - _t
 
         if len(scene.geometry) == 0:
-            print("[SEGMENTED_GLB] No meshes generated")
+            _log.warning("[SEGMENTED_GLB] No meshes generated")
             return None
 
         # 4.5 Build backing plate mesh (contour extrusion)
@@ -508,11 +649,11 @@ def generate_segmented_glb(cache: dict, max_meshes: int = 64, output_path: Optio
         )
         if backing_mesh is not None:
             scene.add_geometry(backing_mesh, node_name="backing_plate")
-            print(f"[SEGMENTED_GLB] Backing plate added ({backing_mesh.vertices.shape[0]} vertices)")
+            _log.info(f"[SEGMENTED_GLB] Backing plate added ({backing_mesh.vertices.shape[0]} vertices)")
         _t_backing = time.perf_counter() - _t
 
-        cache['color_contours'] = contours_data
-        print(f"[SEGMENTED_GLB] Extracted contours for {len(contours_data)} colors")
+        cache["color_contours"] = contours_data
+        _log.info(f"[SEGMENTED_GLB] Extracted contours for {len(contours_data)} colors")
 
         # 6. Export GLB
         _t = time.perf_counter()
@@ -521,18 +662,27 @@ def generate_segmented_glb(cache: dict, max_meshes: int = 64, output_path: Optio
         _t_export = time.perf_counter() - _t
 
         _t_glb_total = time.perf_counter() - _glb_t0
-        print(f"[SEGMENTED_GLB] Exported {len(scene.geometry)} meshes -> {glb_path}")
-        print(f"[SEGMENTED_GLB] Timing: downsample={_t_downsample:.2f}s, "
-              f"unique={_t_unique:.2f}s, merge={_t_merge:.2f}s, "
-              f"mesh_loop={_t_mesh_loop:.2f}s, backing={_t_backing:.2f}s, "
-              f"export={_t_export:.2f}s, total={_t_glb_total:.2f}s")
+        cache["_segmented_glb_timings"] = {
+            "downsample_s": _t_downsample,
+            "unique_s": _t_unique,
+            "merge_s": _t_merge,
+            "mask_build_s": _t_mask_build,
+            "mesh_loop_s": _t_mesh_loop,
+            "backing_s": _t_backing,
+            "export_s": _t_export,
+            "total_s": _t_glb_total,
+        }
+        _log.info(f"[SEGMENTED_GLB] Exported {len(scene.geometry)} meshes -> {glb_path}")
+        _log.info(
+            f"[SEGMENTED_GLB] Timing: downsample={_t_downsample:.2f}s, "
+            f"unique={_t_unique:.2f}s, merge={_t_merge:.2f}s, mask_build={_t_mask_build:.2f}s, "
+            f"mesh_loop={_t_mesh_loop:.2f}s, backing={_t_backing:.2f}s, "
+            f"export={_t_export:.2f}s, total={_t_glb_total:.2f}s"
+        )
         return glb_path
 
-    except Exception as e:
-        print(f"[SEGMENTED_GLB] Failed: {e}")
-        import traceback
-
-        traceback.print_exc()
+    except (OSError, ValueError, TypeError, RuntimeError) as e:
+        _log.exception(f"[SEGMENTED_GLB] Failed: {e}")
         return None
 
 
@@ -575,7 +725,7 @@ def generate_realtime_glb(cache: dict) -> Optional[str]:
         )
 
         if preview_mesh is None:
-            print("[REALTIME_GLB] Preview mesh is None (model too large?)")
+            _log.warning("[REALTIME_GLB] Preview mesh is None (model too large?)")
             return None
 
         # Scale from pixel/voxel coords to mm
@@ -589,11 +739,11 @@ def generate_realtime_glb(cache: dict) -> Optional[str]:
 
         glb_path = os.path.join(OUTPUT_DIR, "realtime_preview.glb")
         preview_mesh.export(glb_path)
-        print(f"[REALTIME_GLB] Exported: {glb_path}")
+        _log.info(f"[REALTIME_GLB] Exported: {glb_path}")
         return glb_path
 
-    except Exception as e:
-        print(f"[REALTIME_GLB] Failed: {e}")
+    except (OSError, ValueError, TypeError, RuntimeError) as e:
+        _log.warning(f"[REALTIME_GLB] Failed: {e}")
         return None
 
 
@@ -650,6 +800,15 @@ def run(ctx: dict) -> dict:
     ctx["glb_path"] = glb_path
 
     _elapsed = time.perf_counter() - _t0
-    print(f"[S11] glb_preview done: {_elapsed:.3f}s")
-    ctx.setdefault('_hifi_timings', {})['glb_preview_s'] = _elapsed
+    _log.info(f"[S11] glb_preview done: {_elapsed:.3f}s")
+    _hifi_timings = ctx.setdefault("_hifi_timings", {})
+    _hifi_timings["glb_preview_s"] = _elapsed
+    seg_timing = cache.get("_segmented_glb_timings")
+    if isinstance(seg_timing, dict):
+        _hifi_timings["s11_unique_s"] = float(seg_timing.get("unique_s", 0.0))
+        _hifi_timings["s11_merge_s"] = float(seg_timing.get("merge_s", 0.0))
+        _hifi_timings["s11_mask_build_s"] = float(seg_timing.get("mask_build_s", 0.0))
+        _hifi_timings["s11_mesh_loop_s"] = float(seg_timing.get("mesh_loop_s", 0.0))
+        _hifi_timings["s11_backing_s"] = float(seg_timing.get("backing_s", 0.0))
+        _hifi_timings["s11_export_s"] = float(seg_timing.get("export_s", 0.0))
     return ctx
