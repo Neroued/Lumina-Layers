@@ -168,6 +168,20 @@ _REMAP_TO_8COLOR = {
 }
 
 
+def _delta_e00_safe(color_a: LabColor, color_b: LabColor) -> float:
+    """Return Delta-E 2000 with NumPy 2 compatibility fallback.
+    返回 Delta-E 2000，并兼容 NumPy 2 的 asscalar 移除问题。
+    """
+    try:
+        return float(delta_e_cie2000(color_a, color_b))
+    except AttributeError as exc:
+        if "asscalar" not in str(exc):
+            raise
+        if not hasattr(np, "asscalar"):
+            np.asscalar = lambda arr: arr.item()  # type: ignore[attr-defined]
+        return float(delta_e_cie2000(color_a, color_b))
+
+
 def _detect_4color_subtype(lut_path, metadata=None):
     """Detect 4-Color subtype (RYBW or CMYW) from metadata or filename.
     从 metadata 或文件名检测 4 色子类型（RYBW 或 CMYW）。
@@ -527,6 +541,183 @@ class LUTMerger:
         return (all_compatible, warnings)
 
     @staticmethod
+    def normalize_stacks_for_compare(stacks, color_mode: str, lut_path: str | None = None, metadata=None):
+        """Normalize stacks into unified 8-color slot IDs for comparison.
+        将堆叠统一归一到 8 色槽位 ID 空间，便于跨 LUT 比较。
+
+        Args:
+            stacks: Source stacks array. (源堆叠数组)
+            color_mode (str): Source color mode string. (源颜色模式)
+            lut_path (str | None): Optional LUT path for subtype detection.
+                (用于子类型检测的可选 LUT 路径)
+            metadata: Optional LUT metadata. (可选 LUT 元数据)
+
+        Returns:
+            np.ndarray: Normalized stacks array. (归一化后的堆叠数组)
+        """
+        if stacks is None:
+            return np.zeros((0, 0), dtype=np.int32)
+
+        stacks_arr = np.asarray(stacks, dtype=np.int32)
+        if stacks_arr.ndim != 2:
+            raise ValueError("Stacks for LUT comparison must be a 2D array")
+        if stacks_arr.size == 0:
+            return stacks_arr
+        return np.asarray(
+            _remap_stacks(stacks_arr, color_mode, lut_path, metadata=metadata),
+            dtype=np.int32,
+        )
+
+    @staticmethod
+    def _recipe_labels_from_key(recipe_key: tuple[int, ...]) -> list[str]:
+        """Convert a normalized recipe key into human-readable labels.
+        将归一化后的配方键转换为可读标签列表。
+        """
+        labels: list[str] = []
+        for material_id in recipe_key:
+            if material_id == -1:
+                labels.append("Air")
+            elif 0 <= material_id < len(_STANDARD_SLOT_ORDER):
+                labels.append(_STANDARD_SLOT_ORDER[material_id])
+            else:
+                labels.append(f"Unknown({material_id})")
+        return labels
+
+    @staticmethod
+    def compare_luts_by_recipe(rgb_a, stacks_a, rgb_b, stacks_b, top_n: int = 10) -> dict:
+        """Compare two LUTs by shared normalized recipe keys.
+        按共享的归一化配方键比较两个 LUT。
+
+        Args:
+            rgb_a: LUT A RGB array [N, 3]. (LUT A RGB 数组)
+            stacks_a: LUT A normalized stacks [N, L]. (LUT A 归一化堆叠数组)
+            rgb_b: LUT B RGB array [M, 3]. (LUT B RGB 数组)
+            stacks_b: LUT B normalized stacks [M, L]. (LUT B 归一化堆叠数组)
+            top_n (int): Number of worst-difference items to keep.
+                (保留的最大差异条目数)
+
+        Returns:
+            dict: Comparison stats, warnings, and worst diffs.
+                (对比统计、警告和最大差异条目)
+        """
+        rgb_a_arr = np.asarray(rgb_a, dtype=np.uint8)
+        rgb_b_arr = np.asarray(rgb_b, dtype=np.uint8)
+        stacks_a_arr = np.asarray(stacks_a, dtype=np.int32)
+        stacks_b_arr = np.asarray(stacks_b, dtype=np.int32)
+
+        if rgb_a_arr.ndim != 2 or rgb_a_arr.shape[1] != 3:
+            raise ValueError("LUT A RGB data must be shaped as (N, 3)")
+        if rgb_b_arr.ndim != 2 or rgb_b_arr.shape[1] != 3:
+            raise ValueError("LUT B RGB data must be shaped as (N, 3)")
+        if stacks_a_arr.ndim != 2 or stacks_b_arr.ndim != 2:
+            raise ValueError("Stacks for LUT comparison must be 2D arrays")
+
+        warnings: list[str] = []
+
+        def _build_lookup(label: str, rgb_arr: np.ndarray, stacks_arr: np.ndarray) -> tuple[dict, list[str]]:
+            local_warnings: list[str] = []
+            row_count = min(rgb_arr.shape[0], stacks_arr.shape[0])
+            if rgb_arr.shape[0] != stacks_arr.shape[0]:
+                local_warnings.append(
+                    f"{label} row mismatch: rgb={rgb_arr.shape[0]}, stacks={stacks_arr.shape[0]}; using first {row_count}"
+                )
+
+            lookup: dict[tuple[int, ...], dict] = {}
+            duplicate_count = 0
+            for idx in range(row_count):
+                recipe_key = tuple(int(v) for v in stacks_arr[idx].tolist())
+                if recipe_key in lookup:
+                    duplicate_count += 1
+                    continue
+                r, g, b = (int(rgb_arr[idx][0]), int(rgb_arr[idx][1]), int(rgb_arr[idx][2]))
+                lab = convert_color(sRGBColor(r / 255.0, g / 255.0, b / 255.0), LabColor)
+                lookup[recipe_key] = {
+                    "rgb": (r, g, b),
+                    "lab": lab,
+                }
+
+            if duplicate_count:
+                local_warnings.append(
+                    f"{label} contains {duplicate_count} duplicate recipe rows; kept the first occurrence for each recipe"
+                )
+            return lookup, local_warnings
+
+        lookup_a, warnings_a = _build_lookup("LUT A", rgb_a_arr, stacks_a_arr)
+        lookup_b, warnings_b = _build_lookup("LUT B", rgb_b_arr, stacks_b_arr)
+        warnings.extend(warnings_a)
+        warnings.extend(warnings_b)
+
+        recipes_a = set(lookup_a.keys())
+        recipes_b = set(lookup_b.keys())
+        shared_recipes = sorted(recipes_a & recipes_b)
+
+        diff_items: list[dict] = []
+        identical_rgb_count = 0
+
+        for recipe_key in shared_recipes:
+            entry_a = lookup_a[recipe_key]
+            entry_b = lookup_b[recipe_key]
+            rgb_a_item = entry_a["rgb"]
+            rgb_b_item = entry_b["rgb"]
+
+            if rgb_a_item == rgb_b_item:
+                identical_rgb_count += 1
+
+            try:
+                delta_e = _delta_e00_safe(entry_a["lab"], entry_b["lab"])
+            except Exception:
+                delta_e = float(
+                    np.linalg.norm(
+                        np.asarray(rgb_b_item, dtype=np.float64) - np.asarray(rgb_a_item, dtype=np.float64)
+                    )
+                )
+
+            diff_items.append(
+                {
+                    "recipe_key": recipe_key,
+                    "recipe": LUTMerger._recipe_labels_from_key(recipe_key),
+                    "rgb_a": list(rgb_a_item),
+                    "rgb_b": list(rgb_b_item),
+                    "hex_a": f"#{rgb_a_item[0]:02X}{rgb_a_item[1]:02X}{rgb_a_item[2]:02X}",
+                    "hex_b": f"#{rgb_b_item[0]:02X}{rgb_b_item[1]:02X}{rgb_b_item[2]:02X}",
+                    "delta_e00": round(float(delta_e), 6),
+                }
+            )
+
+        delta_values = np.array([item["delta_e00"] for item in diff_items], dtype=np.float64)
+        matched_count = len(shared_recipes)
+
+        if matched_count > 0:
+            mean_delta_e00 = round(float(np.mean(delta_values)), 6)
+            median_delta_e00 = round(float(np.median(delta_values)), 6)
+            p95_delta_e00 = round(float(np.percentile(delta_values, 95)), 6)
+            max_delta_e00 = round(float(np.max(delta_values)), 6)
+        else:
+            mean_delta_e00 = 0.0
+            median_delta_e00 = 0.0
+            p95_delta_e00 = 0.0
+            max_delta_e00 = 0.0
+
+        diff_items.sort(key=lambda item: item["delta_e00"], reverse=True)
+
+        return {
+            "stats": {
+                "matched_recipe_count": matched_count,
+                "recipe_coverage_a": round(float(matched_count / len(recipes_a)), 6) if recipes_a else 0.0,
+                "recipe_coverage_b": round(float(matched_count / len(recipes_b)), 6) if recipes_b else 0.0,
+                "mean_delta_e00": mean_delta_e00,
+                "median_delta_e00": median_delta_e00,
+                "p95_delta_e00": p95_delta_e00,
+                "max_delta_e00": max_delta_e00,
+                "identical_rgb_count": identical_rgb_count,
+                "recipes_only_in_a": len(recipes_a - recipes_b),
+                "recipes_only_in_b": len(recipes_b - recipes_a),
+            },
+            "warnings": warnings,
+            "worst_diffs": diff_items[:top_n],
+        }
+
+    @staticmethod
     def merge_palettes(metadata_list: list, mode_priorities: list) -> list:
         """Merge palettes from multiple LUTMetadata using Color_Name as key.
         以 Color_Name 为匹配键合并多组调色板，按 8-Color 槽位排序。
@@ -767,7 +958,7 @@ class LUTMerger:
                 is_similar = False
                 for j in kept_indices:
                     try:
-                        de = delta_e_cie2000(lab_colors[i], lab_colors[j])
+                        de = _delta_e00_safe(lab_colors[i], lab_colors[j])
                         if de < dedup_threshold:
                             is_similar = True
                             break

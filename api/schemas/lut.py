@@ -106,6 +106,99 @@ class MergeResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list, description="打印参数兼容性警告列表")
 
 
+class CompareDiffItem(BaseModel):
+    """Single same-recipe comparison item.
+    单条同配方对比结果。
+
+    Attributes:
+        recipe: Canonical recipe tokens for this shared stack. (标准化后的配方标记)
+        rgb_a: RGB from LUT A. (LUT A 的 RGB)
+        rgb_b: RGB from LUT B. (LUT B 的 RGB)
+        hex_a: Hex color for LUT A. (LUT A 的十六进制颜色)
+        hex_b: Hex color for LUT B. (LUT B 的十六进制颜色)
+        delta_e00: Perceptual color difference under CIEDE2000. (CIEDE2000 感知色差)
+    """
+
+    recipe: list[str] = Field(..., description="共享配方的标准化标记列表")
+    rgb_a: list[int] = Field(..., min_length=3, max_length=3, description="LUT A 的 RGB")
+    rgb_b: list[int] = Field(..., min_length=3, max_length=3, description="LUT B 的 RGB")
+    hex_a: str = Field(..., description="LUT A 的十六进制颜色")
+    hex_b: str = Field(..., description="LUT B 的十六进制颜色")
+    delta_e00: float = Field(..., ge=0.0, description="该共享配方的 CIEDE2000 色差")
+
+
+class CompareStats(BaseModel):
+    """Statistics from same-recipe LUT comparison.
+    同配方 LUT 对比统计信息。
+
+    Attributes:
+        matched_recipe_count: Shared recipe count between two LUTs. (共享配方数量)
+        recipe_coverage_a: Shared recipe coverage over LUT A. (LUT A 共享配方覆盖率)
+        recipe_coverage_b: Shared recipe coverage over LUT B. (LUT B 共享配方覆盖率)
+        mean_delta_e00: Mean Delta-E over shared recipes. (共享配方平均 Delta-E)
+        median_delta_e00: Median Delta-E over shared recipes. (共享配方中位数 Delta-E)
+        p95_delta_e00: 95th percentile Delta-E. (95 分位 Delta-E)
+        max_delta_e00: Maximum Delta-E. (最大 Delta-E)
+        identical_rgb_count: Shared recipes whose RGB values are exactly identical.
+            (RGB 完全一致的共享配方数量)
+        recipes_only_in_a: Recipes only present in LUT A. (仅存在于 LUT A 的配方数量)
+        recipes_only_in_b: Recipes only present in LUT B. (仅存在于 LUT B 的配方数量)
+    """
+
+    matched_recipe_count: int = Field(..., ge=0, description="共享配方数量")
+    recipe_coverage_a: float = Field(..., ge=0.0, le=1.0, description="LUT A 共享配方覆盖率")
+    recipe_coverage_b: float = Field(..., ge=0.0, le=1.0, description="LUT B 共享配方覆盖率")
+    mean_delta_e00: float = Field(..., ge=0.0, description="共享配方平均 Delta-E00")
+    median_delta_e00: float = Field(..., ge=0.0, description="共享配方中位数 Delta-E00")
+    p95_delta_e00: float = Field(..., ge=0.0, description="共享配方 95 分位 Delta-E00")
+    max_delta_e00: float = Field(..., ge=0.0, description="共享配方最大 Delta-E00")
+    identical_rgb_count: int = Field(..., ge=0, description="RGB 完全一致的共享配方数量")
+    recipes_only_in_a: int = Field(..., ge=0, description="仅存在于 LUT A 的配方数量")
+    recipes_only_in_b: int = Field(..., ge=0, description="仅存在于 LUT B 的配方数量")
+
+
+class CompareRequest(BaseModel):
+    """Request model for comparing two LUTs by shared recipe.
+    按共享配方比较两个 LUT 的请求模型。
+
+    Attributes:
+        lut_a_name: Display name of the baseline LUT. (基准 LUT 显示名称)
+        lut_b_name: Display name of the comparison LUT. (对比 LUT 显示名称)
+        top_n: Max number of worst-difference items to return. (返回的最大差异条目数)
+    """
+
+    lut_a_name: str = Field(..., description="基准 LUT 显示名称")
+    lut_b_name: str = Field(..., description="对比 LUT 显示名称")
+    top_n: int = Field(10, ge=1, le=20, description="返回的最大差异条目数")
+
+
+class CompareResponse(BaseModel):
+    """Response model for same-recipe LUT comparison.
+    同配方 LUT 对比结果响应模型。
+
+    Attributes:
+        status: Operation status. (操作状态)
+        message: Human-readable summary. (结果摘要)
+        lut_a_name: Baseline LUT display name. (基准 LUT 显示名称)
+        lut_b_name: Comparison LUT display name. (对比 LUT 显示名称)
+        lut_a_mode: Detected mode for LUT A. (LUT A 检测模式)
+        lut_b_mode: Detected mode for LUT B. (LUT B 检测模式)
+        stats: Aggregated comparison metrics. (聚合对比指标)
+        warnings: Compatibility or interpretation warnings. (兼容性或解释警告)
+        worst_diffs: Top worst same-recipe differences. (最大差异条目列表)
+    """
+
+    status: str = Field(..., description="操作状态")
+    message: str = Field(..., description="结果摘要")
+    lut_a_name: str = Field(..., description="基准 LUT 显示名称")
+    lut_b_name: str = Field(..., description="对比 LUT 显示名称")
+    lut_a_mode: str = Field(..., description="LUT A 检测模式")
+    lut_b_mode: str = Field(..., description="LUT B 检测模式")
+    stats: CompareStats = Field(..., description="同配方对比统计")
+    warnings: list[str] = Field(default_factory=list, description="兼容性或解释警告")
+    worst_diffs: list[CompareDiffItem] = Field(default_factory=list, description="差异最大的共享配方条目")
+
+
 class LutInfoResponse(BaseModel):
     """Response model for LUT information queries.
     LUT 信息查询的响应模型。
