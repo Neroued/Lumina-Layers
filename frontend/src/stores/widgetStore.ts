@@ -35,6 +35,7 @@ export const TAB_WIDGET_MAP: Record<TabId, WidgetId[]> = {
   calibration: ["calibration"],
   extractor: ["extractor"],
   "lut-manager": ["lut-manager"],
+  "lut-compare": [],
   "five-color": ["five-color"],
   vectorizer: [],
   settings: [],

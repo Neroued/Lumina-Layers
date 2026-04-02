@@ -15,6 +15,7 @@ import { useWidgetStore, WIDGET_REGISTRY, TAB_WIDGET_MAP } from "./stores/widget
 import TabNavBar from "./components/widget/TabNavBar";
 import CalibrationPanel from "./components/CalibrationPanel";
 import ExtractorPanel from "./components/ExtractorPanel";
+import LutComparePanel from "./components/LutComparePanel";
 import LutManagerPanel from "./components/LutManagerPanel";
 import FiveColorQueryPanel from "./components/FiveColorQueryPanel";
 import SettingsPanel from "./components/SettingsPanel";
@@ -274,6 +275,7 @@ function AppContent() {
         )}
 
         {activeTab === 'lut-manager' && <LutManagerPanel />}
+        {activeTab === 'lut-compare' && <LutComparePanel />}
         {activeTab === 'five-color' && (
           <div className="flex h-full min-h-0">
             <FiveColorQueryPanel />
