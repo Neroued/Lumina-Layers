@@ -5,10 +5,12 @@ import * as fc from "fast-check";
 const mockMergeLuts = vi.fn();
 const mockFetchLutList = vi.fn();
 const mockFetchLutInfo = vi.fn();
+const mockCompareLuts = vi.fn();
 
 vi.mock("../api/lut", () => ({
   fetchLutInfo: (...args: unknown[]) => mockFetchLutInfo(...args),
   mergeLuts: (...args: unknown[]) => mockMergeLuts(...args),
+  compareLuts: (...args: unknown[]) => mockCompareLuts(...args),
 }));
 
 vi.mock("../api/converter", () => ({

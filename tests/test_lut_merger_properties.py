@@ -324,8 +324,54 @@ class TestDedupPriority:
         # 8-Color has higher priority, so its stack should be kept
         assert list(merged_stacks[0]) == [0, 1, 2, 3, 4]
 
-
 # ---------------------------------------------------------------------------
+# ══════════════════════════════════════════════════════════════
+# Property 6.1: 同配方对比统计正确性
+# ══════════════════════════════════════════════════════════════
+
+
+class TestCompareByRecipe:
+    """Verify same-recipe comparison stats remain internally consistent."""
+
+    @given(n=st.integers(min_value=1, max_value=8))
+    @settings(max_examples=100)
+    def test_identical_inputs_produce_zero_delta(self, n):
+        """Identical RGB/stacks produce zero Delta-E for every shared recipe."""
+        rgb = rgb_array(n)
+        stacks = np.array([[i, 0, 0, 0, 0] for i in range(n)], dtype=np.int32)
+
+        result = LUTMerger.compare_luts_by_recipe(
+            rgb,
+            stacks,
+            rgb.copy(),
+            stacks.copy(),
+            top_n=5,
+        )
+
+        stats = result["stats"]
+        assert stats["matched_recipe_count"] == n
+        assert stats["identical_rgb_count"] == n
+        assert stats["mean_delta_e00"] == 0.0
+        assert stats["max_delta_e00"] == 0.0
+        assert stats["recipes_only_in_a"] == 0
+        assert stats["recipes_only_in_b"] == 0
+
+    def test_unshared_recipe_counts_are_reported(self):
+        """Recipes present on only one side are counted correctly."""
+        rgb_a = np.array([[255, 0, 0], [0, 255, 0]], dtype=np.uint8)
+        rgb_b = np.array([[255, 0, 0], [0, 0, 255]], dtype=np.uint8)
+        stacks_a = np.array([[0, 0, 0, 0, 0], [1, 0, 0, 0, 0]], dtype=np.int32)
+        stacks_b = np.array([[0, 0, 0, 0, 0], [2, 0, 0, 0, 0]], dtype=np.int32)
+
+        result = LUTMerger.compare_luts_by_recipe(rgb_a, stacks_a, rgb_b, stacks_b, top_n=5)
+        stats = result["stats"]
+
+        assert stats["matched_recipe_count"] == 1
+        assert stats["recipes_only_in_a"] == 1
+        assert stats["recipes_only_in_b"] == 1
+        assert len(result["worst_diffs"]) == 1
+
+
 # ══════════════════════════════════════════════════════════════
 # Property 9: 合并统计一致性
 # ══════════════════════════════════════════════════════════════
