@@ -872,3 +872,100 @@ class TestSameColorStrokeCompensation:
         assert len(base_shapes) == 1
         assert len(stroked_shapes) == 1
         assert stroked_shapes[0]["poly"].area > base_shapes[0]["poly"].area
+
+
+# ---------------------------------------------------------------------------
+# Fix 9: Merged LUT palette override in vector pipeline
+# ---------------------------------------------------------------------------
+
+
+class TestMergedLutPaletteOverride:
+    """Verify that analyze_svg uses the Merged JSON LUT palette for
+    slot_names and preview_colors instead of the default EIGHT_COLOR config.
+
+    Regression test: without this fix, material IDs from a 6-color Merged LUT
+    are mapped to 8-color slot names (e.g. ID 2 → Magenta instead of Black),
+    producing phantom Magenta objects in generation and layer preview.
+    """
+
+    @pytest.fixture()
+    def merged_lut_json(self, tmp_path):
+        """Create a minimal Merged JSON LUT with a 4-color palette."""
+        import json
+        lut = {
+            "palette": {
+                "White": {"material": "PLA", "hex_color": "#ffffff", "color_name": "White"},
+                "Yellow": {"material": "PLA", "hex_color": "#ffe600", "color_name": "Yellow"},
+                "Black": {"material": "PLA", "hex_color": "#000000", "color_name": "Black"},
+                "Red": {"material": "PLA", "hex_color": "#dc143c", "color_name": "Red"},
+            },
+            "max_color_layers": 5,
+            "layer_height_mm": 0.08,
+            "line_width_mm": 0.42,
+            "base_layers": 10,
+            "base_channel_idx": 0,
+            "layer_order": "Top2Bottom",
+            "name": "test_merged_4color",
+            "entries": [],
+        }
+        # Build a trivial 4^5 = 1024-entry LUT
+        palette_rgb = [(255, 255, 255), (255, 230, 0), (0, 0, 0), (220, 20, 60)]
+        n_channels = len(palette_rgb)
+        layers = 5
+        entries = []
+        for i in range(n_channels ** layers):
+            recipe = []
+            val = i
+            for _ in range(layers):
+                recipe.append(val % n_channels)
+                val //= n_channels
+            r = palette_rgb[recipe[-1]]
+            entries.append({
+                "rgb": list(r),
+                "hex": f"#{r[0]:02X}{r[1]:02X}{r[2]:02X}",
+                "recipe": {
+                    "canonical_stack_ids": recipe,
+                },
+            })
+        lut["entries"] = entries
+        path = tmp_path / "test_merged.json"
+        path.write_text(json.dumps(lut), encoding="utf-8")
+        return str(path)
+
+    @pytest.fixture()
+    def simple_svg(self, tmp_path):
+        """Create a minimal SVG with a single red rectangle."""
+        svg = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+            '  <rect x="10" y="10" width="80" height="80" fill="#dc143c"/>'
+            "</svg>"
+        )
+        path = tmp_path / "test.svg"
+        path.write_text(svg, encoding="utf-8")
+        return str(path)
+
+    def test_slot_names_from_palette(self, merged_lut_json, simple_svg):
+        """slot_names must come from the LUT palette, not EIGHT_COLOR."""
+        vp = VectorProcessor(merged_lut_json, "Merged")
+        analysis = vp.analyze_svg(simple_svg, target_width_mm=50.0)
+
+        assert analysis.slot_names == ["White", "Yellow", "Black", "Red"]
+        assert analysis.num_channels == 4
+        # Magenta must never appear
+        assert "Magenta" not in str(analysis.slot_names)
+        assert "Slot 3 (Magenta)" not in str(analysis.slot_names)
+
+    def test_preview_colors_from_palette(self, merged_lut_json, simple_svg):
+        """preview_colors must reflect the LUT palette hex values."""
+        vp = VectorProcessor(merged_lut_json, "Merged")
+        analysis = vp.analyze_svg(simple_svg, target_width_mm=50.0)
+
+        # White
+        assert analysis.preview_colors[0][:3] == [255, 255, 255]
+        # Yellow (#ffe600)
+        assert analysis.preview_colors[1][:3] == [255, 230, 0]
+        # Black
+        assert analysis.preview_colors[2][:3] == [0, 0, 0]
+        # Red (#dc143c)
+        assert analysis.preview_colors[3][:3] == [220, 20, 60]
