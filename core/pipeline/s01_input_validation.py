@@ -15,6 +15,7 @@ import time
 import logging
 
 from config import ColorSystem, ModelingMode
+from utils.lut_manager import LUTManager
 
 _log = logging.getLogger(__name__)
 S01_HANDLED_ERRORS = (

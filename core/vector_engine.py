@@ -823,6 +823,31 @@ class VectorProcessor:
         num_channels = len(slot_names)
         num_layers = color_conf.get("layer_count", PrinterConfig.COLOR_LAYERS)
 
+        # For Merged JSON LUTs, override slot_names and preview_colors from
+        # the LUT palette so that material IDs match the actual palette order
+        # (mirrors the raster pipeline logic in S01).
+        lut_path = self.img_processor.lut_path
+        if self.color_mode == "Merged" and lut_path.endswith(".json"):
+            try:
+                from utils.lut_manager import LUTManager
+                _, _, lut_meta = LUTManager.load_lut_with_metadata(lut_path)
+                if lut_meta.palette:
+                    slot_names = [e.color for e in lut_meta.palette]
+                    preview_colors = {}
+                    for idx, entry in enumerate(lut_meta.palette):
+                        hex_color = entry.hex_color or "#FFFFFF"
+                        r = int(hex_color[1:3], 16)
+                        g = int(hex_color[3:5], 16)
+                        b = int(hex_color[5:7], 16)
+                        preview_colors[idx] = [r, g, b, 255]
+                    num_channels = len(slot_names)
+                    color_conf = dict(color_conf)
+                    color_conf["slots"] = slot_names
+                    color_conf["preview"] = preview_colors
+                    _log.info("[VECTOR] Merged LUT palette override: %s", slot_names)
+            except Exception as e:
+                _log.warning("[VECTOR] Failed to extract Merged LUT palette: %s", e)
+
         # === Stage 4: Match fill colors to LUT recipes ===
         replacement_manager = None
         if color_replacements:
@@ -1128,7 +1153,7 @@ class VectorProcessor:
                 pts = np.column_stack(
                     [
                         ext_coords[:, 0] * coord_scale,
-                        h_px - ext_coords[:, 1] * coord_scale,
+                        ext_coords[:, 1] * coord_scale,
                     ]
                 ).astype(np.int32)
                 cv2.fillPoly(canvas, [pts], (*bgr_color, int(rgba[3])))
@@ -1138,7 +1163,7 @@ class VectorProcessor:
                     hole_pts = np.column_stack(
                         [
                             hole_coords[:, 0] * coord_scale,
-                            h_px - hole_coords[:, 1] * coord_scale,
+                            hole_coords[:, 1] * coord_scale,
                         ]
                     ).astype(np.int32)
                     cv2.fillPoly(canvas, [hole_pts], (255, 255, 255, 255))
@@ -1194,7 +1219,7 @@ class VectorProcessor:
             pts = np.column_stack(
                 [
                     coords[:, 0] * coord_scale,
-                    h_px - coords[:, 1] * coord_scale,
+                    coords[:, 1] * coord_scale,
                 ]
             ).astype(np.int32)
             if len(pts) < 3:
