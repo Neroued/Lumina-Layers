@@ -208,6 +208,14 @@ def convert_image_to_3d(
     # Intentional: the API layer produces its own GLB preview, so skip the
     # heavy SVG→raster 2D preview inside the vector branch coordinator.
     ctx["need_2d_preview"] = False
+
+    print("[CONVERTER][DEBUG-COMPARE] ========== convert_image_to_3d START ==========")
+    print(f"[CONVERTER][DEBUG-COMPARE] blur_kernel={blur_kernel}, smooth_sigma={smooth_sigma}")
+    print(f"[CONVERTER][DEBUG-COMPARE] quantize_colors={quantize_colors}, hue_weight={hue_weight}, chroma_gate={chroma_gate}")
+    print(f"[CONVERTER][DEBUG-COMPARE] matched_rgb_path={matched_rgb_path}")
+    print(f"[CONVERTER][DEBUG-COMPARE] replacement_regions count={len(replacement_regions) if replacement_regions else 0}")
+    print(f"[CONVERTER][DEBUG-COMPARE] color_replacements={color_replacements}")
+
     ctx = run_raster_pipeline(ctx)
     if ctx.get("error"):
         return None, None, None, ctx["error"], None
@@ -238,6 +246,12 @@ def generate_preview_cached(
         tuple: (display_image, cache_data, status_message)
     """
     ctx = {k: v for k, v in locals().items()}
+
+    print("[CONVERTER][DEBUG-COMPARE] ========== generate_preview_cached START ==========")
+    print(f"[CONVERTER][DEBUG-COMPARE] quantize_colors={quantize_colors}, hue_weight={hue_weight}, chroma_gate={chroma_gate}")
+    print(f"[CONVERTER][DEBUG-COMPARE] modeling_mode={modeling_mode}, color_mode={color_mode}")
+    print(f"[CONVERTER][DEBUG-COMPARE] enable_cleanup={enable_cleanup}")
+
     ctx = run_preview_pipeline(ctx)
     if ctx.get("error"):
         return None, None, ctx["error"]

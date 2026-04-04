@@ -322,10 +322,24 @@ def run(ctx: dict) -> dict:
     pixel_scale = ctx['pixel_scale']
     color_conf = ctx['color_conf']
 
+    print("[S05][DEBUG-COMPARE] ========== GENERATION PATH S05 START ==========")
+
+    # Log matched_rgb summary going into preview_rgba
+    solid_pixels = matched_rgb[mask_solid]
+    if len(solid_pixels) > 0:
+        unique_colors_s05 = np.unique(solid_pixels.reshape(-1, 3), axis=0)
+        print(f"[S05][DEBUG-COMPARE] matched_rgb -> preview_rgba: {len(unique_colors_s05)} unique colors")
+        for i, c in enumerate(unique_colors_s05[:10]):
+            hex_c = f"#{c[0]:02x}{c[1]:02x}{c[2]:02x}"
+            count = np.sum(np.all(solid_pixels == c, axis=-1))
+            print(f"[S05][DEBUG-COMPARE]   color[{i}]: RGB({c[0]},{c[1]},{c[2]}) {hex_c} count={count}")
+
     # Build preview RGBA
     preview_rgba = np.zeros((target_h, target_w, 4), dtype=np.uint8)
     preview_rgba[mask_solid, :3] = matched_rgb[mask_solid]
     preview_rgba[mask_solid, 3] = 255
+
+    print("[S05][DEBUG-COMPARE] ========== GENERATION PATH S05 END ==========")
 
     # Handle keychain loop
     loop_info = None
