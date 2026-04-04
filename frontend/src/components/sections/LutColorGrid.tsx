@@ -162,6 +162,7 @@ export default function LutColorGrid() {
   const lutColorsLoading = useConverterStore((s) => s.lutColorsLoading);
   const lutColorsLutName = useConverterStore((s) => s.lutColorsLutName);
   const selectionMode = useConverterStore((s) => s.selectionMode);
+  const selectedColors = useConverterStore((s) => s.selectedColors);
   const selectedRegions = useConverterStore((s) => s.selectedRegions);
   const replacePreviewLoading = useConverterStore((s) => s.replacePreviewLoading);
   const setPendingReplacement = useConverterStore((s) => s.setPendingReplacement);
@@ -353,12 +354,16 @@ export default function LutColorGrid() {
 
     switch (selectionMode) {
       case 'select-all': {
-        // 全选模式：需要先选中源色
-        if (!selectedColor) return;
+        // 全选模式：支持多选源色批量替换
+        const colors = selectedColors.size > 0
+          ? Array.from(selectedColors)
+          : selectedColor ? [selectedColor] : [];
+        if (colors.length === 0) return;
         setPendingReplacement({
-          sourceHex: selectedColor,
+          sourceHex: colors[0],
           targetHex: hexNoHash,
           mode: 'select-all',
+          sourceColors: colors.length > 1 ? colors : undefined,
         });
         break;
       }
@@ -404,7 +409,16 @@ export default function LutColorGrid() {
             <div className={cx(workstationInsetCardClass, "flex items-center gap-1.5 px-3 py-2")}>
               {/* Source color swatch(es) */}
               <div className="flex items-center gap-0.5">
-                {pendingReplacement.mode === 'multi-select' && pendingReplacement.sourceRegions ? (
+                {pendingReplacement.mode === 'select-all' && pendingReplacement.sourceColors && pendingReplacement.sourceColors.length > 1 ? (
+                  pendingReplacement.sourceColors.map((hex) => (
+                    <span
+                      key={hex}
+                      className="inline-block h-5 w-5 rounded-lg border border-slate-400/80 dark:border-slate-500/80"
+                      style={{ backgroundColor: `#${hex}` }}
+                      title={`#${hex}`}
+                    />
+                  ))
+                ) : pendingReplacement.mode === 'multi-select' && pendingReplacement.sourceRegions ? (
                   pendingReplacement.sourceRegions.map((region) => {
                     const hex = region.colorHex.replace(/^#/, "");
                     return (

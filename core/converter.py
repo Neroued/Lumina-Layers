@@ -208,6 +208,7 @@ def convert_image_to_3d(
     # Intentional: the API layer produces its own GLB preview, so skip the
     # heavy SVG→raster 2D preview inside the vector branch coordinator.
     ctx["need_2d_preview"] = False
+
     ctx = run_raster_pipeline(ctx)
     if ctx.get("error"):
         return None, None, None, ctx["error"], None
@@ -238,6 +239,7 @@ def generate_preview_cached(
         tuple: (display_image, cache_data, status_message)
     """
     ctx = {k: v for k, v in locals().items()}
+
     ctx = run_preview_pipeline(ctx)
     if ctx.get("error"):
         return None, None, ctx["error"]

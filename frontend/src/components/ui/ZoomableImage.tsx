@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, type WheelEvent, type MouseEvent } from "react";
+import { useState, useRef, useCallback, type ReactNode, type WheelEvent, type MouseEvent } from "react";
 import { useI18n } from "../../i18n/context";
 
 /** Clamp scale to the allowed zoom range [0.5, 5.0]. */
@@ -28,9 +28,10 @@ interface ZoomableImageProps {
   src: string;
   alt: string;
   className?: string;
+  overlay?: ReactNode;
 }
 
-export default function ZoomableImage({ src, alt, className }: ZoomableImageProps) {
+export default function ZoomableImage({ src, alt, className, overlay }: ZoomableImageProps) {
   const { t } = useI18n();
   const [scale, setScale] = useState(1);
   const [translate, setTranslate] = useState({ x: 0, y: 0 });
@@ -102,16 +103,25 @@ export default function ZoomableImage({ src, alt, className }: ZoomableImageProp
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
       >
-        <img
-          src={src}
-          alt={alt}
-          draggable={false}
-          className="w-full select-none"
+        <div
+          className="relative w-full"
           style={{
             transform: `translate(${translate.x}px, ${translate.y}px) scale(${scale})`,
             transformOrigin: "0 0",
           }}
-        />
+        >
+          <img
+            src={src}
+            alt={alt}
+            draggable={false}
+            className="block w-full select-none"
+          />
+          {overlay ? (
+            <div className="pointer-events-none absolute inset-0">
+              {overlay}
+            </div>
+          ) : null}
+        </div>
       </div>
       <button
         type="button"

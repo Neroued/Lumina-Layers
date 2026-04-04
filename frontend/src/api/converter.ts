@@ -13,6 +13,7 @@ import type {
   BatchConvertParams,
   BatchResponse,
   ColorReplaceResponse,
+  ColorHighlightResponse,
   RegionDetectResponse,
   RegionReplaceResponse,
   AutoDetectColorsResponse,
@@ -219,6 +220,19 @@ export async function fetchLayerImages(
 ): Promise<LayerImagesResponse> {
   const response = await apiClient.get<LayerImagesResponse>(
     `/convert/layer-images/${sessionId}`,
+    { timeout: 15_000 },
+  );
+  return response.data;
+}
+
+/** 高亮指定颜色的所有像素 */
+export async function colorHighlight(
+  sessionId: string,
+  colorHexes: string[],
+): Promise<ColorHighlightResponse> {
+  const response = await apiClient.post<ColorHighlightResponse>(
+    "/convert/color-highlight",
+    { session_id: sessionId, color_hexes: colorHexes },
     { timeout: 15_000 },
   );
   return response.data;

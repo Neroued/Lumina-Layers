@@ -291,6 +291,8 @@ function InteractiveModelViewer({
 
   // Read selectionMode and related state for region click handling
   const selectionMode = useConverterStore((s) => s.selectionMode);
+  const selectedColors = useConverterStore((s) => s.selectedColors);
+  const toggleColorInSelection = useConverterStore((s) => s.toggleColorInSelection);
   const selectedRegions = useConverterStore((s) => s.selectedRegions);
   const detectRegion = useConverterStore((s) => s.detectRegion);
   const detectAndAccumulateRegion = useConverterStore((s) => s.detectAndAccumulateRegion);
@@ -334,15 +336,23 @@ function InteractiveModelViewer({
               }
             }
           } else {
-            // 全选模式: 3D 点击 → 切换颜色选择
+            // 全选模式: 3D 点击 → 切换颜色多选
             const hex = extractHexFromMeshName(hitMesh.name);
-            const result = toggleColorSelection(selectedColor, hex);
-            onColorClick(result);
+            toggleColorInSelection(hex);
+            // Keep selectedColor in sync for detail display & recommendations
+            if (selectedColors.has(hex)) {
+              // Was selected, now toggled off
+              const remaining = Array.from(selectedColors).filter((c) => c !== hex);
+              onColorClick(remaining.length > 0 ? remaining[remaining.length - 1] : null);
+            } else {
+              // Newly selected
+              onColorClick(hex);
+            }
           }
         }
       }
     },
-    [threeCtx.gl, threeCtx.camera, colorMeshes, selectedColor, onColorClick, selectionMode, detectRegion, detectAndAccumulateRegion, previewPixelWidth, previewPixelHeight, previewWidthMm, sceneCenter],
+    [threeCtx.gl, threeCtx.camera, colorMeshes, selectedColors, toggleColorInSelection, onColorClick, selectionMode, detectRegion, detectAndAccumulateRegion, previewPixelWidth, previewPixelHeight, previewWidthMm, sceneCenter],
   );
 
   // Expose colorHitRef check so Scene3D's onPointerMissed can query it
@@ -474,6 +484,13 @@ function InteractiveModelViewer({
             outlineTargets.push({ hex, polygons: region.contours });
           }
         }
+      } else if (currentSelectionMode === "select-all" && selectedColors.size > 0) {
+        // select-all 多选模式：为每个已选颜色绘制轮廓
+        for (const hex of selectedColors) {
+          if (colorContours[hex]) {
+            outlineTargets.push({ hex, polygons: colorContours[hex] });
+          }
+        }
       } else if (selectedColor && colorContours[selectedColor]) {
         outlineTargets.push({ hex: selectedColor, polygons: colorContours[selectedColor] });
       }
@@ -534,7 +551,7 @@ function InteractiveModelViewer({
         outlineArcRef.current.push(arcPairs);
       }
     }
-  }, [colorMeshes, mirrorMeshes, colorRemapMap, colorHeightMap, selectedColor, selectedRegions, enableRelief, baseHeight, colorContours, modelBounds, sceneCenter, spacerThick, isDoubleSided, backingMesh, backingPlateMesh, regionData, selectionMode]);
+  }, [colorMeshes, mirrorMeshes, colorRemapMap, colorHeightMap, selectedColor, selectedColors, selectedRegions, enableRelief, baseHeight, colorContours, modelBounds, sceneCenter, spacerThick, isDoubleSided, backingMesh, backingPlateMesh, regionData, selectionMode]);
 
   // Flowing RGB animation with flash-on-select and brightness pulse.
   const tmpColorAnim = useRef(new THREE.Color());

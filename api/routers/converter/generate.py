@@ -118,6 +118,11 @@ async def convert_generate(
     # 2a. Serialize cached matched_rgb to temp file if requested
     # 当存在区域替换时，将缓存的 matched_rgb 序列化为临时文件供 Worker 使用
     matched_rgb_path: str | None = None
+    log.info(
+        "[GENERATE][DEBUG-COMPARE] use_cached_matched_rgb=%s, has_replacement_regions=%s",
+        request.use_cached_matched_rgb,
+        bool(replacement_regions),
+    )
     if request.use_cached_matched_rgb:
         cached_matched_rgb = cache.get("matched_rgb")
         if cached_matched_rgb is not None:
@@ -126,6 +131,11 @@ async def convert_generate(
             np.save(mr_temp_path, cached_matched_rgb)
             matched_rgb_path = mr_temp_path
             store.register_temp_file(body.session_id, mr_temp_path)
+            log.info(
+                "[GENERATE][DEBUG-COMPARE] cached matched_rgb saved: shape=%s, dtype=%s",
+                cached_matched_rgb.shape,
+                cached_matched_rgb.dtype,
+            )
 
     # 2b. Collect scalar parameters into a dict for the worker
     params: dict = {

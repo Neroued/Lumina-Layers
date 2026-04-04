@@ -84,6 +84,7 @@ def run(ctx: dict) -> dict:
     try:
         processor = LuminaImageProcessor(actual_lut_path, color_mode, hue_weight=hue_weight, chroma_gate=chroma_gate)
         processor.enable_cleanup = enable_cleanup
+
         result = processor.process_image(
             image_path=image_path,
             target_width_mm=target_width_mm,
@@ -99,21 +100,26 @@ def run(ctx: dict) -> dict:
         return ctx
 
     _elapsed = time.perf_counter() - _hifi_t0
-    print(f"[S02] image_proc done: {_elapsed:.3f}s")
     _hifi_timings = ctx.setdefault('_hifi_timings', {})
     _hifi_timings['image_proc_s'] = _elapsed
 
     # Extract results into context
-    ctx['matched_rgb'] = result['matched_rgb']
-    ctx['material_matrix'] = result['material_matrix']
-    ctx['mask_solid'] = result['mask_solid']
-    ctx['target_w'], ctx['target_h'] = result['dimensions']
+    matched_rgb = result['matched_rgb']
+    material_matrix = result['material_matrix']
+    mask_solid = result['mask_solid']
+    target_w, target_h = result['dimensions']
+
+    ctx['matched_rgb'] = matched_rgb
+    ctx['material_matrix'] = material_matrix
+    ctx['mask_solid'] = mask_solid
+    ctx['target_w'] = target_w
+    ctx['target_h'] = target_h
     ctx['pixel_scale'] = result['pixel_scale']
     ctx['mode_info'] = result['mode_info']
     ctx['debug_data'] = result.get('debug_data', None)
     ctx['processor'] = processor
 
-    print(f"[S02] Image processed: {ctx['target_w']}x{ctx['target_h']}px, "
-          f"scale={ctx['pixel_scale']}mm/px")
+    print(f"[S02] image_proc done: {_elapsed:.3f}s, {target_w}x{target_h}px, "
+          f"scale={result['pixel_scale']}mm/px")
 
     return ctx

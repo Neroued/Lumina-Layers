@@ -12,6 +12,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from api.dependencies import get_file_registry, get_session_store
 from api.file_registry import FileRegistry
 from api.schemas.converter import (
+    ColorHighlightRequest,
+    ColorHighlightResponse,
     ColorMergePreviewRequest,
     ColorReplaceRequest,
     RegionDetectRequest,
@@ -240,6 +242,80 @@ def reset_replacements(
         preview_url=f"/api/files/{preview_id}",
         preview_glb_url=glb_url,
     )
+
+
+@router.post("/color-highlight", response_model=ColorHighlightResponse)
+def color_highlight(
+    request: ColorHighlightRequest,
+    store: SessionStore = Depends(get_session_store),
+    registry: FileRegistry = Depends(get_file_registry),
+) -> ColorHighlightResponse:
+    """Highlight all pixels matching any of the given colors in the preview.
+    在预览图中高亮所有匹配给定颜色的像素。
+
+    Generates a preview image with semi-transparent cyan overlay on every
+    pixel whose color matches any entry in ``color_hexes``.  Uses the same
+    highlight style as ``region-detect`` (cyan ``[0, 200, 255]``, alpha 0.45).
+    生成预览图，对颜色匹配 ``color_hexes`` 中任意条目的所有像素施加
+    半透明青色叠加，样式与 ``region-detect`` 一致。
+
+    Args:
+        request: Color highlight parameters. (颜色高亮参数)
+        store: Session store dependency. (会话存储依赖)
+        registry: File registry dependency. (文件注册表依赖)
+
+    Returns:
+        ColorHighlightResponse: Highlighted preview URL. (高亮预览图 URL)
+    """
+    session_data = _require_session(store, request.session_id)
+    cache = _require_preview_cache(session_data)
+
+    try:
+        matched_rgb: np.ndarray | None = cache.get("matched_rgb")
+        mask_solid: np.ndarray | None = cache.get("mask_solid")
+
+        if matched_rgb is None or mask_solid is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Preview cache missing matched_rgb or mask_solid.",
+            )
+
+        # Parse color hex strings → RGB tuples
+        target_rgbs: list[np.ndarray] = []
+        for hex_str in request.color_hexes:
+            h = hex_str.lstrip("#")
+            if len(h) != 6:
+                continue
+            target_rgbs.append(np.array([int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)], dtype=np.uint8))
+
+        if not target_rgbs:
+            raise HTTPException(status_code=400, detail="No valid color hex values provided.")
+
+        # Build combined mask: pixels matching ANY of the given colors
+        combined_mask = np.zeros(matched_rgb.shape[:2], dtype=bool)
+        for rgb in target_rgbs:
+            combined_mask |= np.all(matched_rgb == rgb, axis=-1) & mask_solid
+
+        # Apply cyan highlight (same style as region-detect)
+        highlight_color = np.array([0, 200, 255], dtype=np.uint8)
+        alpha = 0.45
+        preview_img: np.ndarray = matched_rgb.copy()
+        preview_img[combined_mask] = (
+            preview_img[combined_mask].astype(np.float32) * (1 - alpha)
+            + highlight_color.astype(np.float32) * alpha
+        ).astype(np.uint8)
+
+        preview_bytes: bytes = _image_to_png_bytes(preview_img)
+        preview_id: str = registry.register_bytes(
+            request.session_id, preview_bytes, "color_highlight.png",
+        )
+
+    except HTTPException:
+        raise
+    except REPLACE_HANDLED_ERRORS as e:
+        _handle_core_error(e, "Color highlight")
+
+    return ColorHighlightResponse(preview_url=f"/api/files/{preview_id}")
 
 
 @router.post("/region-detect", response_model=RegionDetectResponse)

@@ -456,6 +456,13 @@ export interface ColorReplaceResponse {
   replacement_count: number;
 }
 
+// ========== Color Highlight Models ==========
+
+/** 颜色高亮响应 */
+export interface ColorHighlightResponse {
+  preview_url: string;
+}
+
 // ========== Region Detection & Replace Models ==========
 
 /** 连通区域检测响应 */

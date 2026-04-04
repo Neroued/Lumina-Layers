@@ -156,4 +156,39 @@ describe("ActionBar — auto batch mode", () => {
     render(<ActionBar />);
     expect(screen.queryByText(/成功.*总计/)).not.toBeInTheDocument();
   });
+
+  it("renders cumulative multi-select overlay on top of the current highlighted preview image", () => {
+    useConverterStore.setState({
+      selectionMode: "multi-select",
+      sessionId: "session-1",
+      previewImageUrl: "/api/files/highlight-last-region",
+      previewBaseImageUrl: "/api/files/base-preview",
+      preview_width_mm: 60,
+      previewPixelWidth: 600,
+      previewPixelHeight: 400,
+      selectedRegions: [
+        {
+          regionId: "region-a",
+          colorHex: "#ff0000",
+          pixelCount: 10,
+          previewUrl: "/api/files/highlight-region-a",
+          contours: [[[10, 10], [20, 10], [20, 20], [10, 20]]],
+        },
+        {
+          regionId: "region-b",
+          colorHex: "#00ff00",
+          pixelCount: 20,
+          previewUrl: "/api/files/highlight-region-b",
+          contours: [[[30, 5], [40, 5], [40, 15], [30, 15]]],
+        },
+      ],
+    });
+
+    render(<ActionBar />);
+
+    const previewImage = screen.getByAltText("预览结果");
+    expect(previewImage).toHaveAttribute("src", "/api/files/highlight-last-region");
+    expect(screen.getByTestId("preview-multi-select-overlay")).toBeInTheDocument();
+    expect(screen.getAllByTestId("preview-multi-select-polygon")).toHaveLength(1);
+  });
 });

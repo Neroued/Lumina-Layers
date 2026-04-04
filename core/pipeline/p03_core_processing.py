@@ -58,9 +58,9 @@ def run(ctx: dict) -> dict:
     enable_cleanup = ctx.get('enable_cleanup', True)
 
     # ---- 核心处理 ----
-    print(f"[Core generate_preview_cached] hue_weight={hue_weight}, chroma_gate={chroma_gate}, color_mode={color_mode}")
     processor = LuminaImageProcessor(actual_lut_path, color_mode, hue_weight=hue_weight, chroma_gate=chroma_gate)
     processor.enable_cleanup = enable_cleanup
+
     result = processor.process_image(
         image_path=image_path,
         target_width_mm=target_width_mm,
