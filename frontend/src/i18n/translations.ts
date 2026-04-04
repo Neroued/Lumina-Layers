@@ -3066,4 +3066,110 @@ export const translations: Record<string, Record<"zh" | "en", string>> = {
     zh: "灰色选项表示该位置上的无效组合。",
     en: "Gray options indicate invalid combinations at that position.",
   },
+
+  // ==================== Recipe Share Card ====================
+  recipe_export_btn: {
+    zh: "导出分享卡",
+    en: "Export Share Card",
+  },
+  recipe_export_sidecar_btn: {
+    zh: "导出 JSON",
+    en: "Export JSON",
+  },
+  recipe_export_loading: {
+    zh: "正在导出...",
+    en: "Exporting...",
+  },
+  recipe_export_success: {
+    zh: "分享卡已保存",
+    en: "Share card saved",
+  },
+  recipe_export_error: {
+    zh: "导出失败：{error}",
+    en: "Export failed: {error}",
+  },
+  recipe_import_title: {
+    zh: "导入分享卡",
+    en: "Import Share Card",
+  },
+  recipe_import_source_label: {
+    zh: "来源",
+    en: "Source",
+  },
+  recipe_import_source_png: {
+    zh: "PNG 分享卡",
+    en: "PNG Share Card",
+  },
+  recipe_import_source_json: {
+    zh: "JSON 配方文件",
+    en: "JSON Recipe File",
+  },
+  recipe_import_version_label: {
+    zh: "应用版本",
+    en: "App Version",
+  },
+  recipe_import_created_label: {
+    zh: "创建时间",
+    en: "Created",
+  },
+  recipe_import_lut_label: {
+    zh: "LUT",
+    en: "LUT",
+  },
+  recipe_import_color_mode_label: {
+    zh: "色彩模式",
+    en: "Color Mode",
+  },
+  recipe_import_size_label: {
+    zh: "尺寸",
+    en: "Size",
+  },
+  recipe_import_warnings_label: {
+    zh: "警告",
+    en: "Warnings",
+  },
+  recipe_import_confirm: {
+    zh: "确认恢复",
+    en: "Confirm Restore",
+  },
+  recipe_import_cancel: {
+    zh: "取消",
+    en: "Cancel",
+  },
+  recipe_import_success: {
+    zh: "配方已恢复",
+    en: "Recipe restored",
+  },
+  recipe_import_error: {
+    zh: "导入失败：{error}",
+    en: "Import failed: {error}",
+  },
+  recipe_import_not_share_card: {
+    zh: "该 PNG 不包含 Lumina 配方数据",
+    en: "This PNG does not contain Lumina recipe data",
+  },
+  recipe_export_with_sidecar: {
+    zh: "同时导出 JSON",
+    en: "Also export JSON",
+  },
+  recipe_import_lut_missing: {
+    zh: "LUT 未找到，请手动选择兼容的 LUT",
+    en: "LUT not found, please select a compatible LUT manually",
+  },
+  recipe_import_lut_degraded: {
+    zh: "LUT 已降级匹配（名称相同但指纹不一致）",
+    en: "LUT matched by name but fingerprint differs — colors may vary",
+  },
+  recipe_import_schema_newer: {
+    zh: "配方版本较新，部分参数可能无法恢复",
+    en: "Recipe uses a newer schema version — some parameters may not restore",
+  },
+  recipe_import_integrity_fail: {
+    zh: "完整性校验失败，配方数据可能已损坏",
+    en: "Integrity check failed — recipe data may be corrupted",
+  },
+  recipe_import_asset_corrupt: {
+    zh: "素材数据损坏，无法恢复原始文件",
+    en: "Asset data is corrupted — unable to restore original file",
+  },
 };

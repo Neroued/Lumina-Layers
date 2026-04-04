@@ -53,14 +53,20 @@ def list_luts() -> LUTListResponse:
     返回所有可用 LUT 预设，以 LutInfo 对象列表形式返回。
     """
     lut_dict: dict[str, str] = LUTManager.get_all_lut_files()
-    lut_list: list[LutInfo] = [
-        LutInfo(
-            name=display_name,
-            color_mode=LUTManager.infer_color_mode(display_name, file_path),
-            path=file_path,
+    lut_list: list[LutInfo] = []
+    for display_name, file_path in lut_dict.items():
+        try:
+            fingerprint = LUTManager.compute_fingerprint(file_path)
+        except OSError:
+            fingerprint = ""
+        lut_list.append(
+            LutInfo(
+                name=display_name,
+                color_mode=LUTManager.infer_color_mode(display_name, file_path),
+                path=file_path,
+                fingerprint=fingerprint,
+            )
         )
-        for display_name, file_path in lut_dict.items()
-    ]
     return LUTListResponse(luts=lut_list)
 
 

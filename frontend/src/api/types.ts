@@ -164,6 +164,7 @@ export interface LutInfo {
   name: string;
   color_mode: ColorMode;
   path: string;
+  fingerprint: string;
 }
 
 export interface BedSizeItem {

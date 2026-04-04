@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from "react";
 import { useI18n } from "../../i18n/context";
+import { isShareCardFile } from "../../recipe/importFlow";
 
 interface UnifiedUploaderProps {
   /** 当前单图模式的预览 URL */
@@ -14,6 +15,8 @@ interface UnifiedUploaderProps {
   onBatchFileRemove: (index: number) => void;
   /** 接受的文件格式 */
   accept: string;
+  /** Called when a share card or .lumina.json file is detected */
+  onShareCardDetected?: (file: File) => void;
 }
 
 export default function UnifiedUploader({
@@ -23,11 +26,45 @@ export default function UnifiedUploader({
   onFilesSelect,
   onBatchFileRemove,
   accept,
+  onShareCardDetected,
 }: UnifiedUploaderProps) {
   const { t } = useI18n();
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const addMoreInputRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * Check files for share cards before passing to normal handler.
+   * If a single file is a share card (.lumina.json or PNG with recipe), route it.
+   */
+  const filterShareCards = useCallback(
+    async (files: File[]) => {
+      if (files.length === 1 && onShareCardDetected) {
+        const file = files[0];
+        const name = file.name.toLowerCase();
+        // Fast path: .lumina.json is always a share card
+        if (name.endsWith(".lumina.json")) {
+          onShareCardDetected(file);
+          return;
+        }
+        // PNG: check for embedded recipe metadata
+        if (name.endsWith(".png")) {
+          try {
+            const isCard = await isShareCardFile(file);
+            if (isCard) {
+              onShareCardDetected(file);
+              return;
+            }
+          } catch {
+            // Detection failed — treat as normal file
+          }
+        }
+      }
+      // Not a share card — pass through normally
+      onFilesSelect(files);
+    },
+    [onFilesSelect, onShareCardDetected],
+  );
 
   const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -48,10 +85,10 @@ export default function UnifiedUploader({
       setIsDragging(false);
       const files = Array.from(e.dataTransfer.files);
       if (files.length > 0) {
-        onFilesSelect(files);
+        void filterShareCards(files);
       }
     },
-    [onFilesSelect],
+    [filterShareCards],
   );
 
   const handleClick = useCallback(() => {
@@ -62,11 +99,11 @@ export default function UnifiedUploader({
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = Array.from(e.target.files ?? []);
       if (files.length > 0) {
-        onFilesSelect(files);
+        void filterShareCards(files);
       }
       e.target.value = "";
     },
-    [onFilesSelect],
+    [filterShareCards],
   );
 
   const handleAddMoreClick = useCallback(() => {
@@ -77,11 +114,11 @@ export default function UnifiedUploader({
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = Array.from(e.target.files ?? []);
       if (files.length > 0) {
-        onFilesSelect(files);
+        void filterShareCards(files);
       }
       e.target.value = "";
     },
-    [onFilesSelect],
+    [filterShareCards],
   );
 
   const borderClass = isDragging
