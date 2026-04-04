@@ -189,6 +189,8 @@ export default function PalettePanel() {
   const palette = useConverterStore((s) => s.palette);
   const selectedColor = useConverterStore((s) => s.selectedColor);
   const setSelectedColor = useConverterStore((s) => s.setSelectedColor);
+  const selectedColors = useConverterStore((s) => s.selectedColors);
+  const toggleColorInSelection = useConverterStore((s) => s.toggleColorInSelection);
   const enable_relief = useConverterStore((s) => s.enable_relief);
   const color_height_map = useConverterStore((s) => s.color_height_map);
   const updateColorHeight = useConverterStore((s) => s.updateColorHeight);
@@ -216,7 +218,16 @@ export default function PalettePanel() {
       case 'region':
         break;
       case 'select-all':
-        setSelectedColor(selectedColor === hex ? null : hex);
+        toggleColorInSelection(hex);
+        // Keep selectedColor in sync for detail display & recommendations
+        if (selectedColors.has(hex)) {
+          // Was selected, now toggled off
+          const remaining = Array.from(selectedColors).filter((c) => c !== hex);
+          setSelectedColor(remaining.length > 0 ? remaining[remaining.length - 1] : null);
+        } else {
+          // Newly selected
+          setSelectedColor(hex);
+        }
         break;
     }
   };
@@ -229,6 +240,9 @@ export default function PalettePanel() {
   const getIsSelected = (hex: string): boolean => {
     if (multiSelectHexSet) {
       return multiSelectHexSet.has(hex);
+    }
+    if (selectionMode === 'select-all' && selectedColors.size > 0) {
+      return selectedColors.has(hex);
     }
     return selectedColor === hex;
   };
@@ -290,6 +304,25 @@ export default function PalettePanel() {
               onClick={() => setSelectionMode('region')}
             />
           </div>
+
+          {/* Select-all multi-color indicator */}
+          {selectionMode === 'select-all' && selectedColors.size > 0 && (
+            <div className={cx(workstationInsetCardClass, "flex flex-wrap items-center gap-2 px-3 py-2.5")}>
+              <span className="text-[clamp(0.55rem,0.75vw,0.625rem)] font-medium text-amber-500 dark:text-amber-400">
+                {t("palette_multi_select_count").replace("{count}", String(selectedColors.size))}
+              </span>
+              {Array.from(selectedColors).map((hex) => (
+                <button
+                  key={hex}
+                  type="button"
+                  onClick={() => handleSelect(hex)}
+                  className="h-5 w-5 rounded-lg border-2 border-amber-400 shadow-sm transition-transform hover:scale-110"
+                  style={{ backgroundColor: `#${hex}` }}
+                  title={`#${hex} — ${t("palette_multi_select_click_remove")}`}
+                />
+              ))}
+            </div>
+          )}
 
           {/* Multi-select region indicator */}
           {selectionMode === 'multi-select' && selectedRegions.length > 0 && (

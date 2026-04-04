@@ -1,4 +1,4 @@
-import { create } from "zustand";
+import { create } from 'zustand';
 import type {
   ColorMode,
   ModelingMode,
@@ -25,6 +25,7 @@ import {
   cropImage as apiCropImage,
   convertBatch as apiConvertBatch,
   replaceColor as apiReplaceColor,
+  colorHighlight as apiColorHighlight,
   detectRegion as apiDetectRegion,
   regionReplace as apiRegionReplace,
   resetReplacements as apiResetReplacements,
@@ -95,6 +96,24 @@ export interface PendingReplacement {
 
 export function clampValue(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+function getLastSelectedRegion(regions: RegionData[]): RegionData | null {
+  return regions.length > 0 ? regions[regions.length - 1] : null;
+}
+
+function getSelectedRegionPreviewUrl(
+  regions: RegionData[],
+  fallbackPreviewUrl: string | null,
+): string | null {
+  const lastRegion = getLastSelectedRegion(regions);
+  return lastRegion ? lastRegion.previewUrl : fallbackPreviewUrl;
+}
+
+function getPreviewBaseUrl(
+  state: Pick<ConverterState, "previewBaseImageUrl" | "originalPreviewUrl" | "previewImageUrl">,
+): string | null {
+  return state.previewBaseImageUrl ?? state.originalPreviewUrl ?? state.previewImageUrl;
 }
 
 const VALID_IMAGE_TYPES = new Set([
@@ -270,6 +289,7 @@ export interface ConverterState {
   // 颜色替换预览
   replacePreviewLoading: boolean;
   originalPreviewUrl: string | null;
+  previewBaseImageUrl: string | null;
 
   // 切片集成：3MF 路径
   threemfDiskPath: string | null;
@@ -534,6 +554,7 @@ export const DEFAULT_STATE: ConverterState = {
   batchResult: null,
   replacePreviewLoading: false,
   originalPreviewUrl: null,
+  previewBaseImageUrl: null,
   threemfDiskPath: null,
   downloadUrl: null,
   layerImages: [],
@@ -614,7 +635,20 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       }
 
       if (!file) {
-        set({ imageFile: null, imagePreviewUrl: null, aspectRatio: null });
+        set({
+          imageFile: null,
+          imagePreviewUrl: null,
+          aspectRatio: null,
+          previewImageUrl: null,
+          originalPreviewUrl: null,
+          previewBaseImageUrl: null,
+          sessionId: null,
+          previewGlbUrl: null,
+          selectedColor: null,
+          selectedColors: new Set<string>(),
+          regionData: null,
+          selectedRegions: [],
+        });
         return;
       }
 
@@ -624,6 +658,15 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           imageFile: file,
           imagePreviewUrl: null,
           aspectRatio: null,
+          previewImageUrl: null,
+          originalPreviewUrl: null,
+          previewBaseImageUrl: null,
+          sessionId: null,
+          previewGlbUrl: null,
+          selectedColor: null,
+          selectedColors: new Set<string>(),
+          regionData: null,
+          selectedRegions: [],
           cropModalOpen: shouldOpenCrop,
           hasManualPreview: false,
           layerImages: [],
@@ -656,6 +699,15 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       set({
         imageFile: file,
         imagePreviewUrl: previewUrl,
+        previewImageUrl: null,
+        originalPreviewUrl: null,
+        previewBaseImageUrl: null,
+        sessionId: null,
+        previewGlbUrl: null,
+        selectedColor: null,
+        selectedColors: new Set<string>(),
+        regionData: null,
+        selectedRegions: [],
         cropModalOpen: shouldOpenCrop,
         hasManualPreview: false,
         layerImages: [],
@@ -916,54 +968,85 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
     // region: 保留的局部区域模式
     setSelectionMode: (mode: SelectionMode) => {
       switch (mode) {
-        case "current":
+        case "current": {
+          const baseCur = getPreviewBaseUrl(_get());
           set({
             selectionMode: mode,
             selectedColors: new Set<string>(),
             selectedColor: null,
             regionData: null,
             selectedRegions: [],
+            previewImageUrl: baseCur,
           });
           break;
-        case "select-all":
+        }
+        case "select-all": {
+          const baseSelectAll = getPreviewBaseUrl(_get());
           set({
             selectionMode: mode,
             selectedColors: new Set<string>(),
             selectedRegions: [],
+            previewImageUrl: baseSelectAll,
           });
           break;
-        case "multi-select":
+        }
+        case "multi-select": {
+          const baseMulti = getPreviewBaseUrl(_get());
           set({
             selectionMode: mode,
             selectedColors: new Set<string>(),
             selectedColor: null,
             regionData: null,
             selectedRegions: [],
+            previewImageUrl: baseMulti,
           });
           break;
-        case "region":
+        }
+        case "region": {
+          const baseRegion = getPreviewBaseUrl(_get());
           set({
             selectionMode: mode,
             selectedColors: new Set<string>(),
             selectedColor: null,
             regionData: null,
             selectedRegions: [],
+            previewImageUrl: baseRegion,
           });
           break;
+        }
       }
     },
 
     // --- 多选模式颜色切换 ---
     toggleColorInSelection: (hex: string) => {
-      set((state) => {
-        const next = new Set(state.selectedColors);
-        if (next.has(hex)) {
-          next.delete(hex);
-        } else {
-          next.add(hex);
-        }
-        return { selectedColors: next };
-      });
+      const prev = _get().selectedColors;
+      const next = new Set(prev);
+      if (next.has(hex)) {
+        next.delete(hex);
+      } else {
+        next.add(hex);
+      }
+      set({ selectedColors: next });
+
+      // 2D 预览高亮：调用后端生成颜色高亮预览（与 detectRegion 同风格）
+      const state = _get();
+      const sid = state.sessionId;
+      if (!sid) return;
+
+      if (next.size === 0) {
+        set({ previewImageUrl: getPreviewBaseUrl(state) });
+      } else {
+        const hexes = Array.from(next);
+        void apiColorHighlight(sid, hexes)
+          .then((res) => {
+            if (_get().selectedColors.size > 0) {
+              set({ previewImageUrl: normalizeResourceUrl(res.preview_url) });
+            }
+          })
+          .catch(() => {
+            // 静默忽略高亮失败（不影响核心流程）
+          });
+      }
     },
 
     // --- 批量颜色替换 ---
@@ -1015,18 +1098,19 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       }
       try {
         const response = await apiDetectRegion(state.sessionId, x, y);
+        const previewUrl = normalizeResourceUrl(response.preview_url) ?? response.preview_url;
         set({
           regionData: {
             regionId: response.region_id,
             colorHex: response.color_hex,
             pixelCount: response.pixel_count,
-            previewUrl: normalizeResourceUrl(response.preview_url) ?? response.preview_url,
+            previewUrl,
             contours: response.contours ?? null,
             clickX: x,
             clickY: y,
           },
           selectedColor: response.color_hex.replace(/^#/, ""),
-          previewImageUrl: normalizeResourceUrl(response.preview_url),
+          previewImageUrl: previewUrl,
         });
       } catch (err) {
         set({
@@ -1053,23 +1137,30 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           clickX: x,
           clickY: y,
         };
-        const existing = state.selectedRegions;
+        const currentState = _get();
+        const existing = currentState.selectedRegions;
+        const previewBaseUrl = getPreviewBaseUrl(currentState);
         const idx = existing.findIndex(
           (r) => r.regionId === newRegion.regionId,
         );
         if (idx >= 0) {
           const next = existing.filter((_, i) => i !== idx);
-          const lastRegion = next.length > 0 ? next[next.length - 1] : null;
+          const lastRegion = getLastSelectedRegion(next);
           set({
             selectedRegions: next,
             selectedColor: lastRegion
               ? lastRegion.colorHex.replace(/^#/, "")
               : null,
+            previewImageUrl: getSelectedRegionPreviewUrl(next, previewBaseUrl),
           });
         } else {
           set({
             selectedRegions: [...existing, newRegion],
             selectedColor: response.color_hex.replace(/^#/, ""),
+            previewImageUrl: getSelectedRegionPreviewUrl(
+              [...existing, newRegion],
+              previewBaseUrl,
+            ),
           });
         }
       } catch (err) {
@@ -1077,6 +1168,20 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           error: err instanceof Error ? err.message : "Region detect failed",
         });
       }
+    },
+
+    removeRegionFromSelection: (regionId: string) => {
+      const state = _get();
+      const next = state.selectedRegions.filter((region) => region.regionId !== regionId);
+      if (next.length === state.selectedRegions.length) {
+        return;
+      }
+      const lastRegion = getLastSelectedRegion(next);
+      set({
+        selectedRegions: next,
+        selectedColor: lastRegion ? lastRegion.colorHex.replace(/^#/, "") : null,
+        previewImageUrl: getSelectedRegionPreviewUrl(next, getPreviewBaseUrl(state)),
+      });
     },
 
     // --- 连通区域替换 ---
@@ -1095,6 +1200,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         const response = await apiRegionReplace(state.sessionId, `#${newHex}`);
         const updates: Partial<ConverterState> = {
           previewImageUrl: normalizeResourceUrl(response.preview_url),
+          previewBaseImageUrl: normalizeResourceUrl(response.preview_url),
           regionData: null,
           replacePreviewLoading: false,
           threemfDiskPath: null,
@@ -1137,8 +1243,16 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
 
       switch (pending.mode) {
         case "select-all":
-          // 乐观更新 colorRemapMap → 3D 预览即时响应
-          _get().applyColorRemap(pending.sourceHex, pending.targetHex);
+          if (pending.sourceColors && pending.sourceColors.length > 1) {
+            // 多选批量替换：所有选中的源色 → 同一目标色
+            // 先临时写入 selectedColors 以供 applyBatchColorRemap 使用
+            set({ selectedColors: new Set(pending.sourceColors) });
+            await _get().applyBatchColorRemap(pending.targetHex);
+            set({ selectedColors: new Set<string>(), selectedColor: null });
+          } else {
+            // 单色替换：乐观更新 colorRemapMap → 3D 预览即时响应
+            _get().applyColorRemap(pending.sourceHex, pending.targetHex);
+          }
           break;
         case "multi-select": {
           // 多区域模式：顺序 re-detect → replace 每个连通区域
@@ -1165,6 +1279,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
               );
               const updates: Partial<ConverterState> = {
                 previewImageUrl: normalizeResourceUrl(response.preview_url),
+                previewBaseImageUrl: normalizeResourceUrl(response.preview_url),
               };
               if (response.preview_glb_url) {
                 updates.previewGlbUrl = normalizeResourceUrl(response.preview_glb_url);
@@ -1234,15 +1349,13 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         threemfDiskPath: null,
         downloadUrl: null,
       });
-      // 根据撤销后的 map 状态恢复预览
       if (Object.keys(previousMap).length === 0) {
-        // map 为空，恢复原始预览
         const originalUrl = _get().originalPreviewUrl;
-        if (originalUrl) {
-          set({ previewImageUrl: originalUrl });
-        }
+        set({
+          previewImageUrl: originalUrl,
+          previewBaseImageUrl: originalUrl,
+        });
       } else {
-        // map 仍有映射，重新调用后端生成预览
         _get().submitReplacePreview();
       }
     },
@@ -1267,26 +1380,26 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
             const updates: Partial<ConverterState> = {
               previewImageUrl: url,
               originalPreviewUrl: url,
+              previewBaseImageUrl: url,
             };
-            // 后端 reset-replacements 现在也会重新生成 GLB
             if (res.preview_glb_url) {
               updates.previewGlbUrl = `${res.preview_glb_url}`;
             }
             set(updates);
           })
           .catch(() => {
-            // 后端清空失败时回退到 originalPreviewUrl
             const fallback = _get().originalPreviewUrl;
-            if (fallback) {
-              set({ previewImageUrl: fallback });
-            }
+            set({
+              previewImageUrl: fallback,
+              previewBaseImageUrl: fallback,
+            });
           });
       } else {
-        // 无 session 时直接回退到 originalPreviewUrl
         const originalUrl = state.originalPreviewUrl;
-        if (originalUrl) {
-          set({ previewImageUrl: originalUrl });
-        }
+        set({
+          previewImageUrl: originalUrl,
+          previewBaseImageUrl: originalUrl,
+        });
       }
     },
 
@@ -1508,9 +1621,15 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           sessionId: response.session_id,
           previewImageUrl: previewUrl,
           originalPreviewUrl: previewUrl,
+          previewBaseImageUrl: previewUrl,
           palette: normalizedPalette,
           colorContours: response.contours ?? {},
           previewGlbUrl: glbUrl,
+          selectedColor: null,
+          selectedColors: new Set<string>(),
+          regionData: null,
+          selectedRegions: [],
+          pendingReplacement: null,
           preview_width_mm: state.target_width_mm,
           preview_height_mm: state.target_height_mm,
           preview_spacer_thick: state.spacer_thick,
@@ -1715,9 +1834,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
 
         // Revoke previous preview URL
         const prev = _get().imagePreviewUrl;
-        if (prev) {
-          URL.revokeObjectURL(prev);
-        }
+        if (prev) URL.revokeObjectURL(prev);
 
         const newPreviewUrl = URL.createObjectURL(croppedFile);
 
@@ -1826,8 +1943,14 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           imagePreviewUrl: null,
           aspectRatio: null,
           previewImageUrl: null,
+          originalPreviewUrl: null,
+          previewBaseImageUrl: null,
           sessionId: null,
           previewGlbUrl: null,
+          selectedColor: null,
+          selectedColors: new Set<string>(),
+          regionData: null,
+          selectedRegions: [],
           batchMode: false,
           hasManualPreview: false,
         });
@@ -1873,6 +1996,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
             imagePreviewUrl: null,
             aspectRatio: null,
             previewImageUrl: null,
+            previewBaseImageUrl: null,
             sessionId: null,
             previewGlbUrl: null,
             batchMode: false,
@@ -1909,6 +2033,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
             imageFile: singleFile,
             imagePreviewUrl: previewUrl,
             previewImageUrl: null,
+            previewBaseImageUrl: null,
             sessionId: null,
             previewGlbUrl: null,
             batchMode: false,
@@ -1956,6 +2081,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         imagePreviewUrl: null,
         aspectRatio: null,
         previewImageUrl: null,
+        previewBaseImageUrl: null,
         sessionId: null,
         previewGlbUrl: null,
         batchMode: true,
@@ -2008,6 +2134,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         const updates: Partial<ConverterState> = {
           replacePreviewLoading: false,
           previewImageUrl: normalizeResourceUrl(response.preview_url),
+          previewBaseImageUrl: normalizeResourceUrl(response.preview_url),
         };
         if (response.preview_3d_url) {
           updates.previewGlbUrl = normalizeResourceUrl(response.preview_3d_url);
@@ -2064,6 +2191,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         const updates: Partial<ConverterState> = {
           replacePreviewLoading: false,
           previewImageUrl: lastPreviewUrl,
+          previewBaseImageUrl: lastPreviewUrl,
         };
         if (lastGlbUrl) {
           updates.previewGlbUrl = lastGlbUrl;

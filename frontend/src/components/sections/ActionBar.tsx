@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useMemo, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import { useConverterStore } from "../../stores/converter"
 import Button from "../ui/Button"
@@ -20,6 +20,12 @@ export default function ActionBar() {
   const isGenerating = useConverterStore((s) => s.isGenerating)
   const error = useConverterStore((s) => s.error)
   const previewImageUrl = useConverterStore((s) => s.previewImageUrl)
+  const previewBaseImageUrl = useConverterStore((s) => s.previewBaseImageUrl)
+  const selectionMode = useConverterStore((s) => s.selectionMode)
+  const selectedRegions = useConverterStore((s) => s.selectedRegions)
+  const previewWidthMm = useConverterStore((s) => s.preview_width_mm)
+  const previewPixelWidth = useConverterStore((s) => s.previewPixelWidth)
+  const previewPixelHeight = useConverterStore((s) => s.previewPixelHeight)
   const submitPreview = useConverterStore((s) => s.submitPreview)
   const submitGenerate = useConverterStore((s) => s.submitGenerate)
   const submitFullPipeline = useConverterStore((s) => s.submitFullPipeline)
@@ -40,7 +46,83 @@ export default function ActionBar() {
 
   const canSubmit = !!imageFile && !!lut_name
   const canBatchSubmit = batchFiles.length > 0 && !!lut_name
-  const hasPreview = !!previewImageUrl && !!sessionId
+  const previewDisplayUrl = selectionMode === "multi-select"
+    ? (previewImageUrl ?? previewBaseImageUrl)
+    : previewImageUrl
+  const hasPreview = !!previewDisplayUrl && !!sessionId
+  const activeMultiSelectRegionId = selectionMode === "multi-select" && selectedRegions.length > 0
+    ? selectedRegions[selectedRegions.length - 1].regionId
+    : null
+
+  const previewOverlay = useMemo(() => {
+    if (
+      selectionMode !== "multi-select" ||
+      selectedRegions.length === 0 ||
+      !previewWidthMm ||
+      !previewPixelWidth ||
+      !previewPixelHeight ||
+      previewWidthMm <= 0 ||
+      previewPixelWidth <= 0 ||
+      previewPixelHeight <= 0
+    ) {
+      return null
+    }
+
+    const pixelScale = previewWidthMm / previewPixelWidth
+    if (!(pixelScale > 0)) {
+      return null
+    }
+
+    const polygons: ReactNode[] = []
+
+    for (const region of selectedRegions) {
+      if (
+        region.regionId === activeMultiSelectRegionId ||
+        !region.contours ||
+        region.contours.length === 0
+      ) {
+        continue
+      }
+
+      for (let polygonIndex = 0; polygonIndex < region.contours.length; polygonIndex += 1) {
+        const polygon = region.contours[polygonIndex]
+        if (polygon.length < 3) {
+          continue
+        }
+
+        const points = polygon
+          .map(([x, y]) => `${x / pixelScale},${previewPixelHeight - y / pixelScale}`)
+          .join(" ")
+
+        polygons.push(
+          <polygon
+            key={`${region.regionId}-${polygonIndex}`}
+            data-testid="preview-multi-select-polygon"
+            points={points}
+            className="fill-sky-400/25 stroke-sky-400/85"
+            strokeWidth={1}
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+          />,
+        )
+      }
+    }
+
+    if (polygons.length === 0) {
+      return null
+    }
+
+    return (
+      <svg
+        data-testid="preview-multi-select-overlay"
+        viewBox={`0 0 ${previewPixelWidth} ${previewPixelHeight}`}
+        className="h-full w-full"
+        aria-hidden="true"
+      >
+        {polygons}
+      </svg>
+    )
+  }, [activeMultiSelectRegionId, previewPixelHeight, previewPixelWidth, previewWidthMm, selectedRegions, selectionMode])
 
   return (
     <div className="flex flex-col gap-3">
@@ -111,11 +193,12 @@ export default function ActionBar() {
 
       <BedSizeSelector />
 
-      {previewImageUrl && (
+      {previewDisplayUrl && (
         <ZoomableImage
-          src={previewImageUrl}
+          src={previewDisplayUrl}
           alt={t("action_preview_alt")}
           className="w-full rounded-[22px] border border-gray-300 dark:border-gray-700"
+          overlay={previewOverlay}
         />
       )}
 

@@ -37,7 +37,8 @@ vi.stubGlobal(
 );
 
 import { useConverterStore } from "../stores/converter";
-import type { RegionReplaceResponse } from "../api/types";
+import type { RegionData } from "../stores/converter";
+import type { RegionDetectResponse, RegionReplaceResponse } from "../api/types";
 
 const glbUrlPath = fc
   .stringMatching(/^[a-z0-9]{6,12}$/)
@@ -98,6 +99,7 @@ function resetStore(overrides?: Partial<ReturnType<typeof useConverterStore.getS
     replacePreviewLoading: false,
     error: null,
     previewImageUrl: null,
+    previewBaseImageUrl: null,
     previewGlbUrl: null,
     colorContours: {},
     threemfDiskPath: null,
@@ -110,6 +112,110 @@ describe("region 3d preview sync", () => {
   beforeEach(() => {
     resetStore();
     vi.clearAllMocks();
+  });
+
+  it("uses the latest region highlight preview when detectAndAccumulateRegion selects a region in multi-select mode", async () => {
+    const { detectRegion } = await import("../api/converter");
+
+    resetStore({
+      selectionMode: "multi-select",
+      originalPreviewUrl: "/api/files/original-preview",
+      previewBaseImageUrl: "/api/files/original-preview",
+      previewImageUrl: "/api/files/original-preview",
+      selectedRegions: [],
+      selectedColor: null,
+    });
+
+    const response: RegionDetectResponse = {
+      region_id: "region-2",
+      color_hex: "#00ff00",
+      pixel_count: 42,
+      preview_url: "/api/files/highlight-region-2",
+      contours: null,
+    };
+    (detectRegion as ReturnType<typeof vi.fn>).mockResolvedValue(response);
+
+    await useConverterStore.getState().detectAndAccumulateRegion(12, 34);
+
+    const state = useConverterStore.getState();
+    expect(state.previewImageUrl).toBe("/api/files/highlight-region-2");
+    expect(state.previewBaseImageUrl).toBe("/api/files/original-preview");
+    expect(state.selectedColor).toBe("00ff00");
+    expect(state.selectedRegions).toEqual([
+      expect.objectContaining({
+        regionId: "region-2",
+        colorHex: "#00ff00",
+        pixelCount: 42,
+        previewUrl: "/api/files/highlight-region-2",
+        clickX: 12,
+        clickY: 34,
+      }),
+    ]);
+  });
+
+  it("falls back to the latest remaining region highlight when removing multi-select regions", () => {
+    const regionA: RegionData = {
+      regionId: "region-a",
+      colorHex: "#ff0000",
+      pixelCount: 10,
+      previewUrl: "/api/files/highlight-region-a",
+      clickX: 1,
+      clickY: 2,
+    };
+    const regionB: RegionData = {
+      regionId: "region-b",
+      colorHex: "#00ff00",
+      pixelCount: 20,
+      previewUrl: "/api/files/highlight-region-b",
+      clickX: 3,
+      clickY: 4,
+    };
+
+    resetStore({
+      selectionMode: "multi-select",
+      originalPreviewUrl: "/api/files/original-preview",
+      previewBaseImageUrl: "/api/files/original-preview",
+      previewImageUrl: "/api/files/original-preview",
+      selectedRegions: [regionA, regionB],
+      selectedColor: "00ff00",
+    });
+
+    useConverterStore.getState().removeRegionFromSelection("region-b");
+
+    let state = useConverterStore.getState();
+    expect(state.selectedRegions).toEqual([regionA]);
+    expect(state.selectedColor).toBe("ff0000");
+    expect(state.previewImageUrl).toBe(regionA.previewUrl);
+
+    useConverterStore.getState().removeRegionFromSelection("region-a");
+
+    state = useConverterStore.getState();
+    expect(state.selectedRegions).toEqual([]);
+    expect(state.selectedColor).toBeNull();
+    expect(state.previewImageUrl).toBe("/api/files/original-preview");
+  });
+
+  it("updates previewBaseImageUrl together with previewImageUrl after applyRegionReplace", async () => {
+    const { regionReplace } = await import("../api/converter");
+
+    resetStore({
+      previewImageUrl: "/api/files/preview-before-replace",
+      previewBaseImageUrl: "/api/files/preview-before-replace",
+    });
+
+    const response: RegionReplaceResponse = {
+      preview_url: "/api/files/preview-after-replace",
+      preview_glb_url: null,
+      color_contours: null,
+      message: "ok",
+    };
+    (regionReplace as ReturnType<typeof vi.fn>).mockResolvedValue(response);
+
+    await useConverterStore.getState().applyRegionReplace("abcdef");
+
+    const state = useConverterStore.getState();
+    expect(state.previewImageUrl).toBe("/api/files/preview-after-replace");
+    expect(state.previewBaseImageUrl).toBe("/api/files/preview-after-replace");
   });
 
   it("updates previewGlbUrl and colorContours only when response fields are non-null", async () => {

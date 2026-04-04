@@ -395,6 +395,37 @@ class ColorMergePreviewRequest(BaseModel):
     merge_max_distance: int = Field(20, ge=5, le=50, description="最大合并距离 (px)")
 
 
+class ColorHighlightRequest(BaseModel):
+    """Request model for highlighting all pixels of given colors in the preview.
+    高亮预览图中指定颜色所有像素的请求模型。
+
+    Used by ``POST /api/convert/color-highlight`` to generate a preview
+    image with semi-transparent cyan overlay on all pixels matching any
+    of the given color hex values.
+    用于 ``POST /api/convert/color-highlight``，生成对所有匹配给定颜色
+    hex 值的像素施加半透明青色叠加的预览图。
+
+    Attributes:
+        session_id: Active session identifier. (Session ID)
+        color_hexes: List of hex color strings to highlight (with or without '#' prefix).
+            要高亮的颜色 hex 列表（可带或不带 '#' 前缀）。
+    """
+
+    session_id: str = Field(..., description="Session ID")
+    color_hexes: List[str] = Field(..., min_length=1, description="要高亮的颜色 hex 列表")
+
+
+class ColorHighlightResponse(BaseModel):
+    """Response model for color-based pixel highlighting.
+    基于颜色的像素高亮的响应模型。
+
+    Attributes:
+        preview_url: URL of the highlighted preview image. (高亮预览图 URL)
+    """
+
+    preview_url: str = Field(..., description="高亮预览图 URL")
+
+
 class RegionDetectRequest(BaseModel):
     """Request model for detecting a connected region at a click position.
     检测点击位置连通区域的请求模型。
