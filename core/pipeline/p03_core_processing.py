@@ -10,7 +10,6 @@ P03 — 核心图像处理（量化 + LUT 匹配）。
 
 
 import time
-import numpy as np
 
 
 def run(ctx: dict) -> dict:
@@ -59,20 +58,8 @@ def run(ctx: dict) -> dict:
     enable_cleanup = ctx.get('enable_cleanup', True)
 
     # ---- 核心处理 ----
-    print("[P03][DEBUG-COMPARE] ========== PREVIEW PATH P03 START ==========")
-    print(f"[P03][DEBUG-COMPARE] image_path={image_path}")
-    print(f"[P03][DEBUG-COMPARE] lut_path={actual_lut_path}")
-    print(f"[P03][DEBUG-COMPARE] color_mode={color_mode}, modeling_mode={modeling_mode}")
-    print(f"[P03][DEBUG-COMPARE] quantize_colors={quantize_colors}, blur_kernel=0, smooth_sigma=10")
-    print(f"[P03][DEBUG-COMPARE] auto_bg={auto_bg}, bg_tol={bg_tol}, enable_cleanup={enable_cleanup}")
-    print(f"[P03][DEBUG-COMPARE] hue_weight={hue_weight}, chroma_gate={chroma_gate}")
-
     processor = LuminaImageProcessor(actual_lut_path, color_mode, hue_weight=hue_weight, chroma_gate=chroma_gate)
     processor.enable_cleanup = enable_cleanup
-
-    print(f"[P03][DEBUG-COMPARE] LUT loaded: lut_rgb.shape={processor.lut_rgb.shape}, "
-              f"ref_stacks.shape={processor.ref_stacks.shape}, layer_count={processor.layer_count}")
-    print(f"[P03][DEBUG-COMPARE] LUT first 5 RGB: {processor.lut_rgb[:5].tolist()}")
 
     result = processor.process_image(
         image_path=image_path,
@@ -90,53 +77,6 @@ def run(ctx: dict) -> dict:
     material_matrix = result['material_matrix']
     mask_solid = result['mask_solid']
     target_w, target_h = result['dimensions']
-
-    # ---- 调试日志：打印匹配结果摘要 ----
-    print(f"[P03][DEBUG-COMPARE] matched_rgb shape={matched_rgb.shape}, dtype={matched_rgb.dtype}")
-    print(f"[P03][DEBUG-COMPARE] material_matrix shape={material_matrix.shape}, dtype={material_matrix.dtype}")
-    print(f"[P03][DEBUG-COMPARE] mask_solid: True={np.sum(mask_solid)}, False={np.sum(~mask_solid)}")
-    print(f"[P03][DEBUG-COMPARE] dimensions: {target_w}x{target_h}")
-
-    # 打印 matched_rgb 唯一颜色
-    solid_pixels = matched_rgb[mask_solid]
-    if len(solid_pixels) > 0:
-        unique_colors_preview = np.unique(solid_pixels.reshape(-1, 3), axis=0)
-        print(f"[P03][DEBUG-COMPARE] Unique matched colors (solid): {len(unique_colors_preview)}")
-        for i, c in enumerate(unique_colors_preview[:20]):
-            hex_c = f"#{c[0]:02x}{c[1]:02x}{c[2]:02x}"
-            count = np.sum(np.all(solid_pixels == c, axis=-1))
-            print(f"[P03][DEBUG-COMPARE]   color[{i}]: RGB({c[0]},{c[1]},{c[2]}) {hex_c} count={count}")
-
-    # 打印 material_matrix 唯一值
-    if mask_solid.any():
-        mat_solid = material_matrix[mask_solid]
-        if mat_solid.ndim == 2:
-            top_layer = mat_solid[:, 0]
-        else:
-            top_layer = mat_solid
-        unique_mats, mat_counts = np.unique(top_layer, return_counts=True)
-        print(f"[P03][DEBUG-COMPARE] material_matrix top-layer unique values: {unique_mats.tolist()}")
-        print(f"[P03][DEBUG-COMPARE] material_matrix top-layer counts: {mat_counts.tolist()}")
-
-    # 打印几个固定采样点的像素值
-    sample_coords = [(0, 0), (target_h//4, target_w//4), (target_h//2, target_w//2),
-                     (target_h*3//4, target_w*3//4), (target_h-1, target_w-1)]
-    for y, x in sample_coords:
-        if 0 <= y < target_h and 0 <= x < target_w:
-            rgb_val = matched_rgb[y, x]
-            mat_val = material_matrix[y, x]
-            solid = mask_solid[y, x]
-            print(f"[P03][DEBUG-COMPARE] pixel({x},{y}): RGB=({rgb_val[0]},{rgb_val[1]},{rgb_val[2]}) "
-                      f"mat={mat_val.tolist() if hasattr(mat_val, 'tolist') else mat_val} solid={solid}")
-
-    # 打印 quantized_image 摘要
-    q_img = result.get('quantized_image')
-    if q_img is not None:
-        q_unique = np.unique(q_img.reshape(-1, 3), axis=0)
-        print(f"[P03][DEBUG-COMPARE] quantized_image unique colors: {len(q_unique)}")
-        print(f"[P03][DEBUG-COMPARE] quantized_image first 5: {q_unique[:5].tolist()}")
-
-    print("[P03][DEBUG-COMPARE] ========== PREVIEW PATH P03 END ==========")
 
     # ---- 写入输出 ----
     ctx['matched_rgb'] = matched_rgb

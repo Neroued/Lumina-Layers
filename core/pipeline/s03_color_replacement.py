@@ -190,26 +190,10 @@ def run(ctx: dict) -> dict:
     replacement_regions = ctx.get("replacement_regions")
     matched_rgb_path = ctx.get("matched_rgb_path")
 
-    print("[S03][DEBUG-COMPARE] ========== GENERATION PATH S03 START ==========")
-    print(f"[S03][DEBUG-COMPARE] matched_rgb_path={matched_rgb_path}")
-    print(f"[S03][DEBUG-COMPARE] color_replacements={color_replacements}")
-    print(f"[S03][DEBUG-COMPARE] replacement_regions count={len(replacement_regions) if replacement_regions else 0}")
-
-    # Log incoming matched_rgb summary before any override
-    solid_before = matched_rgb[mask_solid]
-    if len(solid_before) > 0:
-        unique_before = np.unique(solid_before.reshape(-1, 3), axis=0)
-        print(f"[S03][DEBUG-COMPARE] BEFORE override: {len(unique_before)} unique matched colors")
-        for i, c in enumerate(unique_before[:10]):
-            hex_c = f"#{c[0]:02x}{c[1]:02x}{c[2]:02x}"
-            count = np.sum(np.all(solid_before == c, axis=-1))
-            print(f"[S03][DEBUG-COMPARE]   before[{i}]: RGB({c[0]},{c[1]},{c[2]}) {hex_c} count={count}")
-
     # ---- Override matched_rgb with pre-computed array if provided ----
     if matched_rgb_path is not None:
         try:
             override_rgb = np.load(matched_rgb_path)
-            print(f"[S03][DEBUG-COMPARE] matched_rgb_path loaded: shape={override_rgb.shape}, dtype={override_rgb.dtype}")
             if override_rgb.shape != matched_rgb.shape:
                 _log.warning(
                     f"[S03] matched_rgb_path shape {override_rgb.shape} "
@@ -218,9 +202,6 @@ def run(ctx: dict) -> dict:
             else:
                 # Detect pixels that differ between original and override
                 diff_mask = np.any(matched_rgb != override_rgb, axis=-1) & mask_solid
-                print(f"[S03][DEBUG-COMPARE] Override diff: {np.sum(diff_mask)} pixels differ "
-                      f"out of {np.sum(mask_solid)} solid pixels "
-                      f"({np.sum(diff_mask)/max(1,np.sum(mask_solid))*100:.2f}%)")
                 if np.any(diff_mask):
                     diff_pixels = override_rgb[diff_mask]  # (N, 3)
                     unique_colors = np.unique(diff_pixels, axis=0)
@@ -295,30 +276,6 @@ def run(ctx: dict) -> dict:
 
     ctx["matched_rgb"] = matched_rgb
     ctx["material_matrix"] = material_matrix
-
-    # Log final matched_rgb summary after all replacements
-    solid_after = matched_rgb[mask_solid]
-    if len(solid_after) > 0:
-        unique_after = np.unique(solid_after.reshape(-1, 3), axis=0)
-        print(f"[S03][DEBUG-COMPARE] AFTER all replacements: {len(unique_after)} unique matched colors")
-        for i, c in enumerate(unique_after[:10]):
-            hex_c = f"#{c[0]:02x}{c[1]:02x}{c[2]:02x}"
-            count = np.sum(np.all(solid_after == c, axis=-1))
-            print(f"[S03][DEBUG-COMPARE]   after[{i}]: RGB({c[0]},{c[1]},{c[2]}) {hex_c} count={count}")
-
-    # Log sample pixels after replacement
-    target_h, target_w = matched_rgb.shape[:2]
-    sample_coords = [(0, 0), (target_h//4, target_w//4), (target_h//2, target_w//2),
-                     (target_h*3//4, target_w*3//4), (target_h-1, target_w-1)]
-    for y, x in sample_coords:
-        if 0 <= y < target_h and 0 <= x < target_w:
-            rgb_val = matched_rgb[y, x]
-            mat_val = material_matrix[y, x]
-            solid = mask_solid[y, x]
-            print(f"[S03][DEBUG-COMPARE] pixel({x},{y}): RGB=({rgb_val[0]},{rgb_val[1]},{rgb_val[2]}) "
-                  f"mat={mat_val.tolist() if hasattr(mat_val, 'tolist') else mat_val} solid={solid}")
-
-    print("[S03][DEBUG-COMPARE] ========== GENERATION PATH S03 END ==========")
 
     _elapsed = time.perf_counter() - _t0
     _hifi_timings = ctx.get("_hifi_timings", {})

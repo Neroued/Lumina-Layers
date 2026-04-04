@@ -79,23 +79,11 @@ def run(ctx: dict) -> dict:
 
     ctx['lut_metadata'] = lut_metadata
 
-    print("[S02][DEBUG-COMPARE] ========== GENERATION PATH S02 START ==========")
-    print(f"[S02][DEBUG-COMPARE] image_path={image_path}")
-    print(f"[S02][DEBUG-COMPARE] lut_path={actual_lut_path}")
-    print(f"[S02][DEBUG-COMPARE] color_mode={color_mode}, modeling_mode={modeling_mode}")
-    print(f"[S02][DEBUG-COMPARE] quantize_colors={quantize_colors}, blur_kernel={blur_kernel}, smooth_sigma={smooth_sigma}")
-    print(f"[S02][DEBUG-COMPARE] auto_bg={auto_bg}, bg_tol={bg_tol}, enable_cleanup={enable_cleanup}")
-    print(f"[S02][DEBUG-COMPARE] hue_weight={hue_weight}, chroma_gate={chroma_gate}")
-
     # Create processor and process image
     _hifi_t0 = time.perf_counter()
     try:
         processor = LuminaImageProcessor(actual_lut_path, color_mode, hue_weight=hue_weight, chroma_gate=chroma_gate)
         processor.enable_cleanup = enable_cleanup
-
-        print(f"[S02][DEBUG-COMPARE] LUT loaded: lut_rgb.shape={processor.lut_rgb.shape}, "
-              f"ref_stacks.shape={processor.ref_stacks.shape}, layer_count={processor.layer_count}")
-        print(f"[S02][DEBUG-COMPARE] LUT first 5 RGB: {processor.lut_rgb[:5].tolist()}")
 
         result = processor.process_image(
             image_path=image_path,
@@ -130,53 +118,6 @@ def run(ctx: dict) -> dict:
     ctx['mode_info'] = result['mode_info']
     ctx['debug_data'] = result.get('debug_data', None)
     ctx['processor'] = processor
-
-    # ---- 调试日志：打印匹配结果摘要 ----
-    print(f"[S02][DEBUG-COMPARE] matched_rgb shape={matched_rgb.shape}, dtype={matched_rgb.dtype}")
-    print(f"[S02][DEBUG-COMPARE] material_matrix shape={material_matrix.shape}, dtype={material_matrix.dtype}")
-    print(f"[S02][DEBUG-COMPARE] mask_solid: True={np.sum(mask_solid)}, False={np.sum(~mask_solid)}")
-    print(f"[S02][DEBUG-COMPARE] dimensions: {target_w}x{target_h}, scale={result['pixel_scale']}mm/px")
-
-    # 打印 matched_rgb 唯一颜色
-    solid_pixels = matched_rgb[mask_solid]
-    if len(solid_pixels) > 0:
-        unique_colors_gen = np.unique(solid_pixels.reshape(-1, 3), axis=0)
-        print(f"[S02][DEBUG-COMPARE] Unique matched colors (solid): {len(unique_colors_gen)}")
-        for i, c in enumerate(unique_colors_gen[:20]):
-            hex_c = f"#{c[0]:02x}{c[1]:02x}{c[2]:02x}"
-            count = np.sum(np.all(solid_pixels == c, axis=-1))
-            print(f"[S02][DEBUG-COMPARE]   color[{i}]: RGB({c[0]},{c[1]},{c[2]}) {hex_c} count={count}")
-
-    # 打印 material_matrix 唯一值
-    if mask_solid.any():
-        mat_solid = material_matrix[mask_solid]
-        if mat_solid.ndim == 2:
-            top_layer = mat_solid[:, 0]
-        else:
-            top_layer = mat_solid
-        unique_mats, mat_counts = np.unique(top_layer, return_counts=True)
-        print(f"[S02][DEBUG-COMPARE] material_matrix top-layer unique values: {unique_mats.tolist()}")
-        print(f"[S02][DEBUG-COMPARE] material_matrix top-layer counts: {mat_counts.tolist()}")
-
-    # 打印几个固定采样点的像素值
-    sample_coords = [(0, 0), (target_h//4, target_w//4), (target_h//2, target_w//2),
-                     (target_h*3//4, target_w*3//4), (target_h-1, target_w-1)]
-    for y, x in sample_coords:
-        if 0 <= y < target_h and 0 <= x < target_w:
-            rgb_val = matched_rgb[y, x]
-            mat_val = material_matrix[y, x]
-            solid = mask_solid[y, x]
-            print(f"[S02][DEBUG-COMPARE] pixel({x},{y}): RGB=({rgb_val[0]},{rgb_val[1]},{rgb_val[2]}) "
-                  f"mat={mat_val.tolist() if hasattr(mat_val, 'tolist') else mat_val} solid={solid}")
-
-    # 打印 quantized_image 摘要
-    q_img = result.get('quantized_image')
-    if q_img is not None:
-        q_unique = np.unique(q_img.reshape(-1, 3), axis=0)
-        print(f"[S02][DEBUG-COMPARE] quantized_image unique colors: {len(q_unique)}")
-        print(f"[S02][DEBUG-COMPARE] quantized_image first 5: {q_unique[:5].tolist()}")
-
-    print("[S02][DEBUG-COMPARE] ========== GENERATION PATH S02 END ==========")
 
     print(f"[S02] image_proc done: {_elapsed:.3f}s, {target_w}x{target_h}px, "
           f"scale={result['pixel_scale']}mm/px")
