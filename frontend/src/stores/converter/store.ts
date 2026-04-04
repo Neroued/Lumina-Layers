@@ -120,7 +120,8 @@ const VALID_IMAGE_TYPES = new Set([
 export const ACCEPT_IMAGE_FORMATS =
   Array.from(VALID_IMAGE_TYPES).join(",") +
   "," +
-  Array.from(RAW_EXTENSIONS_CONVERTER).join(",");
+  Array.from(RAW_EXTENSIONS_CONVERTER).join(",") +
+  ",.lumina.json";
 
 export function isValidImageType(mimeType: string, fileName?: string): boolean {
   if (VALID_IMAGE_TYPES.has(mimeType)) return true;
@@ -429,6 +430,9 @@ export interface ConverterActions {
   // 分层预览
   fetchLayerImages: () => Promise<void>;
   setLayerImagesOpen: (open: boolean) => void;
+
+  // 配方导入
+  importRecipeState: (partial: Partial<ConverterState>, imageFile: File, heightmapFile?: File | null) => void;
 }
 
 // ========== localStorage Helpers ==========
@@ -1090,6 +1094,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         set({ error: "Please select a connected region first" });
         return;
       }
+      const sourceColorHex = state.regionData.colorHex;
       set({ replacePreviewLoading: true, error: null });
       try {
         const response = await apiRegionReplace(state.sessionId, `#${newHex}`);
@@ -1111,6 +1116,19 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         if (response.color_contours) {
           updates.colorContours = response.color_contours;
         }
+
+        // 记录替换到 replacement_regions，供分享卡导出使用
+        const paletteEntry = state.palette.find(
+          (p) => p.matched_hex === sourceColorHex,
+        );
+        updates.replacement_regions = [
+          ..._get().replacement_regions,
+          {
+            quantized_hex: paletteEntry?.quantized_hex ?? sourceColorHex,
+            matched_hex: sourceColorHex,
+            replacement_hex: newHex,
+          },
+        ];
 
         // 不递增 regionReplacementCount（已在 confirmReplacement 中处理）
         set(updates);
@@ -1155,6 +1173,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
             downloadUrl: null,
           });
           try {
+            const newEntries: ColorReplacementItem[] = [];
             for (const region of regions) {
               if (region.clickX != null && region.clickY != null) {
                 await apiDetectRegion(sid, region.clickX, region.clickY);
@@ -1173,12 +1192,25 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
                 updates.colorContours = response.color_contours;
               }
               set(updates);
+              // 记录替换条目，供分享卡导出使用
+              const pe = curState.palette.find(
+                (p) => p.matched_hex === region.colorHex,
+              );
+              newEntries.push({
+                quantized_hex: pe?.quantized_hex ?? region.colorHex,
+                matched_hex: region.colorHex,
+                replacement_hex: pending.targetHex,
+              });
             }
             set({
               replacePreviewLoading: false,
               selectedRegions: [],
               regionData: null,
               selectedColor: null,
+              replacement_regions: [
+                ..._get().replacement_regions,
+                ...newEntries,
+              ],
             });
           } catch (err) {
             set({
@@ -1252,6 +1284,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       set({
         colorRemapMap: {},
         remapHistory: [],
+        replacement_regions: [],
         threemfDiskPath: null,
         downloadUrl: null,
         regionData: null,
@@ -2143,6 +2176,23 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
       }
     },
     setLayerImagesOpen: (open: boolean) => set({ layerImagesOpen: open }),
+
+    importRecipeState: (partial: Partial<ConverterState>, imageFile: File, heightmapFile?: File | null) => {
+      // 1. Apply restored parameters (without triggering crop modal)
+      const prevEnableCrop = _get().enableCrop;
+      set({ ...partial, enableCrop: false });
+
+      // 2. Set image file (creates blob URL, triggers preview flow)
+      _get().setImageFile(imageFile);
+
+      // 3. Restore crop setting
+      set({ enableCrop: prevEnableCrop });
+
+      // 4. Set heightmap if present
+      if (heightmapFile) {
+        _get().setHeightmapFile(heightmapFile);
+      }
+    },
 
     cleanupAfterDownload: () => {
       const { sessionId, downloadUrl } = _get();

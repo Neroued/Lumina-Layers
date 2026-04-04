@@ -280,6 +280,9 @@ node_modules/
 frontend/node_modules/
 frontend/dist/
 
+# Tampermonkey / browser userscripts (local or shelved experiments, not core product)
+scripts/userscripts/
+
 # Performance profiling (ephemeral, machine-specific)
 artifacts/perf_latest.json
 

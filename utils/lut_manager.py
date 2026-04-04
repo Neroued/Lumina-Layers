@@ -3,6 +3,7 @@ Lumina Studio - LUT Preset Manager
 LUT preset management module
 """
 
+import hashlib
 import os
 import re
 import sys
@@ -294,6 +295,23 @@ class LUTManager:
         """
         lut_files = cls.get_all_lut_files()
         return lut_files.get(display_name)
+
+    @staticmethod
+    def compute_fingerprint(file_path: str) -> str:
+        """Compute a SHA-256 fingerprint (first 32 hex chars) for a LUT file.
+        计算 LUT 文件的 SHA-256 指纹（前 32 个十六进制字符）。
+
+        Args:
+            file_path: LUT 文件的绝对路径。
+
+        Returns:
+            str: SHA-256 前 32 个十六进制字符。
+        """
+        sha = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                sha.update(chunk)
+        return sha.hexdigest()[:32]
     
     @classmethod
     def save_uploaded_lut(cls, uploaded_file, custom_name=None):

@@ -100,6 +100,7 @@ class LutInfo(BaseModel):
     name: str
     color_mode: str
     path: str
+    fingerprint: str = ""
 
 
 class LUTListResponse(BaseModel):

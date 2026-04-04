@@ -1,0 +1,166 @@
+/**
+ * Lumina Recipe schema type definitions.
+ * Lumina 配方 schema 类型定义。
+ *
+ * V1: Full-site unified recipe schema, initially wired to converter only.
+ * V1: 全站统一配方 schema，首批仅接入 converter。
+ */
+
+// ========== Asset ==========
+
+/** Embedded asset entry (original file bytes preserved). */
+export interface AssetEntry {
+  filename: string;
+  mime_type: string;
+  byte_size: number;
+  sha256: string;
+  encoding: "base64";
+  payload_b64: string;
+}
+
+// ========== LUT Reference ==========
+
+/** LUT identity for fingerprint-based matching. */
+export interface LutReference {
+  name: string;
+  color_mode: string;
+  fingerprint: string;
+  path_hint?: string;
+}
+
+// ========== Converter Recipe Sub-sections ==========
+
+export interface ConverterRecipeBase {
+  lut: LutReference;
+  color_mode: string;
+  modeling_mode: string;
+  target_width_mm: number;
+  target_height_mm: number;
+  auto_bg: boolean;
+  bg_tol: number;
+  quantize_colors: number;
+  enable_cleanup: boolean;
+  hue_enable: boolean;
+  chroma_gate: number;
+}
+
+export interface ConverterRecipeGeometry {
+  spacer_thick: number;
+  structure_mode: string;
+  separate_backing: boolean;
+  add_loop: boolean;
+  loop_width: number;
+  loop_length: number;
+  loop_hole: number;
+  loop_angle: number;
+  loop_offset_x: number;
+  loop_offset_y: number;
+  loop_position_preset: string;
+}
+
+export interface ConverterRecipeRelief {
+  enable_relief: boolean;
+  auto_height_mode: string;
+  color_height_map: Record<string, number>;
+  heightmap_max_height: number;
+}
+
+export interface ConverterRecipeOutline {
+  enable_outline: boolean;
+  outline_width: number;
+}
+
+export interface ConverterRecipeCloisonne {
+  enable_cloisonne: boolean;
+  wire_width_mm: number;
+  wire_height_mm: number;
+}
+
+export interface ConverterRecipeCoating {
+  enable_coating: boolean;
+  coating_height_mm: number;
+}
+
+export interface ConverterRecipeColorOps {
+  replacement_regions: Array<{
+    quantized_hex: string;
+    matched_hex: string;
+    replacement_hex: string;
+  }>;
+  free_color_set: string[];
+}
+
+export interface ConverterRecipeLargeFormat {
+  large_format_enabled: boolean;
+  tile_width_mm: number;
+  tile_height_mm: number;
+}
+
+export interface ConverterRecipeDevice {
+  printer_id: string;
+  slicer: string;
+}
+
+// ========== Converter Recipe (combined) ==========
+
+export interface ConverterRecipe {
+  base: ConverterRecipeBase;
+  geometry: ConverterRecipeGeometry;
+  relief: ConverterRecipeRelief;
+  outline: ConverterRecipeOutline;
+  cloisonne: ConverterRecipeCloisonne;
+  coating: ConverterRecipeCoating;
+  color_ops: ConverterRecipeColorOps;
+  large_format: ConverterRecipeLargeFormat;
+  device: ConverterRecipeDevice;
+}
+
+// ========== Top-level Recipe ==========
+
+export type RecipeSource =
+  | "converter"
+  | "extractor"
+  | "calibration"
+  | "lut-manager";
+
+export interface RecipeCover {
+  width: number;
+  height: number;
+  mime_type: "image/png";
+}
+
+export interface RecipeAssets {
+  primary: AssetEntry;
+  heightmap?: AssetEntry;
+}
+
+export interface RecipeIntegrity {
+  recipe_sha256: string;
+  asset_checksums: Record<string, string>;
+}
+
+export interface RecipeCompat {
+  min_schema_version: number;
+  degraded_fields?: string[];
+}
+
+export interface LuminaRecipe {
+  format: "lumina-recipe";
+  schema_version: number;
+  app_version: string;
+  created_at: string;
+  source: RecipeSource;
+  cover: RecipeCover;
+  asset: RecipeAssets;
+  recipe: {
+    converter?: ConverterRecipe;
+  };
+  integrity: RecipeIntegrity;
+  compat: RecipeCompat;
+  warnings: string[];
+}
+
+// ========== Constants ==========
+
+export const RECIPE_FORMAT = "lumina-recipe" as const;
+export const RECIPE_SCHEMA_VERSION = 1;

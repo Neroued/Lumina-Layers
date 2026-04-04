@@ -9,6 +9,7 @@ import SlicerSelector from "./SlicerSelector"
 import WikiTooltip from "../ui/WikiTooltip"
 import { useI18n } from "../../i18n/context"
 import { useWorkspaceMode } from "../../hooks/useWorkspaceMode"
+import { exportShareCard, exportSidecar } from "../../recipe/importFlow"
 
 export default function ActionBar() {
   const { t } = useI18n()
@@ -37,6 +38,9 @@ export default function ActionBar() {
   const fetchLayerImages = useConverterStore((s) => s.fetchLayerImages)
   const layerImagesLoading = useConverterStore((s) => s.layerImagesLoading)
   const layerImages = useConverterStore((s) => s.layerImages)
+
+  const [isExporting, setIsExporting] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
 
   const canSubmit = !!imageFile && !!lut_name
   const canBatchSubmit = batchFiles.length > 0 && !!lut_name
@@ -100,6 +104,48 @@ export default function ActionBar() {
                 loading={layerImagesLoading}
                 className="w-full"
               />
+            )}
+            {hasPreview && (
+              <div className="flex gap-2">
+                <Button
+                  label={isExporting ? t("recipe_export_loading") : t("recipe_export_btn")}
+                  variant="secondary"
+                  onClick={() => {
+                    setIsExporting(true)
+                    setExportError(null)
+                    exportShareCard()
+                      .then(() => setExportError(null))
+                      .catch((err: unknown) => {
+                        setExportError(err instanceof Error ? err.message : "Export failed")
+                      })
+                      .finally(() => setIsExporting(false))
+                  }}
+                  disabled={isExporting}
+                  loading={isExporting}
+                  className="flex-1"
+                />
+                <Button
+                  label={t("recipe_export_sidecar_btn")}
+                  variant="secondary"
+                  onClick={() => {
+                    setIsExporting(true)
+                    setExportError(null)
+                    exportSidecar()
+                      .then(() => setExportError(null))
+                      .catch((err: unknown) => {
+                        setExportError(err instanceof Error ? err.message : "Export failed")
+                      })
+                      .finally(() => setIsExporting(false))
+                  }}
+                  disabled={isExporting}
+                  className="flex-1"
+                />
+              </div>
+            )}
+            {exportError && (
+              <div className="text-xs text-red-500 dark:text-red-400">
+                {t("recipe_export_error").replace("{error}", exportError)}
+              </div>
             )}
           </div>
         </>

@@ -1,4 +1,4 @@
-import { useRef, useEffect, useMemo, useState } from "react";
+import { useRef, useEffect, useMemo, useState, useCallback } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useConverterStore, ACCEPT_IMAGE_FORMATS } from "../../stores/converter";
 import {
@@ -14,8 +14,12 @@ import Button from "../ui/Button";
 import RadioGroup from "../ui/RadioGroup";
 import { CropModal } from "../ui/CropModal";
 import type { CropData } from "../ui/CropModal";
+import ImportConfirmDialog from "../ui/ImportConfirmDialog";
 import { useI18n } from "../../i18n/context";
 import { useWorkspaceMode } from "../../hooks/useWorkspaceMode";
+import { prepareImport, applyImport, revokeImportCoverUrl } from "../../recipe/importFlow";
+import type { ImportPreview } from "../../recipe/importFlow";
+import type { RecipeFileSource } from "../../recipe/importRecipe";
 
 const COLOR_MODE_DOTS: Record<string, string[]> = {
   [ColorMode.BW]: ["var(--palette-black)", "var(--palette-white)"],
@@ -121,6 +125,42 @@ export default function BasicSettings() {
 
   const [uploaderExpanded, setUploaderExpanded] = useState(true);
 
+  // --- Share card import state ---
+  const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
+  const [importSource, setImportSource] = useState<RecipeFileSource>("png");
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importLoading, setImportLoading] = useState(false);
+
+  const handleShareCardDetected = useCallback(async (file: File) => {
+    try {
+      setImportLoading(true);
+      const preview = await prepareImport(file);
+      setImportPreview(preview);
+      setImportSource(file.name.toLowerCase().endsWith(".lumina.json") ? "json" : "png");
+      setImportDialogOpen(true);
+    } catch (err) {
+      useConverterStore.getState().setError(
+        err instanceof Error ? err.message : "Import failed",
+      );
+    } finally {
+      setImportLoading(false);
+    }
+  }, []);
+
+  const handleImportConfirm = useCallback(() => {
+    if (!importPreview) return;
+    applyImport(importPreview.restoreResult);
+    revokeImportCoverUrl(importPreview.coverUrl);
+    setImportDialogOpen(false);
+    setImportPreview(null);
+  }, [importPreview]);
+
+  const handleImportCancel = useCallback(() => {
+    revokeImportCoverUrl(importPreview?.coverUrl ?? null);
+    setImportDialogOpen(false);
+    setImportPreview(null);
+  }, [importPreview]);
+
   useEffect(() => {
     if (previewImageUrl) setUploaderExpanded(false);
   }, [previewImageUrl]);
@@ -191,6 +231,7 @@ export default function BasicSettings() {
           onFilesSelect={handleFilesSelect}
           onBatchFileRemove={removeBatchFile}
           accept={ACCEPT_IMAGE_FORMATS}
+          onShareCardDetected={(file) => void handleShareCardDetected(file)}
         />
       ) : (
         <button
@@ -348,6 +389,15 @@ export default function BasicSettings() {
         value={modeling_mode}
         options={modelingModeOptions}
         onChange={(v) => setModelingMode(v as ModelingMode)}
+      />
+
+      <ImportConfirmDialog
+        open={importDialogOpen}
+        preview={importPreview}
+        source={importSource}
+        onConfirm={handleImportConfirm}
+        onCancel={handleImportCancel}
+        isLoading={importLoading}
       />
     </div>
   );
