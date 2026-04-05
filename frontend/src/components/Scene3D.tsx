@@ -208,7 +208,7 @@ function Scene3D({ modelUrl }: Scene3DProps) {
       {/* Loading indicator is now 3D-anchored inside Canvas */}
 
       <Canvas
-        camera={{ position: [1.3, -129.08, 465.36], fov: 45 }}
+        camera={{ position: [0, -57, 474], fov: 45 }}
         gl={{ preserveDrawingBuffer: true }}
         onPointerMissed={() => {
           // Skip deselection if a color mesh was just clicked via native event

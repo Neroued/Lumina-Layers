@@ -178,8 +178,9 @@ describe('PalettePanel 双色显示', () => {
 
     render(<PalettePanel />);
 
-    expect(screen.getByText('量化色')).toBeInTheDocument();
-    expect(screen.getByText('匹配色')).toBeInTheDocument();
+    // Inline swatches use title attributes for quantized/matched labels
+    expect(screen.getByTitle(/量化色.*#ff0000/)).toBeInTheDocument();
+    expect(screen.getByTitle(/匹配色.*#ee0000/)).toBeInTheDocument();
   });
 
   it('双色显示区域显示 HEX 编码 (Req 4.2)', async () => {
@@ -197,11 +198,9 @@ describe('PalettePanel 双色显示', () => {
 
     render(<PalettePanel />);
 
-    // The detail area uses text-[10px] font-mono class for hex codes
-    // quantized_hex='ff0000' appears in detail area ColorBlock
-    expect(screen.getByText('#ff0000')).toBeInTheDocument();
-    // matched_hex='ee0000' appears in detail area ColorBlock
-    expect(screen.getByText('#ee0000')).toBeInTheDocument();
+    // HEX codes are encoded in inline swatch title attributes
+    expect(screen.getByTitle(/量化色.*#ff0000/)).toBeInTheDocument();
+    expect(screen.getByTitle(/匹配色.*#ee0000/)).toBeInTheDocument();
   });
 
   it('颜色已被替换时额外显示替换色色块 (Req 4.3)', async () => {
@@ -219,9 +218,8 @@ describe('PalettePanel 双色显示', () => {
 
     render(<PalettePanel />);
 
-    expect(screen.getByText('替换色')).toBeInTheDocument();
-    // replacement hex '00ee00' appears in detail area ColorBlock
-    expect(screen.getByText('#00ee00')).toBeInTheDocument();
+    // Replacement swatch uses title with 替换色 label
+    expect(screen.getByTitle(/替换色.*#00ee00/)).toBeInTheDocument();
   });
 
   it('颜色未被替换时不显示替换色色块', async () => {
@@ -239,7 +237,7 @@ describe('PalettePanel 双色显示', () => {
 
     render(<PalettePanel />);
 
-    expect(screen.queryByText('替换色')).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/替换色/)).not.toBeInTheDocument();
   });
 
   it('selectedColor 为 null 时不显示双色显示区域', async () => {
@@ -257,8 +255,8 @@ describe('PalettePanel 双色显示', () => {
 
     render(<PalettePanel />);
 
-    expect(screen.queryByText('量化色')).not.toBeInTheDocument();
-    expect(screen.queryByText('匹配色')).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/量化色/)).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/匹配色/)).not.toBeInTheDocument();
   });
 
   it('点击调色板颜色可切换选中状态（全选模式）', async () => {

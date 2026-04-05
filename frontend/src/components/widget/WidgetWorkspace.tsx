@@ -21,6 +21,7 @@ import type {
   DragMoveEvent,
   DragEndEvent,
 } from '@dnd-kit/core';
+import { AnimatePresence } from 'framer-motion';
 import { useWidgetStore, WIDGET_REGISTRY, TAB_WIDGET_MAP } from '../../stores/widgetStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { computeSnap, computeStackPositions, computeDockBottomInset, resolveResponsiveWidgetWidth, resolveWidgetHeight, WIDGET_WIDTH, COLLAPSED_HEIGHT, STACK_GAP, WIDGET_PANEL_RADIUS } from '../../utils/widgetUtils';
@@ -39,6 +40,7 @@ import ExtractorWidgetContent from './ExtractorWidgetContent';
 import LutManagerWidgetContent from './LutManagerWidgetContent';
 import FiveColorWidgetContent from './FiveColorWidgetContent';
 import ColorWorkstation from './ColorWorkstation';
+import Color2DOverlay from './Color2DOverlay';
 import { useConverterDataInit } from '../../hooks/useConverterDataInit';
 import { useWorkspaceMode } from '../../hooks/useWorkspaceMode';
 import { useI18n } from '../../i18n/context';
@@ -87,6 +89,7 @@ export function WidgetWorkspace({ children }: WidgetWorkspaceProps) {
   const activeWidgetId = useWidgetStore((s) => s.activeWidgetId);
   const activeTab = useWidgetStore((s) => s.activeTab);
   const colorWorkstationCollapsed = useWidgetStore((s) => s.colorWorkstationCollapsed);
+  const color2DOverlayOpen = useWidgetStore((s) => s.color2DOverlayOpen);
 
   // Always render converter widgets only; other tabs have their own
   // page-level rendering and do not use the widget dock system.
@@ -547,6 +550,11 @@ export function WidgetWorkspace({ children }: WidgetWorkspaceProps) {
           <div className="absolute inset-0 z-10 flex flex-col" style={{ pointerEvents: 'auto' }}>
             {children}
           </div>
+
+          {/* 2D Color Overlay — z-[45], above docks, covers 3D scene */}
+          <AnimatePresence>
+            {color2DOverlayOpen && <Color2DOverlay />}
+          </AnimatePresence>
 
           {/* Snap Guides — z-20 */}
           <SnapGuides

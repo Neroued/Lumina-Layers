@@ -125,7 +125,11 @@ export interface PreviewResponse {
   preview_url: string;
   preview_glb_url: string | null; // GLB 3D 预览 URL
   palette: PaletteEntry[];
-  dimensions: { width: number; height: number };
+  dimensions: {
+    width: number;
+    height: number;
+    preview_raw_url?: string;
+  };
   contours?: Record<string, number[][][]> | null; // hex -> list of contour polygons (world coords mm)
 }
 

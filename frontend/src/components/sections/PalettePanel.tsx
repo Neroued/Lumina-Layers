@@ -124,44 +124,6 @@ function PaletteItem({
   );
 }
 
-// ========== ColorBlock ==========
-
-interface ColorBlockProps {
-  label: string;
-  hex: string;
-}
-
-function ColorBlock({ label, hex }: ColorBlockProps) {
-  return (
-    <div className="flex flex-col items-center gap-1">
-      <span className="text-[clamp(0.55rem,0.75vw,0.625rem)] font-medium text-slate-500 dark:text-slate-400">{label}</span>
-      <span
-        className="inline-block h-[clamp(2rem,3vw,2.75rem)] w-[clamp(2rem,3vw,2.75rem)] rounded-2xl border border-slate-300/80 dark:border-slate-600/80"
-        style={{ backgroundColor: `#${hex}` }}
-      />
-      <span className="font-mono text-[clamp(0.55rem,0.75vw,0.625rem)] text-slate-600 dark:text-slate-300">#{hex}</span>
-    </div>
-  );
-}
-
-// ========== SelectedColorDetail ==========
-
-interface SelectedColorDetailProps {
-  entry: PaletteEntry;
-  remappedHex?: string;
-}
-
-function SelectedColorDetail({ entry, remappedHex }: SelectedColorDetailProps) {
-  const { t } = useI18n();
-  return (
-    <div className={cx(workstationInsetCardClass, "mb-1 flex items-start gap-4")}>
-      <ColorBlock label={t("palette_quantized")} hex={entry.quantized_hex} />
-      <ColorBlock label={t("palette_matched")} hex={entry.matched_hex} />
-      {remappedHex && <ColorBlock label={t("palette_replaced_label")} hex={remappedHex} />}
-    </div>
-  );
-}
-
 // ========== FreeColorSummary ==========
 
 function FreeColorSummary({ freeColors }: { freeColors: Set<string> }) {
@@ -254,23 +216,44 @@ export default function PalettePanel() {
           {t("palette_no_data")}
         </p>
       ) : (
-        <div className="flex h-full flex-col gap-3">
-          {/* Selected color detail */}
-          {selectedColor && (() => {
-            const selectedEntry = palette.find(
-              (e) => e.matched_hex === selectedColor
-            );
-            if (!selectedEntry) return null;
-            return (
-              <SelectedColorDetail
-                entry={selectedEntry}
-                remappedHex={colorRemapMap[selectedColor]}
-              />
-            );
-          })()}
+        <div className="flex h-full flex-col gap-1.5">
+          {/* Toolbar: selected color detail + action buttons + mode buttons (single row) */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Inline selected color swatches */}
+            {selectedColor && (() => {
+              const selectedEntry = palette.find(
+                (e) => e.matched_hex === selectedColor
+              );
+              if (!selectedEntry) return null;
+              const remapped = colorRemapMap[selectedColor];
+              return (
+                <>
+                  <span
+                    className="inline-block h-5 w-5 shrink-0 rounded-lg border border-slate-300/80 dark:border-slate-600/80"
+                    style={{ backgroundColor: `#${selectedEntry.quantized_hex}` }}
+                    title={`${t("palette_quantized")}: #${selectedEntry.quantized_hex}`}
+                  />
+                  <span className="text-[10px] text-slate-400">{"\u2192"}</span>
+                  <span
+                    className="inline-block h-5 w-5 shrink-0 rounded-lg border border-slate-300/80 dark:border-slate-600/80"
+                    style={{ backgroundColor: `#${selectedEntry.matched_hex}` }}
+                    title={`${t("palette_matched")}: #${selectedEntry.matched_hex}`}
+                  />
+                  {remapped && (
+                    <>
+                      <span className="text-[10px] text-slate-400">{"\u2192"}</span>
+                      <span
+                        className="inline-block h-5 w-5 shrink-0 rounded-lg border-2 border-yellow-500"
+                        style={{ backgroundColor: `#${remapped}` }}
+                        title={`${t("palette_replaced_label")}: #${remapped}`}
+                      />
+                    </>
+                  )}
+                  <span className="mr-1 h-4 w-px bg-slate-300 dark:bg-slate-700" />
+                </>
+              );
+            })()}
 
-          {/* Undo / Clear buttons + Mode switching buttons */}
-          <div className="flex flex-wrap gap-2">
             <Button
               label={t("palette_undo")}
               variant="secondary"
@@ -302,6 +285,20 @@ export default function PalettePanel() {
               label={t("palette_mode_region")}
               variant={selectionMode === 'region' ? 'primary' : 'secondary'}
               onClick={() => setSelectionMode('region')}
+            />
+            <Button
+              label={t("conv_free_color_btn")}
+              variant="secondary"
+              onClick={() => {
+                if (selectedColor) toggleFreeColor(selectedColor);
+              }}
+              disabled={selectedColor === null}
+            />
+            <Button
+              label={t("conv_free_color_clear_btn")}
+              variant="secondary"
+              onClick={clearFreeColors}
+              disabled={free_color_set.size === 0}
             />
           </div>
 
@@ -345,24 +342,6 @@ export default function PalettePanel() {
               })}
             </div>
           )}
-
-          {/* Free color buttons */}
-          <div className="flex flex-wrap gap-2">
-            <Button
-              label={t("conv_free_color_btn")}
-              variant="secondary"
-              onClick={() => {
-                if (selectedColor) toggleFreeColor(selectedColor);
-              }}
-              disabled={selectedColor === null}
-            />
-            <Button
-              label={t("conv_free_color_clear_btn")}
-              variant="secondary"
-              onClick={clearFreeColors}
-              disabled={free_color_set.size === 0}
-            />
-          </div>
 
           {/* Free color summary */}
           <FreeColorSummary freeColors={free_color_set} />

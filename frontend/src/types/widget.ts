@@ -69,6 +69,11 @@ export interface WidgetStore {
   // ColorWorkstation 展开/收起
   colorWorkstationCollapsed: boolean;
   toggleColorWorkstation: () => void;
+
+  // 2D 颜色覆盖层
+  color2DOverlayOpen: boolean;
+  openColor2DOverlay: () => void;
+  closeColor2DOverlay: () => void;
 }
 
 // ===== 吸附计算 =====

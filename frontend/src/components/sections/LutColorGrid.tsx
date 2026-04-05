@@ -91,7 +91,6 @@ function saveFavorites(lutKey: string, favs: Set<string>) {
 
 const SWATCH_GRID_CLASS = "grid grid-cols-[repeat(auto-fit,minmax(3rem,1fr))] gap-1.5";
 const CARD_CELL_SIZE = "clamp(14px, 1vw, 18px)";
-const COLOR_GRID_MAX_HEIGHT = "clamp(12rem, 28vh, 24rem)";
 
 const ColorSwatch = memo(function ColorSwatch({
   entry,
@@ -258,7 +257,7 @@ export default function LutColorGrid() {
       const colsA = Math.ceil(Math.sqrt(half));
       const colsB = Math.ceil(Math.sqrt(total - half));
       return (
-        <div className="flex gap-3 overflow-auto" style={{ maxHeight: COLOR_GRID_MAX_HEIGHT }}>
+        <div className="flex gap-3 overflow-auto">
           <CardSection
             colors={lutColors.slice(0, half)}
             cols={colsA}
@@ -281,7 +280,7 @@ export default function LutColorGrid() {
 
     const cols = Math.ceil(Math.sqrt(total));
     return (
-      <div className="overflow-auto" style={{ maxHeight: COLOR_GRID_MAX_HEIGHT }}>
+      <div className="overflow-auto">
         <CardSection
           colors={lutColors}
           cols={cols}
@@ -392,7 +391,7 @@ export default function LutColorGrid() {
   };
 
   return (
-    <div className="relative">
+    <div className="relative h-full">
       {replacePreviewLoading && (
         <div className="absolute inset-0 z-10 flex items-center justify-center rounded-[28px] bg-slate-950/40">
           <p className="text-xs text-slate-100">{t("lut_grid_loading")}</p>
@@ -403,7 +402,7 @@ export default function LutColorGrid() {
       ) : lutColors.length === 0 ? (
         <p className="py-4 text-sm text-slate-500 dark:text-slate-400">{t("lut_grid_select_lut")}</p>
       ) : (
-        <div className={cx(workstationPanelCardClass, "flex flex-col gap-3")}>
+        <div className={cx(workstationPanelCardClass, "flex h-full flex-col gap-3")}>
           {/* Confirmation preview bar */}
           {pendingReplacement && (
             <div className={cx(workstationInsetCardClass, "flex items-center gap-1.5 px-3 py-2")}>
@@ -558,7 +557,7 @@ export default function LutColorGrid() {
               onColorClick={handleColorClick}
             />
           ) : (
-            <div className="dock-scrollbar flex flex-col gap-2 overflow-y-auto pr-1" style={{ maxHeight: COLOR_GRID_MAX_HEIGHT }} role="listbox" aria-label={t("palette_list_label")}>
+            <div className="dock-scrollbar min-h-0 flex-1 flex flex-col gap-2 overflow-y-auto pr-1" role="listbox" aria-label={t("palette_list_label")}>
               {recommendations && recommendations.length > 0 && (
                 <div>
                   <p className="mb-1 text-[clamp(0.65rem,0.8vw,0.7rem)] font-semibold text-amber-500">

@@ -49,6 +49,39 @@ from .common import (
 router = APIRouter()
 log = get_logger(__name__)
 
+
+def _render_styled_preview_bytes(replaced_rgb: np.ndarray, cache: dict) -> bytes:
+    """Render a raw RGBA preview from replaced_rgb with transparency.
+    从替换后的 matched_rgb 生成带透明通道的原始 RGBA 预览。
+
+    Returns raw RGBA so that pixel coordinates match previewPixelWidth ×
+    previewPixelHeight exactly, keeping SVG contour overlays and
+    click-to-pixel mapping correctly aligned in ColorPreview2D.
+
+    Args:
+        replaced_rgb: Updated matched_rgb array (H, W, 3) after color replacement.
+        cache: Preview cache dict containing mask_solid, etc.
+
+    Returns:
+        PNG bytes of the raw RGBA preview image.
+    """
+    mask_solid: np.ndarray | None = cache.get("mask_solid")
+    h, w = replaced_rgb.shape[:2]
+
+    # Reconstruct RGBA from replaced_rgb + mask_solid
+    preview_rgba = np.zeros((h, w, 4), dtype=np.uint8)
+    if mask_solid is not None:
+        preview_rgba[mask_solid, :3] = replaced_rgb[mask_solid]
+        preview_rgba[mask_solid, 3] = 255
+    else:
+        preview_rgba[..., :3] = replaced_rgb
+        preview_rgba[..., 3] = 255
+
+    # Update cache's preview_rgba for consistency
+    cache["preview_rgba"] = preview_rgba.copy()
+
+    return _image_to_png_bytes(preview_rgba)
+
 # Extend base tuple with IndexError for array-index operations
 # in region-detect / region-replace endpoints.
 REPLACE_HANDLED_ERRORS = ROUTER_HANDLED_ERRORS + (IndexError,)
@@ -112,8 +145,8 @@ def replace_color(
         cache["matched_rgb"] = replaced_rgb
         store.put(request.session_id, "preview_cache", cache)
 
-        # Generate preview PNG from replaced image
-        preview_bytes = _image_to_png_bytes(replaced_rgb)
+        # Generate styled preview PNG (with bed grid and transparency)
+        preview_bytes = _render_styled_preview_bytes(replaced_rgb, cache)
         preview_id = registry.register_bytes(request.session_id, preview_bytes, "preview_replaced.png")
 
         # Regenerate segmented GLB from updated matched_rgb
@@ -498,8 +531,8 @@ def region_replace(
         cache["matched_rgb"] = replaced_rgb
         store.put(request.session_id, "preview_cache", cache)
 
-        # Generate preview PNG
-        preview_bytes: bytes = _image_to_png_bytes(replaced_rgb)
+        # Generate styled preview PNG (with bed grid and transparency)
+        preview_bytes: bytes = _render_styled_preview_bytes(replaced_rgb, cache)
         preview_id: str = registry.register_bytes(request.session_id, preview_bytes, "preview_region_replaced.png")
 
         # Regenerate segmented GLB from updated matched_rgb
