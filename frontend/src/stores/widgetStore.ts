@@ -44,7 +44,8 @@ export const TAB_WIDGET_MAP: Record<TabId, WidgetId[]> = {
 // ===== 默认布局 =====
 
 export const DEFAULT_LAYOUT: Record<WidgetId, WidgetLayoutState> = {
-  // --- Converter 页面：8 个 Widget，左侧吸附，stackOrder 0-7 ---
+  // --- Converter 页面 ---
+  // 左侧：基础设置（展开）
   "basic-settings": {
     id: "basic-settings",
     position: { x: 0, y: 0 },
@@ -54,49 +55,14 @@ export const DEFAULT_LAYOUT: Record<WidgetId, WidgetLayoutState> = {
     stackOrder: 0,
     expandedHeight: EXPANDED_HEIGHT,
   },
-  "advanced-settings": {
-    id: "advanced-settings",
+  // 右侧：操作栏（展开）+ 其余 6 个（折叠）
+  "action-bar": {
+    id: "action-bar",
     position: { x: 0, y: 0 },
-    collapsed: true,
+    collapsed: false,
     visible: true,
-    snapEdge: "left",
-    stackOrder: 1,
-    expandedHeight: EXPANDED_HEIGHT,
-  },
-  "relief-settings": {
-    id: "relief-settings",
-    position: { x: 0, y: 0 },
-    collapsed: true,
-    visible: true,
-    snapEdge: "left",
-    stackOrder: 2,
-    expandedHeight: EXPANDED_HEIGHT,
-  },
-  "outline-settings": {
-    id: "outline-settings",
-    position: { x: 0, y: 0 },
-    collapsed: true,
-    visible: true,
-    snapEdge: "left",
-    stackOrder: 3,
-    expandedHeight: EXPANDED_HEIGHT,
-  },
-  "cloisonne-settings": {
-    id: "cloisonne-settings",
-    position: { x: 0, y: 0 },
-    collapsed: true,
-    visible: true,
-    snapEdge: "left",
-    stackOrder: 4,
-    expandedHeight: EXPANDED_HEIGHT,
-  },
-  "coating-settings": {
-    id: "coating-settings",
-    position: { x: 0, y: 0 },
-    collapsed: true,
-    visible: true,
-    snapEdge: "left",
-    stackOrder: 5,
+    snapEdge: "right",
+    stackOrder: 0,
     expandedHeight: EXPANDED_HEIGHT,
   },
   "keychain-loop": {
@@ -104,17 +70,53 @@ export const DEFAULT_LAYOUT: Record<WidgetId, WidgetLayoutState> = {
     position: { x: 0, y: 0 },
     collapsed: true,
     visible: true,
-    snapEdge: "left",
-    stackOrder: 6,
+    snapEdge: "right",
+    stackOrder: 1,
     expandedHeight: EXPANDED_HEIGHT,
   },
-  "action-bar": {
-    id: "action-bar",
+  "coating-settings": {
+    id: "coating-settings",
     position: { x: 0, y: 0 },
-    collapsed: false,
+    collapsed: true,
     visible: true,
-    snapEdge: "left",
-    stackOrder: 7,
+    snapEdge: "right",
+    stackOrder: 2,
+    expandedHeight: EXPANDED_HEIGHT,
+  },
+  "cloisonne-settings": {
+    id: "cloisonne-settings",
+    position: { x: 0, y: 0 },
+    collapsed: true,
+    visible: true,
+    snapEdge: "right",
+    stackOrder: 3,
+    expandedHeight: EXPANDED_HEIGHT,
+  },
+  "outline-settings": {
+    id: "outline-settings",
+    position: { x: 0, y: 0 },
+    collapsed: true,
+    visible: true,
+    snapEdge: "right",
+    stackOrder: 4,
+    expandedHeight: EXPANDED_HEIGHT,
+  },
+  "relief-settings": {
+    id: "relief-settings",
+    position: { x: 0, y: 0 },
+    collapsed: true,
+    visible: true,
+    snapEdge: "right",
+    stackOrder: 5,
+    expandedHeight: EXPANDED_HEIGHT,
+  },
+  "advanced-settings": {
+    id: "advanced-settings",
+    position: { x: 0, y: 0 },
+    collapsed: true,
+    visible: true,
+    snapEdge: "right",
+    stackOrder: 6,
     expandedHeight: EXPANDED_HEIGHT,
   },
   // --- 其他 4 个页面：各 1 个 Widget，左侧吸附，stackOrder 0 ---
@@ -257,6 +259,7 @@ export const useWidgetStore = create<WidgetStore>()(
       activeWidgetId: null,
       activeTab: "converter" as TabId,
       colorWorkstationCollapsed: true,
+      color2DOverlayOpen: false,
 
       /**
        * Set the active TAB page.
@@ -505,6 +508,22 @@ export const useWidgetStore = create<WidgetStore>()(
           colorWorkstationCollapsed: !state.colorWorkstationCollapsed,
         }));
       },
+
+      /**
+       * Open the 2D color overlay.
+       * 打开 2D 颜色覆盖层。
+       */
+      openColor2DOverlay: () => {
+        set({ color2DOverlayOpen: true });
+      },
+
+      /**
+       * Close the 2D color overlay.
+       * 关闭 2D 颜色覆盖层。
+       */
+      closeColor2DOverlay: () => {
+        set({ color2DOverlayOpen: false });
+      },
     }),
     {
       name: "lumina-widget-layout",
@@ -514,6 +533,7 @@ export const useWidgetStore = create<WidgetStore>()(
           widgets?: Record<WidgetId, WidgetLayoutState>;
           activeTab?: TabId;
           colorWorkstationCollapsed?: boolean;
+          color2DOverlayOpen?: boolean;
         };
 
         if (version < 3) {

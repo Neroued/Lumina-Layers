@@ -1114,7 +1114,6 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
             clickY: y,
           },
           selectedColor: response.color_hex.replace(/^#/, ""),
-          previewImageUrl: previewUrl,
         });
       } catch (err) {
         set({
@@ -1143,7 +1142,6 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         };
         const currentState = _get();
         const existing = currentState.selectedRegions;
-        const previewBaseUrl = getPreviewBaseUrl(currentState);
         const idx = existing.findIndex(
           (r) => r.regionId === newRegion.regionId,
         );
@@ -1155,16 +1153,12 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
             selectedColor: lastRegion
               ? lastRegion.colorHex.replace(/^#/, "")
               : null,
-            previewImageUrl: getSelectedRegionPreviewUrl(next, previewBaseUrl),
           });
         } else {
           set({
             selectedRegions: [...existing, newRegion],
             selectedColor: response.color_hex.replace(/^#/, ""),
-            previewImageUrl: getSelectedRegionPreviewUrl(
-              [...existing, newRegion],
-              previewBaseUrl,
-            ),
+            previewImageUrl: newRegion.previewUrl,
           });
         }
       } catch (err) {
@@ -1654,7 +1648,8 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           sessionId: response.session_id,
           previewImageUrl: previewUrl,
           originalPreviewUrl: previewUrl,
-          previewBaseImageUrl: previewUrl,
+          previewBaseImageUrl:
+            normalizeResourceUrl(response.dimensions?.preview_raw_url) ?? previewUrl,
           palette: normalizedPalette,
           colorContours: response.contours ?? {},
           previewGlbUrl: glbUrl,
@@ -1738,6 +1733,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           enable_cleanup: state.enable_cleanup,
           hue_weight: state.hue_enable ? 0.5 : 0.0,
           chroma_gate: state.hue_enable ? state.chroma_gate : 0,
+          is_dark: useSettingsStore.getState().theme === "dark",
           spacer_thick: state.spacer_thick,
           structure_mode: state.structure_mode,
           separate_backing: state.separate_backing,
@@ -2323,14 +2319,24 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
     },
 
     cleanupAfterDownload: () => {
-      const { sessionId, downloadUrl } = _get();
-      if (!sessionId) return;
+      const state = _get();
+      if (!state.sessionId) return;
       const keepIds: string[] = [];
-      if (downloadUrl) {
-        const match = downloadUrl.match(/\/api\/files\/([^/?#]+)/);
+      // Preserve download, preview, and GLB files so share card export
+      // and 3D viewer still work after slicer launch / download.
+      const urlsToKeep = [
+        state.downloadUrl,
+        state.previewImageUrl,
+        state.previewBaseImageUrl,
+        state.originalPreviewUrl,
+        state.previewGlbUrl,
+      ];
+      for (const url of urlsToKeep) {
+        if (!url) continue;
+        const match = url.match(/\/api\/files\/([^/?#]+)/);
         if (match) keepIds.push(match[1]);
       }
-      apiCleanupSessionFiles(sessionId, keepIds);
+      apiCleanupSessionFiles(state.sessionId, keepIds);
     },
   }),
 );

@@ -16,6 +16,63 @@ from PIL import Image, ImageDraw, ImageFont
 from config import PrinterConfig, BedManager, PREVIEW_SCALE
 
 
+def compute_bed_model_rect(
+    raw_h: int,
+    raw_w: int,
+    target_width_mm: float | None = None,
+    bed_label: str | None = None,
+) -> dict[str, int]:
+    """Compute the model's pixel bounding box within a bed-rendered canvas.
+    计算模型在热床渲染画布中的像素边界框。
+
+    Returns the same placement that ``render_preview`` would use, so the
+    frontend can map between raw-image pixel coordinates and bed-canvas
+    pixel coordinates for contour overlays and click handling.
+
+    Args:
+        raw_h: Raw image height in pixels (matched_rgb rows).
+        raw_w: Raw image width in pixels (matched_rgb cols).
+        target_width_mm: Physical model width in mm.
+        bed_label: BedManager label; defaults to DEFAULT_BED.
+
+    Returns:
+        Dict with keys bed_total_w, bed_total_h, model_x, model_y,
+        model_w, model_h (all int, pixels).
+    """
+    if bed_label is None:
+        bed_label = BedManager.DEFAULT_BED
+    bed_w_mm, bed_h_mm = BedManager.get_bed_size(bed_label)
+    ppm = BedManager.compute_scale(bed_w_mm, bed_h_mm)
+
+    canvas_w = int(bed_w_mm * ppm)
+    canvas_h = int(bed_h_mm * ppm)
+    margin = int(30 * ppm / 3)
+    total_w = canvas_w + margin
+    total_h = canvas_h + margin
+
+    if target_width_mm is not None and target_width_mm > 0:
+        model_w_mm = target_width_mm
+        model_h_mm = target_width_mm * raw_h / raw_w
+    else:
+        model_w_mm = raw_w * PrinterConfig.NOZZLE_WIDTH
+        model_h_mm = raw_h * PrinterConfig.NOZZLE_WIDTH
+
+    new_w = max(1, int(model_w_mm * ppm))
+    new_h = max(1, int(model_h_mm * ppm))
+
+    offset_x = margin + (canvas_w - new_w) // 2
+    offset_y = (canvas_h - new_h) // 2
+
+    return {
+        "bed_total_w": total_w,
+        "bed_total_h": total_h,
+        "model_x": offset_x,
+        "model_y": offset_y,
+        "model_w": new_w,
+        "model_h": new_h,
+    }
+
+
 def render_preview(preview_rgba, loop_pos, loop_width, loop_length,
                    loop_hole, loop_angle, loop_enabled, color_conf,
                    bed_label=None, target_width_mm=None, is_dark=True):

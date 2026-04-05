@@ -8,7 +8,6 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import type { ReactNode, HTMLAttributes } from 'react';
 import { I18nProvider } from '../i18n/context';
 import { translations } from '../i18n/translations';
 import {
@@ -19,26 +18,8 @@ import {
 } from '../stores/widgetStore';
 import type { TabId } from '../types/widget';
 
-// Mock PalettePanel and LutColorGrid — they have complex store dependencies
-vi.mock('../components/sections/PalettePanel', () => ({
-  default: () => <div data-testid="palette-panel">PalettePanel</div>,
-}));
-vi.mock('../components/sections/LutColorGrid', () => ({
-  default: () => <div data-testid="lut-color-grid">LutColorGrid</div>,
-}));
-
-// Mock framer-motion to avoid animation complexity in tests
-vi.mock('framer-motion', () => ({
-  motion: {
-    div: ({
-      children,
-      ...props
-    }: HTMLAttributes<HTMLDivElement> & { children?: ReactNode }) => (
-      <div {...props}>{children}</div>
-    ),
-  },
-  AnimatePresence: ({ children }: { children?: ReactNode }) => <>{children}</>,
-}));
+// PalettePanel and LutColorGrid are no longer rendered inside ColorWorkstation
+// (they moved to Color2DOverlay), so no mocks needed for them.
 
 // Mock settingsStore for enableBlur
 vi.mock('../stores/settingsStore', () => ({
@@ -117,29 +98,18 @@ describe('Palette-LUT Merge Unit Tests', () => {
 
   // ===== ColorWorkstation 渲染验证 =====
   describe('ColorWorkstation rendering', () => {
-    it('renders PalettePanel and LutColorGrid when activeTab is converter and expanded', () => {
-      // Requirements 2.3 — rendered outside DnD; 1.2 — left/right layout
+    it('renders the entry bar with hint text when activeTab is converter', () => {
+      // ColorWorkstation is now a thin entry bar that opens the 2D overlay
       useWidgetStore.setState({
         activeTab: 'converter',
-        colorWorkstationCollapsed: false,
       });
 
       renderWithI18n(<ColorWorkstation />);
 
-      expect(screen.getByTestId('palette-panel')).toBeInTheDocument();
-      expect(screen.getByTestId('lut-color-grid')).toBeInTheDocument();
-    });
-
-    it('renders only the title bar when collapsed', () => {
-      useWidgetStore.setState({
-        activeTab: 'converter',
-        colorWorkstationCollapsed: true,
-      });
-
-      renderWithI18n(<ColorWorkstation />);
-
-      // Title bar uses aria-label instead of visible text
-      expect(screen.getByLabelText(translations['widget.colorWorkstation'].zh)).toBeInTheDocument();
+      expect(screen.getByTestId('color-workstation')).toBeInTheDocument();
+      // Hint text from widget.colorWorkstationHint
+      expect(screen.getByText(translations['widget.colorWorkstationHint'].zh)).toBeInTheDocument();
+      // PalettePanel and LutColorGrid are no longer inside ColorWorkstation
       expect(screen.queryByTestId('palette-panel')).not.toBeInTheDocument();
       expect(screen.queryByTestId('lut-color-grid')).not.toBeInTheDocument();
     });

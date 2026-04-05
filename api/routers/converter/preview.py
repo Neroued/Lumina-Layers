@@ -293,9 +293,18 @@ async def convert_preview(
     store.register_temp_file(session_id, result["preview_png_path"])
     store.register_temp_file(session_id, result["cache_data_path"])
 
-    # Register preview image
+    # Register preview image (bed-rendered, for general display)
     preview_bytes = _image_to_png_bytes(preview_img)
     preview_id = registry.register_bytes(session_id, preview_bytes, "preview.png")
+
+    # Register raw RGBA preview (no bed, pixel-aligned with previewPixelWidth/Height)
+    # Used by ColorPreview2D so SVG contour overlays and click coords align.
+    preview_raw_url: str | None = None
+    if cache_data and "preview_rgba" in cache_data:
+        raw_rgba = cache_data["preview_rgba"]
+        raw_bytes = ndarray_to_png_bytes(raw_rgba)
+        raw_id = registry.register_bytes(session_id, raw_bytes, "preview_raw.png")
+        preview_raw_url = f"/api/files/{raw_id}"
 
     # Generate segmented GLB (one Mesh per color)
     _t = time.perf_counter()
@@ -373,12 +382,14 @@ async def convert_preview(
                 }
             )
 
-    dimensions = {}
+    dimensions: dict = {}
     if cache_data:
         dimensions = {
             "width": cache_data.get("target_w", 0),
             "height": cache_data.get("target_h", 0),
         }
+    if preview_raw_url:
+        dimensions["preview_raw_url"] = preview_raw_url
 
     _t_palette = time.perf_counter() - _t
 

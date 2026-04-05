@@ -1173,6 +1173,40 @@ export const translations: Record<string, Record<"zh" | "en", string>> = {
     zh: "颜色工作站",
     en: "Color Workstation",
   },
+  "widget.colorWorkstationHint": {
+    zh: "点击打开颜色工作站",
+    en: "Click to open Color Workstation",
+  },
+
+  // ==================== 2D Color Overlay ====================
+  color_2d_overlay_title: {
+    zh: "颜色工作站",
+    en: "Color Workstation",
+  },
+  color_2d_overlay_close: {
+    zh: "关闭",
+    en: "Close",
+  },
+  color_2d_tab_preview: {
+    zh: "2D 预览",
+    en: "2D Preview",
+  },
+  color_2d_tab_palette: {
+    zh: "调色板",
+    en: "Palette",
+  },
+  color_2d_tab_lut_grid: {
+    zh: "LUT 颜色",
+    en: "LUT Colors",
+  },
+  color_2d_no_preview: {
+    zh: "暂无预览图，请先完成预览",
+    en: "No preview available. Please generate a preview first.",
+  },
+  color_2d_generating_preview: {
+    zh: "正在生成预览…",
+    en: "Generating preview…",
+  },
 
   // ==================== TAB Navigation Titles ====================
   "tab.converter": {
