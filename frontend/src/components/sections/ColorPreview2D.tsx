@@ -440,6 +440,23 @@ export default function ColorPreview2D() {
         </div>
       )}
 
+      <div
+        className="pointer-events-none absolute inset-0 z-20 border-2"
+        style={{ borderColor: 'var(--info-border)' }}
+        aria-hidden="true"
+      >
+        <div
+          className="absolute right-2 top-2 rounded-full border px-2 py-1 text-[10px] font-semibold"
+          style={{
+            borderColor: 'var(--info-border)',
+            background: 'var(--info-soft)',
+            color: 'var(--surface-text-muted)',
+          }}
+        >
+          {t('preview_debug_main_2d')}
+        </div>
+      </div>
+
       {/* Zoom indicator */}
       {zoom !== 1 && (
         <div className="absolute left-2 top-2 z-20 rounded-full bg-slate-900/60 px-2 py-0.5 text-[10px] text-slate-100 backdrop-blur-sm">

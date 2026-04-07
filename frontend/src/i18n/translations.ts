@@ -599,6 +599,34 @@ export const translations: Record<string, Record<"zh" | "en", string>> = {
     zh: "截图",
     en: "Screenshot",
   },
+  viewer_hover_magnifier: {
+    zh: "放大镜",
+    en: "Magnifier",
+  },
+  viewer_hover_pixel: {
+    zh: "像素坐标",
+    en: "Pixel",
+  },
+  viewer_hover_surface_color: {
+    zh: "表面颜色",
+    en: "Surface Color",
+  },
+  viewer_hover_layers_title: {
+    zh: "分层颜色",
+    en: "Layer Colors",
+  },
+  viewer_hover_loading_layers: {
+    zh: "正在加载分层颜色...",
+    en: "Loading layer colors...",
+  },
+  viewer_hover_no_layer_data: {
+    zh: "暂无分层颜色数据",
+    en: "No layer color data",
+  },
+  viewer_hover_transparent: {
+    zh: "透明",
+    en: "Transparent",
+  },
 
   // ==================== Footer ====================
   footer_tip: {
@@ -1207,6 +1235,14 @@ export const translations: Record<string, Record<"zh" | "en", string>> = {
     zh: "正在生成预览…",
     en: "Generating preview…",
   },
+  preview_debug_main_2d: {
+    zh: "主 2D 预览",
+    en: "Main 2D Preview",
+  },
+  preview_debug_action_2d: {
+    zh: "操作栏 2D 小预览",
+    en: "ActionBar Mini Preview",
+  },
 
   // ==================== TAB Navigation Titles ====================
   "tab.converter": {
@@ -1295,7 +1331,6 @@ export const translations: Record<string, Record<"zh" | "en", string>> = {
     zh: "清除缓存失败，请稍后重试",
     en: "Failed to clear cache. Please try again.",
   },
-
 
   // ==================== Settings Panel (Slicer Settings) ====================
   "settings.slicer_settings": {

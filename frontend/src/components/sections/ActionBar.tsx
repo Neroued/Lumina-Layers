@@ -1,20 +1,194 @@
-import { useMemo, useState, type ReactNode } from "react"
+import { useMemo, useState, useRef, useEffect, useCallback, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import { useConverterStore } from "../../stores/converter"
 import Button from "../ui/Button"
 import BatchResultSummary from "../ui/BatchResultSummary"
-import ZoomableImage from "../ui/ZoomableImage"
+import ZoomableImage, { type ZoomableImageHoverSample } from "../ui/ZoomableImage"
 import BedSizeSelector from "./BedSizeSelector"
 import SlicerSelector from "./SlicerSelector"
 import WikiTooltip from "../ui/WikiTooltip"
+import { resolvePreviewHoverPixel } from "./actionBarHoverUtils"
 import { useI18n } from "../../i18n/context"
 import { useWorkspaceMode } from "../../hooks/useWorkspaceMode"
 import { exportShareCard, exportSidecar } from "../../recipe/importFlow"
+
+interface LayerHoverColorSample {
+  displayIndex: number
+  layerName: string
+  colorHex: string | null
+}
+
+interface LayerCanvasBuffer {
+  layerIndex: number
+  name: string
+  width: number
+  height: number
+  context: CanvasRenderingContext2D
+}
+
+interface PreviewCanvasBuffer {
+  width: number
+  height: number
+  context: CanvasRenderingContext2D
+}
+
+function buildPreviewCanvasBuffer(image: HTMLImageElement): PreviewCanvasBuffer | null {
+  const width = image.naturalWidth || image.width
+  const height = image.naturalHeight || image.height
+  if (width <= 0 || height <= 0) {
+    return null
+  }
+
+  const canvas = document.createElement("canvas")
+  canvas.width = width
+  canvas.height = height
+  const context = canvas.getContext("2d", { willReadFrequently: true })
+  if (!context) {
+    return null
+  }
+
+  context.drawImage(image, 0, 0)
+  return { width, height, context }
+}
+
+const HOVER_POPOVER_DELAY_MS = 180
+const MAGNIFIER_SIZE_PX = 152
+const MAGNIFIER_ZOOM = 3
+const MAGNIFIER_OFFSET_PX = 18
+const INSPECTOR_WIDTH_PX = 248
+const INSPECTOR_HEIGHT_PX = 310
+const INSPECTOR_EDGE_MARGIN_PX = 8
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max)
+}
+
+function mapPixelToBufferCoordinate(pixel: number, sourceSize: number, bufferSize: number): number {
+  return clampNumber(
+    Math.round((pixel / Math.max(sourceSize - 1, 1)) * (bufferSize - 1)),
+    0,
+    Math.max(bufferSize - 1, 0),
+  )
+}
+
+function computeHoverInspectorStyle(sample: ZoomableImageHoverSample): { left: string; top: string } | null {
+  if (typeof window === "undefined") {
+    return null
+  }
+
+  const viewportWidth = window.innerWidth
+  const viewportHeight = window.innerHeight
+  if (viewportWidth <= 0 || viewportHeight <= 0) {
+    return null
+  }
+
+  const containerLeft = sample.containerLeft
+  const containerTop = sample.containerTop
+  const containerRight = containerLeft + sample.containerWidth
+  const containerBottom = containerTop + sample.containerHeight
+  const pointerX = containerLeft + sample.containerX
+  const pointerY = containerTop + sample.containerY
+
+  const requiredHorizontal = INSPECTOR_WIDTH_PX + MAGNIFIER_OFFSET_PX
+  const requiredVertical = INSPECTOR_HEIGHT_PX + MAGNIFIER_OFFSET_PX
+
+  const spaceRight = viewportWidth - containerRight - INSPECTOR_EDGE_MARGIN_PX
+  const spaceLeft = containerLeft - INSPECTOR_EDGE_MARGIN_PX
+  const spaceBelow = viewportHeight - containerBottom - INSPECTOR_EDGE_MARGIN_PX
+  const spaceAbove = containerTop - INSPECTOR_EDGE_MARGIN_PX
+
+  const canPlaceRight = spaceRight >= requiredHorizontal
+  const canPlaceLeft = spaceLeft >= requiredHorizontal
+  const canPlaceBelow = spaceBelow >= requiredVertical
+  const canPlaceAbove = spaceAbove >= requiredVertical
+
+  let left = pointerX - INSPECTOR_WIDTH_PX / 2
+  let top = pointerY - INSPECTOR_HEIGHT_PX / 2
+
+  if (canPlaceRight || canPlaceLeft) {
+    left = canPlaceRight && (!canPlaceLeft || spaceRight >= spaceLeft)
+      ? containerRight + MAGNIFIER_OFFSET_PX
+      : containerLeft - INSPECTOR_WIDTH_PX - MAGNIFIER_OFFSET_PX
+  } else if (canPlaceBelow || canPlaceAbove) {
+    top = canPlaceBelow && (!canPlaceAbove || spaceBelow >= spaceAbove)
+      ? containerBottom + MAGNIFIER_OFFSET_PX
+      : containerTop - INSPECTOR_HEIGHT_PX - MAGNIFIER_OFFSET_PX
+  } else {
+    const horizontalShortfall = Math.max(0, requiredHorizontal - Math.max(spaceRight, spaceLeft))
+    const verticalShortfall = Math.max(0, requiredVertical - Math.max(spaceBelow, spaceAbove))
+    if (horizontalShortfall <= verticalShortfall) {
+      left = spaceRight >= spaceLeft
+        ? containerRight + MAGNIFIER_OFFSET_PX
+        : containerLeft - INSPECTOR_WIDTH_PX - MAGNIFIER_OFFSET_PX
+    } else {
+      top = spaceBelow >= spaceAbove
+        ? containerBottom + MAGNIFIER_OFFSET_PX
+        : containerTop - INSPECTOR_HEIGHT_PX - MAGNIFIER_OFFSET_PX
+    }
+  }
+
+  const maxLeft = Math.max(INSPECTOR_EDGE_MARGIN_PX, viewportWidth - INSPECTOR_WIDTH_PX - INSPECTOR_EDGE_MARGIN_PX)
+  const maxTop = Math.max(INSPECTOR_EDGE_MARGIN_PX, viewportHeight - INSPECTOR_HEIGHT_PX - INSPECTOR_EDGE_MARGIN_PX)
+
+  return {
+    left: `${clampNumber(left, INSPECTOR_EDGE_MARGIN_PX, maxLeft)}px`,
+    top: `${clampNumber(top, INSPECTOR_EDGE_MARGIN_PX, maxTop)}px`,
+  }
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+  const toHex = (component: number) => component.toString(16).padStart(2, "0").toUpperCase()
+  return `${toHex(r)}${toHex(g)}${toHex(b)}`
+}
+
+function areLayerSamplesEqual(left: LayerHoverColorSample[], right: LayerHoverColorSample[]): boolean {
+  if (left === right) return true
+  if (left.length !== right.length) return false
+  for (let i = 0; i < left.length; i += 1) {
+    const a = left[i]
+    const b = right[i]
+    if (a.displayIndex !== b.displayIndex || a.layerName !== b.layerName || a.colorHex !== b.colorHex) {
+      return false
+    }
+  }
+  return true
+}
+
+function areHoverSamplesEqual(
+  left: ZoomableImageHoverSample | null,
+  right: ZoomableImageHoverSample | null,
+): boolean {
+  if (left === right) return true
+  if (!left || !right) return false
+  return (
+    left.containerX === right.containerX
+    && left.containerY === right.containerY
+    && left.containerWidth === right.containerWidth
+    && left.containerHeight === right.containerHeight
+    && left.containerLeft === right.containerLeft
+    && left.containerTop === right.containerTop
+    && left.pixelX === right.pixelX
+    && left.pixelY === right.pixelY
+    && left.naturalWidth === right.naturalWidth
+    && left.naturalHeight === right.naturalHeight
+  )
+}
 
 export default function ActionBar() {
   const { t } = useI18n()
   const workspace = useWorkspaceMode()
   const [zoomedLayerIdx, setZoomedLayerIdx] = useState<number | null>(null)
+  const [hoverSample, setHoverSample] = useState<ZoomableImageHoverSample | null>(null)
+  const [hoverLayerColors, setHoverLayerColors] = useState<LayerHoverColorSample[]>([])
+  const [hoverSurfaceHex, setHoverSurfaceHex] = useState<string | null>(null)
+  const [previewCanvasBuffer, setPreviewCanvasBuffer] = useState<PreviewCanvasBuffer | null>(null)
+  const [layerCanvasBuffers, setLayerCanvasBuffers] = useState<LayerCanvasBuffer[]>([])
+  const pendingHoverSampleRef = useRef<ZoomableImageHoverSample | null>(null)
+  const hoverDelayTimerRef = useRef<number | null>(null)
+  const magnifierCanvasRef = useRef<HTMLCanvasElement>(null)
+  const fetchedLayerSessionRef = useRef<string | null>(null)
+  const layerSampleCacheRef = useRef<Map<string, LayerHoverColorSample[]>>(new Map())
+  const surfaceSampleCacheRef = useRef<Map<string, string | null>>(new Map())
   const imageFile = useConverterStore((s) => s.imageFile)
   const lut_name = useConverterStore((s) => s.lut_name)
   const isLoading = useConverterStore((s) => s.isLoading)
@@ -27,6 +201,8 @@ export default function ActionBar() {
   const previewWidthMm = useConverterStore((s) => s.preview_width_mm)
   const previewPixelWidth = useConverterStore((s) => s.previewPixelWidth)
   const previewPixelHeight = useConverterStore((s) => s.previewPixelHeight)
+  const bedLabel = useConverterStore((s) => s.bed_label)
+  const bedSizes = useConverterStore((s) => s.bedSizes)
   const submitPreview = useConverterStore((s) => s.submitPreview)
   const submitGenerate = useConverterStore((s) => s.submitGenerate)
   const submitFullPipeline = useConverterStore((s) => s.submitFullPipeline)
@@ -127,6 +303,398 @@ export default function ActionBar() {
       </svg>
     )
   }, [activeMultiSelectRegionId, previewPixelHeight, previewPixelWidth, previewWidthMm, selectedRegions, selectionMode])
+
+  const previewDebugOverlay = useMemo(() => (
+    <div
+      className="pointer-events-none absolute inset-0 border-2"
+      style={{ borderColor: "var(--warning-border)" }}
+      aria-hidden="true"
+    >
+      <div
+        className="absolute left-2 top-2 rounded-full border px-2 py-1 text-[10px] font-semibold"
+        style={{
+          borderColor: "var(--warning-border)",
+          background: "var(--warning-soft)",
+          color: "var(--surface-text-muted)",
+        }}
+      >
+        {t("preview_debug_action_2d")}
+      </div>
+    </div>
+  ), [t])
+
+  const handlePreviewImageReady = useCallback((image: HTMLImageElement | null) => {
+    if (!image) {
+      setPreviewCanvasBuffer(null)
+      surfaceSampleCacheRef.current.clear()
+      return
+    }
+
+    const buffer = buildPreviewCanvasBuffer(image)
+    setPreviewCanvasBuffer(buffer)
+    surfaceSampleCacheRef.current.clear()
+  }, [])
+
+  useEffect(() => {
+    if (!sessionId) {
+      fetchedLayerSessionRef.current = null
+      return
+    }
+
+    if (!hasPreview || layerImagesLoading || layerImages.length > 0) {
+      return
+    }
+
+    if (fetchedLayerSessionRef.current === sessionId) {
+      return
+    }
+
+    fetchedLayerSessionRef.current = sessionId
+    void fetchLayerImages()
+  }, [hasPreview, sessionId, layerImagesLoading, layerImages.length, fetchLayerImages])
+
+  useEffect(() => {
+    if (!previewDisplayUrl) {
+      setPreviewCanvasBuffer(null)
+      layerSampleCacheRef.current.clear()
+      surfaceSampleCacheRef.current.clear()
+      setHoverSample(null)
+      setHoverLayerColors([])
+      setHoverSurfaceHex(null)
+      return
+    }
+
+    layerSampleCacheRef.current.clear()
+    surfaceSampleCacheRef.current.clear()
+    setHoverSample(null)
+    setHoverLayerColors([])
+    setHoverSurfaceHex(null)
+  }, [previewDisplayUrl])
+
+  useEffect(() => {
+    let cancelled = false
+
+    if (layerImages.length === 0) {
+      setLayerCanvasBuffers([])
+      layerSampleCacheRef.current.clear()
+      return () => {
+        cancelled = true
+      }
+    }
+
+    const buildBuffers = async () => {
+      const loaded = await Promise.all(
+        layerImages.map(
+          (layer) =>
+            new Promise<LayerCanvasBuffer | null>((resolve) => {
+              const image = new Image()
+              image.crossOrigin = "anonymous"
+              image.onload = () => {
+                const width = image.naturalWidth || image.width
+                const height = image.naturalHeight || image.height
+                if (width <= 0 || height <= 0) {
+                  resolve(null)
+                  return
+                }
+                const canvas = document.createElement("canvas")
+                canvas.width = width
+                canvas.height = height
+                const context = canvas.getContext("2d", { willReadFrequently: true })
+                if (!context) {
+                  resolve(null)
+                  return
+                }
+                context.drawImage(image, 0, 0)
+                resolve({
+                  layerIndex: layer.layer_index,
+                  name: layer.name,
+                  width,
+                  height,
+                  context,
+                })
+              }
+              image.onerror = () => resolve(null)
+              image.src = layer.url
+            }),
+        ),
+      )
+
+      if (cancelled) return
+      setLayerCanvasBuffers(loaded.filter((entry): entry is LayerCanvasBuffer => entry !== null))
+      layerSampleCacheRef.current.clear()
+    }
+
+    void buildBuffers()
+
+    return () => {
+      cancelled = true
+    }
+  }, [layerImages])
+
+  useEffect(() => {
+    return () => {
+      if (hoverDelayTimerRef.current !== null) {
+        window.clearTimeout(hoverDelayTimerRef.current)
+        hoverDelayTimerRef.current = null
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!hoverSample) {
+      setHoverLayerColors((previous) => (previous.length === 0 ? previous : []))
+      setHoverSurfaceHex((previous) => (previous === null ? previous : null))
+      return
+    }
+
+    const surfaceCacheKey = `${hoverSample.pixelX},${hoverSample.pixelY}`
+    const resolvedLayerPixel = resolvePreviewHoverPixel(hoverSample, {
+      rawWidth: previewPixelWidth,
+      rawHeight: previewPixelHeight,
+      previewWidthMm,
+      bedLabel,
+      bedSizes,
+    })
+    const layerBaseWidth = previewPixelWidth && previewPixelWidth > 0 ? previewPixelWidth : hoverSample.naturalWidth
+    const layerBaseHeight = previewPixelHeight && previewPixelHeight > 0 ? previewPixelHeight : hoverSample.naturalHeight
+
+    const previewBuffer = previewCanvasBuffer
+    if (!previewBuffer) {
+      setHoverSurfaceHex((previous) => (previous === null ? previous : null))
+    } else {
+      const cachedSurface = surfaceSampleCacheRef.current.get(surfaceCacheKey)
+      if (cachedSurface !== undefined) {
+        setHoverSurfaceHex((previous) => (previous === cachedSurface ? previous : cachedSurface))
+      } else {
+        let sampledSurface: string | null = null
+        const x = mapPixelToBufferCoordinate(hoverSample.pixelX, hoverSample.naturalWidth, previewBuffer.width)
+        const y = mapPixelToBufferCoordinate(hoverSample.pixelY, hoverSample.naturalHeight, previewBuffer.height)
+        try {
+          const rgba = previewBuffer.context.getImageData(x, y, 1, 1).data
+          sampledSurface = rgba[3] <= 8 ? null : rgbToHex(rgba[0], rgba[1], rgba[2])
+        } catch {
+          sampledSurface = null
+        }
+        surfaceSampleCacheRef.current.set(surfaceCacheKey, sampledSurface)
+        setHoverSurfaceHex((previous) => (previous === sampledSurface ? previous : sampledSurface))
+      }
+    }
+
+    const buffers = layerCanvasBuffers
+    if (!resolvedLayerPixel || buffers.length === 0) {
+      setHoverLayerColors((previous) => (previous.length === 0 ? previous : []))
+      return
+    }
+
+    const layerCacheKey = `${resolvedLayerPixel.pixelX},${resolvedLayerPixel.pixelY}`
+    const cachedLayers = layerSampleCacheRef.current.get(layerCacheKey)
+    if (cachedLayers) {
+      setHoverLayerColors((previous) => (areLayerSamplesEqual(previous, cachedLayers) ? previous : cachedLayers))
+      return
+    }
+
+    const sampledLayers = buffers.map((layer, index) => {
+      const x = mapPixelToBufferCoordinate(resolvedLayerPixel.pixelX, layerBaseWidth, layer.width)
+      const y = mapPixelToBufferCoordinate(resolvedLayerPixel.pixelY, layerBaseHeight, layer.height)
+
+      try {
+        const rgba = layer.context.getImageData(x, y, 1, 1).data
+        const alpha = rgba[3]
+        return {
+          displayIndex: index + 1,
+          layerName: layer.name,
+          colorHex: alpha <= 8 ? null : rgbToHex(rgba[0], rgba[1], rgba[2]),
+        }
+      } catch {
+        return {
+          displayIndex: index + 1,
+          layerName: layer.name,
+          colorHex: null,
+        }
+      }
+    })
+
+    layerSampleCacheRef.current.set(layerCacheKey, sampledLayers)
+    setHoverLayerColors((previous) => (areLayerSamplesEqual(previous, sampledLayers) ? previous : sampledLayers))
+  }, [hoverSample, previewPixelWidth, previewPixelHeight, previewWidthMm, bedLabel, bedSizes, previewCanvasBuffer, layerCanvasBuffers])
+
+  useEffect(() => {
+    const magnifierCanvas = magnifierCanvasRef.current
+    const context = magnifierCanvas?.getContext("2d")
+    if (!magnifierCanvas || !context) {
+      return
+    }
+
+    context.clearRect(0, 0, magnifierCanvas.width, magnifierCanvas.height)
+
+    if (!hoverSample) {
+      return
+    }
+
+    const previewBuffer = previewCanvasBuffer
+    if (!previewBuffer) {
+      return
+    }
+
+    const centerX = mapPixelToBufferCoordinate(hoverSample.pixelX, hoverSample.naturalWidth, previewBuffer.width)
+    const centerY = mapPixelToBufferCoordinate(hoverSample.pixelY, hoverSample.naturalHeight, previewBuffer.height)
+
+    const sourceSize = MAGNIFIER_SIZE_PX / MAGNIFIER_ZOOM
+    const maxSourceX = Math.max(0, previewBuffer.width - sourceSize)
+    const maxSourceY = Math.max(0, previewBuffer.height - sourceSize)
+    const sourceX = clampNumber(centerX - sourceSize / 2, 0, maxSourceX)
+    const sourceY = clampNumber(centerY - sourceSize / 2, 0, maxSourceY)
+
+    context.imageSmoothingEnabled = false
+    context.drawImage(
+      previewBuffer.context.canvas,
+      sourceX,
+      sourceY,
+      sourceSize,
+      sourceSize,
+      0,
+      0,
+      magnifierCanvas.width,
+      magnifierCanvas.height,
+    )
+
+    const center = magnifierCanvas.width / 2
+    context.strokeStyle = "rgba(255, 255, 255, 0.9)"
+    context.lineWidth = 1
+    context.beginPath()
+    context.moveTo(center, 0)
+    context.lineTo(center, magnifierCanvas.height)
+    context.moveTo(0, center)
+    context.lineTo(magnifierCanvas.width, center)
+    context.stroke()
+  }, [hoverSample, previewCanvasBuffer])
+
+  const handlePreviewHoverSample = useCallback((sample: ZoomableImageHoverSample | null) => {
+    pendingHoverSampleRef.current = sample
+
+    if (hoverDelayTimerRef.current !== null) {
+      window.clearTimeout(hoverDelayTimerRef.current)
+      hoverDelayTimerRef.current = null
+    }
+
+    if (sample === null) {
+      setHoverSample((previous) => (previous === null ? previous : null))
+      return
+    }
+
+    setHoverSample((previous) => (previous === null ? previous : null))
+
+    hoverDelayTimerRef.current = window.setTimeout(() => {
+      hoverDelayTimerRef.current = null
+      const pending = pendingHoverSampleRef.current
+      if (!pending) {
+        return
+      }
+      setHoverSample((previous) => (areHoverSamplesEqual(previous, pending) ? previous : pending))
+    }, HOVER_POPOVER_DELAY_MS)
+  }, [])
+
+  const hoverInspectorStyle = hoverSample ? computeHoverInspectorStyle(hoverSample) : null
+
+  const hoverInspectorContent = hoverSample && hoverInspectorStyle ? (
+    <div
+      className="pointer-events-none fixed z-[60]"
+      style={hoverInspectorStyle}
+      data-testid="action-hover-inspector"
+    >
+      <div
+        className="w-[248px] rounded-xl border p-2 shadow-xl backdrop-blur-sm"
+        style={{
+          borderColor: "var(--surface-outline)",
+          background: "var(--surface-panel-strong)",
+          color: "var(--surface-text-muted)",
+        }}
+      >
+        <div
+          className="relative overflow-hidden rounded-md border"
+          style={{ borderColor: "var(--surface-outline)" }}
+        >
+          <canvas
+            ref={magnifierCanvasRef}
+            width={MAGNIFIER_SIZE_PX}
+            height={MAGNIFIER_SIZE_PX}
+            className="h-[152px] w-[152px]"
+            aria-label={t("viewer_hover_magnifier")}
+          />
+          <span
+            className="absolute left-2 top-2 rounded border px-1.5 py-0.5 text-[10px]"
+            style={{
+              borderColor: "var(--surface-outline)",
+              background: "var(--surface-section-muted)",
+            }}
+          >
+            {t("viewer_hover_magnifier")}
+          </span>
+        </div>
+
+        <div className="mt-2 space-y-1 text-[11px]">
+          <div className="flex items-center justify-between">
+            <span>{t("viewer_hover_pixel")}</span>
+            <span className="font-mono">({hoverSample.pixelX}, {hoverSample.pixelY})</span>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <span>{t("viewer_hover_surface_color")}</span>
+            <span className="inline-flex items-center gap-1.5 font-mono">
+              <span
+                className="h-3 w-3 rounded border"
+                style={{
+                  borderColor: "var(--surface-outline)",
+                  backgroundColor: hoverSurfaceHex ? `#${hoverSurfaceHex}` : "transparent",
+                }}
+              />
+              {hoverSurfaceHex ? `#${hoverSurfaceHex}` : t("viewer_hover_transparent")}
+            </span>
+          </div>
+        </div>
+
+        <div
+          className="mt-2 border-t pt-2"
+          style={{ borderColor: "var(--surface-outline)" }}
+        >
+          <div className="mb-1 text-[11px] font-semibold">
+            {t("viewer_hover_layers_title")}
+          </div>
+          {layerImagesLoading && hoverLayerColors.length === 0 ? (
+            <p className="text-[11px]">{t("viewer_hover_loading_layers")}</p>
+          ) : hoverLayerColors.length > 0 ? (
+            <ul className="max-h-28 space-y-1 overflow-y-auto pr-1 text-[11px]">
+              {hoverLayerColors.map((layer) => (
+                <li
+                  key={`${layer.displayIndex}-${layer.layerName}`}
+                  className="flex items-center justify-between gap-2"
+                >
+                  <span className="truncate">
+                    {t("action_layer_nth")}{layer.displayIndex}{t("action_layer_unit")}
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 font-mono">
+                    <span
+                      className="h-2.5 w-2.5 rounded border"
+                      style={{
+                        borderColor: "var(--surface-outline)",
+                        backgroundColor: layer.colorHex ? `#${layer.colorHex}` : "transparent",
+                      }}
+                    />
+                    {layer.colorHex ? `#${layer.colorHex}` : t("viewer_hover_transparent")}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-[11px]">{t("viewer_hover_no_layer_data")}</p>
+          )}
+        </div>
+      </div>
+    </div>
+  ) : null
+
+  const hoverInspectorOverlay = hoverInspectorContent && typeof document !== "undefined"
+    ? createPortal(hoverInspectorContent, document.body)
+    : null
 
   return (
     <div className="flex flex-col gap-3">
@@ -245,8 +813,12 @@ export default function ActionBar() {
           alt={t("action_preview_alt")}
           className="w-full rounded-[22px] border border-gray-300 dark:border-gray-700"
           overlay={previewOverlay}
+          floatingOverlay={previewDebugOverlay}
+          onHoverSample={handlePreviewHoverSample}
+          onImageReady={handlePreviewImageReady}
         />
       )}
+      {hoverInspectorOverlay}
 
       {layerImages.length > 0 && (
         <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
