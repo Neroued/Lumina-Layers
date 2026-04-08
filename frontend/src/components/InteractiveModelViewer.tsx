@@ -53,10 +53,38 @@ export interface InteractiveModelViewerProps {
   enableCloisonne?: boolean;   // 是否启用景泰蓝预览，默认 false
   wireWidthMm?: number;        // 金丝宽度 (mm)，默认 0.4
   wireHeightMm?: number;       // 金丝高度 (mm)，默认 0.1
+  onHoverSample?: (sample: ViewerHoverSample | null) => void;
+}
+
+export interface ViewerHoverSample {
+  canvasX: number;
+  canvasY: number;
+  pixelX: number;
+  pixelY: number;
+  hitColorHex: string;
 }
 
 /** Color layer thickness in mm (5 layers × 0.08mm). */
 const COLOR_LAYER_HEIGHT = 0.4;
+
+type HoverPerfWindow = Window & { __luminaHoverPerfDebug?: boolean };
+
+interface HoverPerfStats {
+  pointerMoveCount: number;
+  processCount: number;
+  emitCount: number;
+  dedupeCount: number;
+  missCount: number;
+  wheelCount: number;
+  totalProcessMs: number;
+  maxProcessMs: number;
+  lastLogAt: number;
+}
+
+function isHoverPerfDebugEnabled(): boolean {
+  if (typeof window === "undefined") return false;
+  return Boolean((window as HoverPerfWindow).__luminaHoverPerfDebug);
+}
 
 function InteractiveModelViewer({
   url,
@@ -66,6 +94,7 @@ function InteractiveModelViewer({
   baseHeight,
   enableRelief,
   onColorClick,
+  onHoverSample,
   scaleX = 1,
   scaleY = 1,
   spacerThick = 1.2,
@@ -288,6 +317,20 @@ function InteractiveModelViewer({
   // Flag to suppress onPointerMissed when a color mesh was clicked via native event.
   // We store this on the converterStore so Scene3D can read it.
   const colorHitRef = useRef(false);
+  const hoverPointerRef = useRef<{ clientX: number; clientY: number } | null>(null);
+  const hoverRafRef = useRef<number | null>(null);
+  const lastHoverSignatureRef = useRef<string>("");
+  const hoverPerfStatsRef = useRef<HoverPerfStats>({
+    pointerMoveCount: 0,
+    processCount: 0,
+    emitCount: 0,
+    dedupeCount: 0,
+    missCount: 0,
+    wheelCount: 0,
+    totalProcessMs: 0,
+    maxProcessMs: 0,
+    lastLogAt: performance.now(),
+  });
 
   // Read selectionMode and related state for region click handling
   const selectionMode = useConverterStore((s) => s.selectionMode);
@@ -300,6 +343,74 @@ function InteractiveModelViewer({
   const previewPixelWidth = useConverterStore((s) => s.previewPixelWidth);
   const previewPixelHeight = useConverterStore((s) => s.previewPixelHeight);
   const previewWidthMm = useConverterStore((s) => s.preview_width_mm);
+
+  const mapWorldToPreviewPixel = useCallback(
+    (worldPoint: THREE.Vector3): { x: number; y: number } | null => {
+      if (
+        !groupRef.current
+        || !previewPixelWidth
+        || !previewPixelHeight
+        || !previewWidthMm
+        || previewWidthMm <= 0
+      ) {
+        return null;
+      }
+
+      const localPoint = groupRef.current.worldToLocal(worldPoint.clone());
+      const pixelScale = previewWidthMm / previewPixelWidth;
+      const originalX = localPoint.x + sceneCenter.x;
+      const originalY = localPoint.y + sceneCenter.y;
+      const pixelX = Math.floor(originalX / pixelScale);
+      const pixelY = Math.floor(previewPixelHeight - originalY / pixelScale);
+
+      return {
+        x: Math.max(0, Math.min(previewPixelWidth - 1, pixelX)),
+        y: Math.max(0, Math.min(previewPixelHeight - 1, pixelY)),
+      };
+    },
+    [previewPixelWidth, previewPixelHeight, previewWidthMm, sceneCenter],
+  );
+
+  const maybeFlushHoverPerfLog = useCallback((force = false) => {
+    if (!isHoverPerfDebugEnabled()) {
+      return;
+    }
+
+    const stats = hoverPerfStatsRef.current;
+    const now = performance.now();
+    const elapsed = Math.max(1, now - stats.lastLogAt);
+    if (!force && elapsed < 1000) {
+      return;
+    }
+
+    const averageProcessMs =
+      stats.processCount > 0 ? +(stats.totalProcessMs / stats.processCount).toFixed(3) : 0;
+    const maxProcessMs = +stats.maxProcessMs.toFixed(3);
+    const processPerSecond = +((stats.processCount * 1000) / elapsed).toFixed(2);
+
+    console.info("[HoverPerf][InteractiveModelViewer]", {
+      elapsed_ms: +elapsed.toFixed(1),
+      pointermove_events: stats.pointerMoveCount,
+      process_events: stats.processCount,
+      process_per_sec: processPerSecond,
+      hover_emits: stats.emitCount,
+      hover_dedupes: stats.dedupeCount,
+      misses: stats.missCount,
+      wheel_events: stats.wheelCount,
+      avg_process_ms: averageProcessMs,
+      max_process_ms: maxProcessMs,
+    });
+
+    stats.pointerMoveCount = 0;
+    stats.processCount = 0;
+    stats.emitCount = 0;
+    stats.dedupeCount = 0;
+    stats.missCount = 0;
+    stats.wheelCount = 0;
+    stats.totalProcessMs = 0;
+    stats.maxProcessMs = 0;
+    stats.lastLogAt = now;
+  }, []);
 
   const handlePointerDown = useCallback(
     (event: PointerEvent) => {
@@ -318,21 +429,14 @@ function InteractiveModelViewer({
         const hitMesh = intersects[0].object as THREE.Mesh;
         if (hitMesh.name.startsWith("color_")) {
           colorHitRef.current = true;
+          const previewPixel = mapWorldToPreviewPixel(intersects[0].point);
 
           if (selectionMode === "current" || selectionMode === "region" || selectionMode === "multi-select") {
-            if (groupRef.current && previewPixelWidth && previewPixelHeight && previewWidthMm && previewWidthMm > 0) {
-              const localPoint = groupRef.current.worldToLocal(intersects[0].point.clone());
-              const pixelScale = previewWidthMm / previewPixelWidth;
-              const originalX = localPoint.x + sceneCenter.x;
-              const originalY = localPoint.y + sceneCenter.y;
-              const pixelX = Math.floor(originalX / pixelScale);
-              const pixelY = Math.floor(previewPixelHeight - originalY / pixelScale);
-              const clampedX = Math.max(0, Math.min(previewPixelWidth - 1, pixelX));
-              const clampedY = Math.max(0, Math.min(previewPixelHeight - 1, pixelY));
+            if (previewPixel) {
               if (selectionMode === "multi-select") {
-                detectAndAccumulateRegion(clampedX, clampedY);
+                detectAndAccumulateRegion(previewPixel.x, previewPixel.y);
               } else {
-                detectRegion(clampedX, clampedY);
+                detectRegion(previewPixel.x, previewPixel.y);
               }
             }
           } else {
@@ -352,8 +456,164 @@ function InteractiveModelViewer({
         }
       }
     },
-    [threeCtx.gl, threeCtx.camera, colorMeshes, selectedColors, toggleColorInSelection, onColorClick, selectionMode, detectRegion, detectAndAccumulateRegion, previewPixelWidth, previewPixelHeight, previewWidthMm, sceneCenter],
+    [threeCtx.gl, threeCtx.camera, colorMeshes, selectedColors, toggleColorInSelection, onColorClick, selectionMode, detectRegion, detectAndAccumulateRegion, mapWorldToPreviewPixel],
   );
+
+  const emitHoverSample = useCallback(
+    (sample: ViewerHoverSample | null) => {
+      if (!onHoverSample) return;
+      const stats = hoverPerfStatsRef.current;
+
+      if (!sample) {
+        if (lastHoverSignatureRef.current === "__null__") {
+          stats.dedupeCount += 1;
+          maybeFlushHoverPerfLog(false);
+          return;
+        }
+        lastHoverSignatureRef.current = "__null__";
+        stats.emitCount += 1;
+        onHoverSample(null);
+        maybeFlushHoverPerfLog(false);
+        return;
+      }
+
+      const signature = `${sample.canvasX},${sample.canvasY},${sample.pixelX},${sample.pixelY},${sample.hitColorHex}`;
+      if (signature === lastHoverSignatureRef.current) {
+        stats.dedupeCount += 1;
+        maybeFlushHoverPerfLog(false);
+        return;
+      }
+
+      lastHoverSignatureRef.current = signature;
+      stats.emitCount += 1;
+      onHoverSample(sample);
+      maybeFlushHoverPerfLog(false);
+    },
+    [onHoverSample, maybeFlushHoverPerfLog],
+  );
+
+  const processHoverPointer = useCallback(() => {
+    if (!onHoverSample) return;
+    const processStart = performance.now();
+    const stats = hoverPerfStatsRef.current;
+    stats.processCount += 1;
+
+    const pending = hoverPointerRef.current;
+    if (!pending) {
+      stats.missCount += 1;
+      const totalMs = performance.now() - processStart;
+      stats.totalProcessMs += totalMs;
+      stats.maxProcessMs = Math.max(stats.maxProcessMs, totalMs);
+      emitHoverSample(null);
+      maybeFlushHoverPerfLog(totalMs > 8);
+      return;
+    }
+
+    const canvas = threeCtx.gl.domElement;
+    const rect = canvas.getBoundingClientRect();
+    const relativeX = pending.clientX - rect.left;
+    const relativeY = pending.clientY - rect.top;
+
+    pointerRef.current.x = (relativeX / rect.width) * 2 - 1;
+    pointerRef.current.y = -(relativeY / rect.height) * 2 + 1;
+
+    raycasterRef.current.setFromCamera(pointerRef.current, threeCtx.camera);
+    const intersects = raycasterRef.current.intersectObjects(colorMeshes, false);
+
+    if (intersects.length === 0) {
+      stats.missCount += 1;
+      const totalMs = performance.now() - processStart;
+      stats.totalProcessMs += totalMs;
+      stats.maxProcessMs = Math.max(stats.maxProcessMs, totalMs);
+      emitHoverSample(null);
+      maybeFlushHoverPerfLog(totalMs > 8);
+      return;
+    }
+
+    const hitMesh = intersects[0].object as THREE.Mesh;
+    if (!hitMesh.name.startsWith("color_")) {
+      stats.missCount += 1;
+      const totalMs = performance.now() - processStart;
+      stats.totalProcessMs += totalMs;
+      stats.maxProcessMs = Math.max(stats.maxProcessMs, totalMs);
+      emitHoverSample(null);
+      maybeFlushHoverPerfLog(totalMs > 8);
+      return;
+    }
+
+    const previewPixel = mapWorldToPreviewPixel(intersects[0].point);
+    if (!previewPixel) {
+      stats.missCount += 1;
+      const totalMs = performance.now() - processStart;
+      stats.totalProcessMs += totalMs;
+      stats.maxProcessMs = Math.max(stats.maxProcessMs, totalMs);
+      emitHoverSample(null);
+      maybeFlushHoverPerfLog(totalMs > 8);
+      return;
+    }
+
+    emitHoverSample({
+      canvasX: Math.round(relativeX),
+      canvasY: Math.round(relativeY),
+      pixelX: previewPixel.x,
+      pixelY: previewPixel.y,
+      hitColorHex: extractHexFromMeshName(hitMesh.name),
+    });
+
+    const totalMs = performance.now() - processStart;
+    stats.totalProcessMs += totalMs;
+    stats.maxProcessMs = Math.max(stats.maxProcessMs, totalMs);
+    maybeFlushHoverPerfLog(totalMs > 8);
+  }, [threeCtx.gl, threeCtx.camera, colorMeshes, mapWorldToPreviewPixel, onHoverSample, emitHoverSample, maybeFlushHoverPerfLog]);
+
+  const handlePointerMove = useCallback(
+    (event: PointerEvent) => {
+      if (!onHoverSample) return;
+      hoverPerfStatsRef.current.pointerMoveCount += 1;
+
+      hoverPointerRef.current = { clientX: event.clientX, clientY: event.clientY };
+
+      if (hoverRafRef.current !== null) {
+        return;
+      }
+
+      hoverRafRef.current = window.requestAnimationFrame(() => {
+        hoverRafRef.current = null;
+        processHoverPointer();
+      });
+    },
+    [onHoverSample, processHoverPointer],
+  );
+
+  const handleWheel = useCallback(() => {
+    hoverPerfStatsRef.current.wheelCount += 1;
+    hoverPointerRef.current = null;
+    if (hoverRafRef.current !== null) {
+      window.cancelAnimationFrame(hoverRafRef.current);
+      hoverRafRef.current = null;
+    }
+    emitHoverSample(null);
+    maybeFlushHoverPerfLog(false);
+  }, [emitHoverSample, maybeFlushHoverPerfLog]);
+
+  const handlePointerLeave = useCallback(() => {
+    hoverPointerRef.current = null;
+    if (hoverRafRef.current !== null) {
+      window.cancelAnimationFrame(hoverRafRef.current);
+      hoverRafRef.current = null;
+    }
+    emitHoverSample(null);
+  }, [emitHoverSample]);
+
+  useEffect(() => {
+    return () => {
+      if (hoverRafRef.current !== null) {
+        window.cancelAnimationFrame(hoverRafRef.current);
+        hoverRafRef.current = null;
+      }
+      maybeFlushHoverPerfLog(true);
+    };
+  }, [maybeFlushHoverPerfLog]);
 
   // Expose colorHitRef check so Scene3D's onPointerMissed can query it
   useEffect(() => {
@@ -367,8 +627,16 @@ function InteractiveModelViewer({
   useEffect(() => {
     const canvas = threeCtx.gl.domElement;
     canvas.addEventListener("pointerdown", handlePointerDown);
-    return () => canvas.removeEventListener("pointerdown", handlePointerDown);
-  }, [threeCtx.gl, handlePointerDown]);
+    canvas.addEventListener("pointermove", handlePointerMove);
+    canvas.addEventListener("wheel", handleWheel, { passive: true });
+    canvas.addEventListener("pointerleave", handlePointerLeave);
+    return () => {
+      canvas.removeEventListener("pointerdown", handlePointerDown);
+      canvas.removeEventListener("pointermove", handlePointerMove);
+      canvas.removeEventListener("wheel", handleWheel);
+      canvas.removeEventListener("pointerleave", handlePointerLeave);
+    };
+  }, [threeCtx.gl, handlePointerDown, handlePointerMove, handleWheel, handlePointerLeave]);
 
   // Edge outline LineSegments for selected color regions.
   const outlineObjsRef = useRef<THREE.LineSegments[]>([]);

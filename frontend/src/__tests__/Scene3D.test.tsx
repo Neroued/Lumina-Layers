@@ -9,8 +9,12 @@ vi.mock("../i18n/context", () => ({
 
 // Mock child components that live inside Canvas (R3F components)
 vi.mock("../components/ModelViewer", () => ({ default: () => null }));
+let capturedInteractiveViewerProps: Record<string, unknown> | null = null;
 vi.mock("../components/InteractiveModelViewer", () => ({
-  default: () => null,
+  default: (props: Record<string, unknown>) => {
+    capturedInteractiveViewerProps = props;
+    return null;
+  },
   extractHexFromMeshName: (name: string) => name.slice(6),
   toggleColorSelection: (sel: string | null, clicked: string) =>
     sel === clicked ? null : clicked,
@@ -56,6 +60,7 @@ import Scene3D from "../components/Scene3D";
 describe("Scene3D", () => {
   beforeEach(() => {
     capturedCanvasProps = {};
+    capturedInteractiveViewerProps = null;
     // Reset store to defaults
     useConverterStore.setState({
       isLoading: false,
@@ -145,6 +150,59 @@ describe("Scene3D", () => {
       });
 
       expect(useConverterStore.getState().selectedColor).toBeNull();
+    });
+  });
+
+  describe("hover inspector", () => {
+    it("shows hover inspector when InteractiveModelViewer reports hover and hides on pointer missed", () => {
+      vi.useFakeTimers();
+
+      useConverterStore.setState({
+        previewGlbUrl: "/api/files/mock-preview.glb",
+        colorRemapMap: { ff0000: "00ff00" },
+      });
+
+      render(<Scene3D />);
+
+      const hoverHandler = capturedInteractiveViewerProps?.onHoverSample as
+        | ((sample: {
+          canvasX: number;
+          canvasY: number;
+          pixelX: number;
+          pixelY: number;
+          hitColorHex: string;
+        }) => void)
+        | undefined;
+
+      expect(hoverHandler).toBeTypeOf("function");
+
+      act(() => {
+        hoverHandler?.({
+          canvasX: 24,
+          canvasY: 36,
+          pixelX: 10,
+          pixelY: 20,
+          hitColorHex: "ff0000",
+        });
+      });
+
+      expect(screen.queryByTestId("viewer-hover-inspector")).not.toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(220);
+      });
+
+      expect(screen.getByTestId("viewer-hover-inspector")).toBeInTheDocument();
+      expect(screen.getByText("(10, 20)")).toBeInTheDocument();
+      expect(screen.getByText("#00FF00")).toBeInTheDocument();
+
+      act(() => {
+        (capturedCanvasProps.onPointerMissed as () => void)();
+      });
+
+      expect(screen.queryByTestId("viewer-hover-inspector")).not.toBeInTheDocument();
+
+      vi.useRealTimers();
     });
   });
 

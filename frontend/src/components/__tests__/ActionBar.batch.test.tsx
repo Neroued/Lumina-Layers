@@ -1,7 +1,10 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { act, render, screen } from "@testing-library/react";
 import { useConverterStore } from "../../stores/converter";
 import ActionBar from "../sections/ActionBar";
+
+let capturedZoomableImageProps: Record<string, unknown> | null = null;
 
 // Mock child components with complex dependencies
 vi.mock("../sections/BedSizeSelector", () => ({
@@ -12,12 +15,26 @@ vi.mock("../sections/SlicerSelector", () => ({
   default: () => <div data-testid="slicer-selector" />,
 }));
 
+vi.mock("../ui/ZoomableImage", () => ({
+  default: (props: Record<string, unknown>) => {
+    capturedZoomableImageProps = props;
+    return (
+      <div data-testid="zoomable-image-mock">
+        <img alt={String(props.alt ?? "")} src={String(props.src ?? "")} />
+        {props.overlay ? <div data-testid="zoomable-image-overlay">{props.overlay as ReactNode}</div> : null}
+        {props.floatingOverlay ? <div data-testid="zoomable-image-floating-overlay">{props.floatingOverlay as ReactNode}</div> : null}
+      </div>
+    );
+  },
+}));
+
 function makeFile(name: string, type = "image/png"): File {
   return new File(["dummy"], name, { type });
 }
 
 describe("ActionBar — auto batch mode", () => {
   beforeEach(() => {
+    capturedZoomableImageProps = null;
     useConverterStore.setState({
       batchMode: false,
       batchFiles: [],
@@ -28,8 +45,19 @@ describe("ActionBar — auto batch mode", () => {
       isLoading: false,
       error: null,
       previewImageUrl: null,
+      previewBaseImageUrl: null,
+      sessionId: null,
+      layerImages: [],
+      layerImagesLoading: false,
+      fetchLayerImages: vi.fn(),
       modelUrl: null,
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   // --- SingleMode (batchFiles empty → batchMode false) ---
@@ -190,5 +218,103 @@ describe("ActionBar — auto batch mode", () => {
     expect(previewImage).toHaveAttribute("src", "/api/files/highlight-last-region");
     expect(screen.getByTestId("preview-multi-select-overlay")).toBeInTheDocument();
     expect(screen.getAllByTestId("preview-multi-select-polygon")).toHaveLength(1);
+  });
+
+  it("redraws the 2D hover magnifier after the preview buffer image loads asynchronously", async () => {
+    vi.useFakeTimers();
+
+    const drawImageMock = vi.fn();
+    const context2d = {
+      clearRect: vi.fn(),
+      drawImage: drawImageMock,
+      getImageData: vi.fn(() => ({ data: new Uint8ClampedArray([255, 0, 0, 255]) })),
+      beginPath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      stroke: vi.fn(),
+      canvas: { width: 152, height: 152 },
+      set imageSmoothingEnabled(_value: boolean) {},
+      set strokeStyle(_value: string) {},
+      set lineWidth(_value: number) {},
+    } as unknown as CanvasRenderingContext2D;
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
+      ((contextId: string) => (contextId === "2d" ? context2d : null)) as typeof HTMLCanvasElement.prototype.getContext,
+    );
+
+    useConverterStore.setState({
+      batchMode: false,
+      imageFile: makeFile("preview.png"),
+      lut_name: "test_lut",
+      sessionId: null,
+      previewImageUrl: "/api/files/preview.png",
+      previewBaseImageUrl: "/api/files/preview.png",
+      previewPixelWidth: 300,
+      previewPixelHeight: 200,
+      layerImages: [],
+      layerImagesLoading: true,
+    });
+
+    render(<ActionBar />);
+
+    const hoverHandler = capturedZoomableImageProps?.onHoverSample as
+      | ((sample: {
+        containerX: number;
+        containerY: number;
+        containerWidth: number;
+        containerHeight: number;
+        containerLeft: number;
+        containerTop: number;
+        pixelX: number;
+        pixelY: number;
+        naturalWidth: number;
+        naturalHeight: number;
+      } | null) => void)
+      | undefined;
+    const imageReadyHandler = capturedZoomableImageProps?.onImageReady as
+      | ((image: HTMLImageElement | null) => void)
+      | undefined;
+
+    expect(hoverHandler).toBeTypeOf("function");
+    expect(imageReadyHandler).toBeTypeOf("function");
+
+    act(() => {
+      hoverHandler?.({
+        containerX: 96,
+        containerY: 72,
+        containerWidth: 320,
+        containerHeight: 220,
+        containerLeft: 40,
+        containerTop: 60,
+        pixelX: 200,
+        pixelY: 120,
+        naturalWidth: 600,
+        naturalHeight: 400,
+      });
+      vi.advanceTimersByTime(180);
+    });
+
+    expect(screen.getByTestId("action-hover-inspector")).toBeInTheDocument();
+    expect(drawImageMock.mock.calls.some((call) => call.length >= 9)).toBe(false);
+
+    const previewImage = document.createElement("img");
+    Object.defineProperty(previewImage, "naturalWidth", { value: 600, configurable: true });
+    Object.defineProperty(previewImage, "naturalHeight", { value: 400, configurable: true });
+    Object.defineProperty(previewImage, "width", { value: 600, configurable: true });
+    Object.defineProperty(previewImage, "height", { value: 400, configurable: true });
+
+    act(() => {
+      imageReadyHandler?.(previewImage);
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(drawImageMock.mock.calls.some((call) => call.length >= 9)).toBe(true);
+
+    const magnifierDrawCall = [...drawImageMock.mock.calls].reverse().find((call) => call.length >= 9);
+    expect(magnifierDrawCall).toBeDefined();
+    expect(magnifierDrawCall?.[1]).toBeCloseTo(174.6667, 3);
+    expect(magnifierDrawCall?.[2]).toBeCloseTo(94.6667, 3);
   });
 });
