@@ -152,9 +152,18 @@ const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 10;
 const ZOOM_STEP = 1.15;
 
-export default function ColorPreview2D() {
+interface ColorPreview2DProps {
+  showMagnifier?: boolean;
+  showLayerDetails?: boolean;
+}
+
+export default function ColorPreview2D({
+  showMagnifier = true,
+  showLayerDetails = true,
+}: ColorPreview2DProps) {
   const SURFACE_CACHE_LIMIT = 256;
   const LAYER_CACHE_LIMIT = 128;
+  const hoverInspectorEnabled = showMagnifier || showLayerDetails;
   const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -218,7 +227,7 @@ export default function ColorPreview2D() {
   const fetchedLayerSessionRef = useRef<string | null>(null);
   const layerSampleCacheRef = useRef<Map<string, HoverLayerColorSample[]>>(new Map());
   const surfaceSampleCacheRef = useRef<Map<string, string | null>>(new Map());
-  const needsLayerHoverData = hoverSample !== null;
+  const needsLayerHoverData = hoverInspectorEnabled && showLayerDetails && hoverSample !== null;
 
   // --------------- Zoom / Pan state ---------------
   const [zoom, setZoom] = useState(1);
@@ -303,6 +312,25 @@ export default function ColorPreview2D() {
   );
 
   const handleHoverSample = useCallback((sample: ZoomableImageHoverSample | null) => {
+    if (!hoverInspectorEnabled) {
+      pendingHoverSampleRef.current = null;
+      if (hoverDelayTimerRef.current !== null) {
+        window.clearTimeout(hoverDelayTimerRef.current);
+        hoverDelayTimerRef.current = null;
+      }
+      if (hoverResourceReleaseTimerRef.current !== null) {
+        window.clearTimeout(hoverResourceReleaseTimerRef.current);
+        hoverResourceReleaseTimerRef.current = null;
+      }
+      setHoverSample((previous) => (previous === null ? previous : null));
+      setHoverLayerColors((previous) => (previous.length === 0 ? previous : []));
+      setHoverSurfaceHex((previous) => (previous === null ? previous : null));
+      setLayerCanvasBuffers((previous) => (previous.length === 0 ? previous : []));
+      layerSampleCacheRef.current.clear();
+      surfaceSampleCacheRef.current.clear();
+      return;
+    }
+
     pendingHoverSampleRef.current = sample;
 
     if (hoverDelayTimerRef.current !== null) {
@@ -334,7 +362,13 @@ export default function ColorPreview2D() {
       }
       setHoverSample((previous) => (areHoverSamplesEqual(previous, pending) ? previous : pending));
     }, HOVER_POPOVER_DELAY_MS);
-  }, []);
+  }, [hoverInspectorEnabled]);
+
+  useEffect(() => {
+    if (!hoverInspectorEnabled) {
+      handleHoverSample(null);
+    }
+  }, [handleHoverSample, hoverInspectorEnabled]);
 
   useEffect(() => {
     if (hoverResourceReleaseTimerRef.current !== null) {
@@ -454,7 +488,7 @@ export default function ColorPreview2D() {
   }, [layerImages, needsLayerHoverData]);
 
   useEffect(() => {
-    if (!hoverSample) {
+    if (!hoverInspectorEnabled || !hoverSample) {
       setHoverLayerColors((previous) => (previous.length === 0 ? previous : []));
       setHoverSurfaceHex((previous) => (previous === null ? previous : null));
       return;
@@ -492,7 +526,7 @@ export default function ColorPreview2D() {
       }
     }
 
-    if (!resolvedLayerPixel || layerCanvasBuffers.length === 0) {
+    if (!showLayerDetails || !resolvedLayerPixel || layerCanvasBuffers.length === 0) {
       setHoverLayerColors((previous) => (previous.length === 0 ? previous : []));
       return;
     }
@@ -536,6 +570,8 @@ export default function ColorPreview2D() {
     bedSizes,
     previewCanvasBuffer,
     layerCanvasBuffers,
+    hoverInspectorEnabled,
+    showLayerDetails,
     SURFACE_CACHE_LIMIT,
     LAYER_CACHE_LIMIT,
   ]);
@@ -548,7 +584,7 @@ export default function ColorPreview2D() {
     }
 
     context.clearRect(0, 0, magnifierCanvas.width, magnifierCanvas.height);
-    if (!hoverSample || !previewCanvasBuffer) {
+    if (!showMagnifier || !hoverSample || !previewCanvasBuffer) {
       return;
     }
 
@@ -582,7 +618,7 @@ export default function ColorPreview2D() {
     context.moveTo(0, center);
     context.lineTo(magnifierCanvas.width, center);
     context.stroke();
-  }, [hoverSample, previewCanvasBuffer]);
+  }, [hoverSample, previewCanvasBuffer, showMagnifier]);
 
   // Mouse wheel → zoom, centred on cursor
   const handleWheel = useCallback(
@@ -784,7 +820,7 @@ export default function ColorPreview2D() {
   ]);
 
   const hoverInspectorStyle = hoverSample ? computeHoverInspectorStyle(hoverSample) : null;
-  const hoverInspectorOverlay = hoverSample && hoverInspectorStyle && typeof document !== 'undefined'
+  const hoverInspectorOverlay = hoverInspectorEnabled && hoverSample && hoverInspectorStyle && typeof document !== 'undefined'
     ? createPortal(
       <PreviewHoverInspector
         dataTestId="main-2d-hover-inspector"
@@ -795,6 +831,8 @@ export default function ColorPreview2D() {
         surfaceHex={hoverSurfaceHex}
         hoverLayerColors={hoverLayerColors}
         layerImagesLoading={layerImagesLoading}
+        showMagnifier={showMagnifier}
+        showLayerDetails={showLayerDetails}
       />,
       document.body,
     )

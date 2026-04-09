@@ -139,4 +139,37 @@ describe('ColorPreview2D hover inspector', () => {
 
     expect(screen.queryByTestId('main-2d-hover-inspector')).not.toBeInTheDocument();
   });
+
+  it('does not render the hover inspector when both hover tools are disabled', () => {
+    render(<ColorPreview2D showMagnifier={false} showLayerDetails={false} />);
+
+    const container = screen.getByTestId('color-preview-2d-container');
+    const image = screen.getByAltText('2D color preview');
+
+    Object.defineProperty(image, 'naturalWidth', { configurable: true, value: 100 });
+    Object.defineProperty(image, 'naturalHeight', { configurable: true, value: 100 });
+    Object.defineProperty(container, 'getBoundingClientRect', {
+      configurable: true,
+      value: () =>
+        ({
+          width: 400,
+          height: 300,
+          left: 0,
+          top: 0,
+          right: 400,
+          bottom: 300,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        }) as DOMRect,
+    });
+
+    act(() => {
+      fireEvent.load(image);
+      fireEvent.pointerMove(container, { clientX: 120, clientY: 150 });
+      vi.advanceTimersByTime(220);
+    });
+
+    expect(screen.queryByTestId('main-2d-hover-inspector')).not.toBeInTheDocument();
+  });
 });

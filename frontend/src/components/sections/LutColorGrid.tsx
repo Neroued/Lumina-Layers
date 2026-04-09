@@ -405,64 +405,66 @@ export default function LutColorGrid() {
         <div className={cx(workstationPanelCardClass, "flex h-full flex-col gap-3")}>
           {/* Confirmation preview bar */}
           {pendingReplacement && (
-            <div className={cx(workstationInsetCardClass, "flex items-center gap-1.5 px-3 py-2")}>
-              {/* Source color swatch(es) */}
-              <div className="flex items-center gap-0.5">
-                {pendingReplacement.mode === 'select-all' && pendingReplacement.sourceColors && pendingReplacement.sourceColors.length > 1 ? (
-                  pendingReplacement.sourceColors.map((hex) => (
-                    <span
-                      key={hex}
-                      className="inline-block h-5 w-5 rounded-lg border border-slate-400/80 dark:border-slate-500/80"
-                      style={{ backgroundColor: `#${hex}` }}
-                      title={`#${hex}`}
-                    />
-                  ))
-                ) : pendingReplacement.mode === 'multi-select' && pendingReplacement.sourceRegions ? (
-                  pendingReplacement.sourceRegions.map((region) => {
-                    const hex = region.colorHex.replace(/^#/, "");
-                    return (
+            <div className={cx(workstationInsetCardClass, "flex flex-col gap-2 px-3 py-2")}>
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                {/* Source color swatch(es) */}
+                <div className="flex min-w-0 flex-wrap items-center gap-0.5">
+                  {pendingReplacement.mode === 'select-all' && pendingReplacement.sourceColors && pendingReplacement.sourceColors.length > 1 ? (
+                    pendingReplacement.sourceColors.map((hex) => (
                       <span
-                        key={region.regionId}
+                        key={hex}
                         className="inline-block h-5 w-5 rounded-lg border border-slate-400/80 dark:border-slate-500/80"
                         style={{ backgroundColor: `#${hex}` }}
-                        title={`#${hex} (${region.pixelCount}px)`}
+                        title={`#${hex}`}
                       />
-                    );
-                  })
-                ) : (
-                  <span
-                    className="inline-block h-5 w-5 rounded-lg border border-slate-400/80 dark:border-slate-500/80"
-                    style={{ backgroundColor: `#${pendingReplacement.sourceHex}` }}
-                    title={`#${pendingReplacement.sourceHex}`}
-                  />
-                )}
+                    ))
+                  ) : pendingReplacement.mode === 'multi-select' && pendingReplacement.sourceRegions ? (
+                    pendingReplacement.sourceRegions.map((region) => {
+                      const hex = region.colorHex.replace(/^#/, "");
+                      return (
+                        <span
+                          key={region.regionId}
+                          className="inline-block h-5 w-5 rounded-lg border border-slate-400/80 dark:border-slate-500/80"
+                          style={{ backgroundColor: `#${hex}` }}
+                          title={`#${hex} (${region.pixelCount}px)`}
+                        />
+                      );
+                    })
+                  ) : (
+                    <span
+                      className="inline-block h-5 w-5 rounded-lg border border-slate-400/80 dark:border-slate-500/80"
+                      style={{ backgroundColor: `#${pendingReplacement.sourceHex}` }}
+                      title={`#${pendingReplacement.sourceHex}`}
+                    />
+                  )}
+                </div>
+                {/* Arrow */}
+                <span className="text-xs text-slate-400">→</span>
+                {/* Target color swatch */}
+                <span
+                  className="inline-block h-5 w-5 shrink-0 rounded-lg border border-slate-400/80 dark:border-slate-500/80"
+                  style={{ backgroundColor: `#${pendingReplacement.targetHex}` }}
+                  title={`#${pendingReplacement.targetHex}`}
+                />
               </div>
-              {/* Arrow */}
-              <span className="text-xs text-slate-400">→</span>
-              {/* Target color swatch */}
-              <span
-                className="inline-block h-5 w-5 rounded-lg border border-slate-400/80 dark:border-slate-500/80"
-                style={{ backgroundColor: `#${pendingReplacement.targetHex}` }}
-                title={`#${pendingReplacement.targetHex}`}
-              />
-              {/* Spacer */}
-              <div className="flex-1" />
-              {/* Confirm button */}
-              <button
-                type="button"
-                onClick={() => confirmReplacement()}
-                className="rounded-full bg-blue-600 px-2.5 py-1 text-[10px] font-medium text-white transition-colors hover:bg-blue-500"
-              >
-                {t("replace_confirm_btn")}
-              </button>
-              {/* Cancel button */}
-              <button
-                type="button"
-                onClick={() => setPendingReplacement(null)}
-                className="rounded-full border border-slate-300/80 bg-slate-100/85 px-2.5 py-1 text-[10px] font-medium text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700/80 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-slate-900"
-              >
-                {t("replace_cancel_btn")}
-              </button>
+              <div className="flex flex-wrap justify-end gap-1.5">
+                {/* Confirm button */}
+                <button
+                  type="button"
+                  onClick={() => confirmReplacement()}
+                  className="rounded-full bg-blue-600 px-2.5 py-1 text-[10px] font-medium text-white transition-colors hover:bg-blue-500"
+                >
+                  {t("replace_confirm_btn")}
+                </button>
+                {/* Cancel button */}
+                <button
+                  type="button"
+                  onClick={() => setPendingReplacement(null)}
+                  className="rounded-full border border-slate-300/80 bg-slate-100/85 px-2.5 py-1 text-[10px] font-medium text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700/80 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-slate-900"
+                >
+                  {t("replace_cancel_btn")}
+                </button>
+              </div>
             </div>
           )}
 

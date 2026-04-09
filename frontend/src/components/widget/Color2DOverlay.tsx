@@ -9,7 +9,7 @@
  * 用户在下方 3D 场景中点击模型选色，然后在此面板中选择目标色。
  */
 
-import { useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useWidgetStore } from '../../stores/widgetStore';
 import { useConverterStore } from '../../stores/converter';
@@ -26,6 +26,8 @@ export default function Color2DOverlay() {
   const previewImageUrl = useConverterStore((s) => s.previewImageUrl);
   const isLoading = useConverterStore((s) => s.isLoading);
   const submitPreview = useConverterStore((s) => s.submitPreview);
+  const [showHoverMagnifier, setShowHoverMagnifier] = useState(true);
+  const [showHoverLayerDetails, setShowHoverLayerDetails] = useState(true);
 
   // Auto-trigger preview when overlay opens with an image but no preview
   const didAutoPreview = useRef(false);
@@ -75,19 +77,31 @@ export default function Color2DOverlay() {
         </button>
       </div>
 
-      {/* Content: left = 2D preview, right = palette + LUT grid */}
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_clamp(22rem,35%,32rem)] gap-0">
+      {/* Content: left = 2D preview, right = palette + LUT grid in two columns */}
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(18rem,0.82fr)_minmax(17rem,0.46fr)_minmax(20rem,0.72fr)] gap-0">
         {/* Left: 2D preview image (click to select color/region) */}
-        <div className="min-h-0 border-r border-slate-200/60 p-3 dark:border-slate-800/60">
-          <ColorPreview2D />
+        <div className="min-h-0 border-r border-slate-200/60 px-2 py-3 dark:border-slate-800/60">
+          <ColorPreview2D
+            showMagnifier={showHoverMagnifier}
+            showLayerDetails={showHoverLayerDetails}
+          />
         </div>
 
-        {/* Right: palette panel (top) + LUT color grid (bottom) */}
-        <div className="flex min-h-0 flex-col">
-          <div className="shrink-0 overflow-y-auto border-b border-slate-200/60 px-3 py-2 dark:border-slate-800/60" style={{ maxHeight: '35%' }}>
-            <PalettePanel />
+        {/* Middle: palette panel */}
+        <div className="min-h-0 border-r border-slate-200/60 px-3 py-2 dark:border-slate-800/60">
+          <div className="h-full overflow-y-auto">
+            <PalettePanel
+              showHoverMagnifier={showHoverMagnifier}
+              showHoverLayerDetails={showHoverLayerDetails}
+              onToggleHoverMagnifier={setShowHoverMagnifier}
+              onToggleHoverLayerDetails={setShowHoverLayerDetails}
+            />
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
+        </div>
+
+        {/* Right: LUT color grid */}
+        <div className="min-h-0 px-3 py-2">
+          <div className="h-full overflow-y-auto">
             <LutColorGrid />
           </div>
         </div>
