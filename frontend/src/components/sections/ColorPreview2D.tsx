@@ -9,8 +9,29 @@
  */
 
 import { useRef, useCallback, useMemo, useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useConverterStore } from '../../stores/converter';
 import { useI18n } from '../../i18n/context';
+import type { ZoomableImageHoverSample } from '../ui/ZoomableImage';
+import PreviewHoverInspector from '../ui/PreviewHoverInspector';
+import {
+  HOVER_POPOVER_DELAY_MS,
+  HOVER_RESOURCE_RELEASE_DELAY_MS,
+  MAGNIFIER_SIZE_PX,
+  MAGNIFIER_ZOOM,
+  type HoverLayerColorSample,
+  type LayerCanvasBuffer,
+  type PreviewCanvasBuffer,
+  areHoverSamplesEqual,
+  areLayerSamplesEqual,
+  buildPreviewCanvasBuffer,
+  clampNumber,
+  computeHoverInspectorStyle,
+  mapPixelToBufferCoordinate,
+  rgbToHex,
+  setBoundedCacheValue,
+} from '../ui/previewHoverInspectorUtils';
+import { resolvePreviewHoverPixel } from './actionBarHoverUtils';
 
 /**
  * Convert a click on an <img> with object-contain to image pixel coordinates.
@@ -132,6 +153,8 @@ const MAX_ZOOM = 10;
 const ZOOM_STEP = 1.15;
 
 export default function ColorPreview2D() {
+  const SURFACE_CACHE_LIMIT = 256;
+  const LAYER_CACHE_LIMIT = 128;
   const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -170,11 +193,32 @@ export default function ColorPreview2D() {
   const colorContours = useConverterStore((s) => s.colorContours);
   const regionData = useConverterStore((s) => s.regionData);
   const selectedRegions = useConverterStore((s) => s.selectedRegions);
+  const sessionId = useConverterStore((s) => s.sessionId);
+  const previewWidthMm = useConverterStore((s) => s.preview_width_mm);
+  const bedLabel = useConverterStore((s) => s.bed_label);
+  const bedSizes = useConverterStore((s) => s.bedSizes);
+  const fetchLayerImages = useConverterStore((s) => s.fetchLayerImages);
+  const layerImagesLoading = useConverterStore((s) => s.layerImagesLoading);
+  const layerImages = useConverterStore((s) => s.layerImages);
 
   const setSelectedColor = useConverterStore((s) => s.setSelectedColor);
   const toggleColorInSelection = useConverterStore((s) => s.toggleColorInSelection);
   const detectRegion = useConverterStore((s) => s.detectRegion);
   const detectAndAccumulateRegion = useConverterStore((s) => s.detectAndAccumulateRegion);
+
+  const [hoverSample, setHoverSample] = useState<ZoomableImageHoverSample | null>(null);
+  const [hoverLayerColors, setHoverLayerColors] = useState<HoverLayerColorSample[]>([]);
+  const [hoverSurfaceHex, setHoverSurfaceHex] = useState<string | null>(null);
+  const [previewCanvasBuffer, setPreviewCanvasBuffer] = useState<PreviewCanvasBuffer | null>(null);
+  const [layerCanvasBuffers, setLayerCanvasBuffers] = useState<LayerCanvasBuffer[]>([]);
+  const pendingHoverSampleRef = useRef<ZoomableImageHoverSample | null>(null);
+  const hoverDelayTimerRef = useRef<number | null>(null);
+  const hoverResourceReleaseTimerRef = useRef<number | null>(null);
+  const magnifierCanvasRef = useRef<HTMLCanvasElement>(null);
+  const fetchedLayerSessionRef = useRef<string | null>(null);
+  const layerSampleCacheRef = useRef<Map<string, HoverLayerColorSample[]>>(new Map());
+  const surfaceSampleCacheRef = useRef<Map<string, string | null>>(new Map());
+  const needsLayerHoverData = hoverSample !== null;
 
   // --------------- Zoom / Pan state ---------------
   const [zoom, setZoom] = useState(1);
@@ -202,7 +246,10 @@ export default function ColorPreview2D() {
   const [natSize, setNatSize] = useState({ w: 0, h: 0 });
   const handleImgLoad = useCallback(() => {
     const img = imgRef.current;
-    if (img) setNatSize({ w: img.naturalWidth, h: img.naturalHeight });
+    if (!img) return;
+    setNatSize({ w: img.naturalWidth, h: img.naturalHeight });
+    setPreviewCanvasBuffer(buildPreviewCanvasBuffer(img));
+    surfaceSampleCacheRef.current.clear();
   }, []);
 
   // Compute fitted image dimensions (image scaled to fit container)
@@ -213,16 +260,335 @@ export default function ColorPreview2D() {
   const fittedW = natSize.w * fitScale;
   const fittedH = natSize.h * fitScale;
 
+  const mapPointerToHoverSample = useCallback(
+    (clientX: number, clientY: number): ZoomableImageHoverSample | null => {
+      const container = containerRef.current;
+      if (!container || !natSize.w || !natSize.h || !fittedW || !fittedH) {
+        return null;
+      }
+
+      const rect = container.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) {
+        return null;
+      }
+
+      const baseOffX = (rect.width - fittedW) / 2;
+      const baseOffY = (rect.height - fittedH) / 2;
+      const relX = clientX - rect.left;
+      const relY = clientY - rect.top;
+      const imageX = (relX - pan.x) / zoom - baseOffX;
+      const imageY = (relY - pan.y) / zoom - baseOffY;
+
+      if (imageX < 0 || imageX >= fittedW || imageY < 0 || imageY >= fittedH) {
+        return null;
+      }
+
+      const pixelX = Math.floor((imageX / fittedW) * natSize.w);
+      const pixelY = Math.floor((imageY / fittedH) * natSize.h);
+
+      return {
+        containerX: Math.round(relX),
+        containerY: Math.round(relY),
+        containerWidth: Math.round(rect.width),
+        containerHeight: Math.round(rect.height),
+        containerLeft: Math.round(rect.left),
+        containerTop: Math.round(rect.top),
+        pixelX: Math.max(0, Math.min(natSize.w - 1, pixelX)),
+        pixelY: Math.max(0, Math.min(natSize.h - 1, pixelY)),
+        naturalWidth: natSize.w,
+        naturalHeight: natSize.h,
+      };
+    },
+    [natSize, fittedW, fittedH, pan, zoom],
+  );
+
+  const handleHoverSample = useCallback((sample: ZoomableImageHoverSample | null) => {
+    pendingHoverSampleRef.current = sample;
+
+    if (hoverDelayTimerRef.current !== null) {
+      window.clearTimeout(hoverDelayTimerRef.current);
+      hoverDelayTimerRef.current = null;
+    }
+    if (hoverResourceReleaseTimerRef.current !== null) {
+      window.clearTimeout(hoverResourceReleaseTimerRef.current);
+      hoverResourceReleaseTimerRef.current = null;
+    }
+
+    if (sample === null) {
+      setHoverSample((previous) => (previous === null ? previous : null));
+      hoverResourceReleaseTimerRef.current = window.setTimeout(() => {
+        hoverResourceReleaseTimerRef.current = null;
+        setLayerCanvasBuffers((previous) => (previous.length === 0 ? previous : []));
+        layerSampleCacheRef.current.clear();
+        surfaceSampleCacheRef.current.clear();
+      }, HOVER_RESOURCE_RELEASE_DELAY_MS);
+      return;
+    }
+
+    setHoverSample((previous) => (previous === null ? previous : null));
+    hoverDelayTimerRef.current = window.setTimeout(() => {
+      hoverDelayTimerRef.current = null;
+      const pending = pendingHoverSampleRef.current;
+      if (!pending) {
+        return;
+      }
+      setHoverSample((previous) => (areHoverSamplesEqual(previous, pending) ? previous : pending));
+    }, HOVER_POPOVER_DELAY_MS);
+  }, []);
+
+  useEffect(() => {
+    if (hoverResourceReleaseTimerRef.current !== null) {
+      window.clearTimeout(hoverResourceReleaseTimerRef.current);
+      hoverResourceReleaseTimerRef.current = null;
+    }
+    setPreviewCanvasBuffer(null);
+    setLayerCanvasBuffers([]);
+    layerSampleCacheRef.current.clear();
+    surfaceSampleCacheRef.current.clear();
+    setHoverSample(null);
+    setHoverLayerColors([]);
+    setHoverSurfaceHex(null);
+  }, [displayUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (hoverDelayTimerRef.current !== null) {
+        window.clearTimeout(hoverDelayTimerRef.current);
+        hoverDelayTimerRef.current = null;
+      }
+      if (hoverResourceReleaseTimerRef.current !== null) {
+        window.clearTimeout(hoverResourceReleaseTimerRef.current);
+        hoverResourceReleaseTimerRef.current = null;
+      }
+    };
+  }, []);
+
   // Reset zoom/pan when the image source changes
   useEffect(() => {
     setZoom(1);
     setPan({ x: 0, y: 0 });
   }, [stableImageUrl]);
 
+  useEffect(() => {
+    if (!sessionId) {
+      fetchedLayerSessionRef.current = null;
+      return;
+    }
+
+    if (!needsLayerHoverData || !displayUrl || layerImagesLoading || layerImages.length > 0) {
+      return;
+    }
+
+    if (fetchedLayerSessionRef.current === sessionId) {
+      return;
+    }
+
+    fetchedLayerSessionRef.current = sessionId;
+    void fetchLayerImages();
+  }, [displayUrl, sessionId, needsLayerHoverData, layerImagesLoading, layerImages.length, fetchLayerImages]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!needsLayerHoverData) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (layerImages.length === 0) {
+      setLayerCanvasBuffers([]);
+      layerSampleCacheRef.current.clear();
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const buildBuffers = async () => {
+      const loaded = await Promise.all(
+        layerImages.map(
+          (layer) =>
+            new Promise<LayerCanvasBuffer | null>((resolve) => {
+              const image = new Image();
+              image.crossOrigin = 'anonymous';
+              image.onload = () => {
+                const width = image.naturalWidth || image.width;
+                const height = image.naturalHeight || image.height;
+                if (width <= 0 || height <= 0) {
+                  resolve(null);
+                  return;
+                }
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const context = canvas.getContext('2d', { willReadFrequently: true });
+                if (!context) {
+                  resolve(null);
+                  return;
+                }
+                context.drawImage(image, 0, 0);
+                resolve({
+                  layerIndex: layer.layer_index,
+                  name: layer.name,
+                  width,
+                  height,
+                  context,
+                });
+              };
+              image.onerror = () => resolve(null);
+              image.src = layer.url;
+            }),
+        ),
+      );
+
+      if (cancelled) return;
+      setLayerCanvasBuffers(loaded.filter((entry): entry is LayerCanvasBuffer => entry !== null));
+      layerSampleCacheRef.current.clear();
+    };
+
+    void buildBuffers();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [layerImages, needsLayerHoverData]);
+
+  useEffect(() => {
+    if (!hoverSample) {
+      setHoverLayerColors((previous) => (previous.length === 0 ? previous : []));
+      setHoverSurfaceHex((previous) => (previous === null ? previous : null));
+      return;
+    }
+
+    const surfaceCacheKey = `${hoverSample.pixelX},${hoverSample.pixelY}`;
+    const resolvedLayerPixel = resolvePreviewHoverPixel(hoverSample, {
+      rawWidth: previewPixelWidth,
+      rawHeight: previewPixelHeight,
+      previewWidthMm,
+      bedLabel,
+      bedSizes,
+    });
+    const layerBaseWidth = previewPixelWidth && previewPixelWidth > 0 ? previewPixelWidth : hoverSample.naturalWidth;
+    const layerBaseHeight = previewPixelHeight && previewPixelHeight > 0 ? previewPixelHeight : hoverSample.naturalHeight;
+
+    if (!previewCanvasBuffer) {
+      setHoverSurfaceHex((previous) => (previous === null ? previous : null));
+    } else {
+      const cachedSurface = surfaceSampleCacheRef.current.get(surfaceCacheKey);
+      if (cachedSurface !== undefined) {
+        setHoverSurfaceHex((previous) => (previous === cachedSurface ? previous : cachedSurface));
+      } else {
+        let sampledSurface: string | null = null;
+        const x = mapPixelToBufferCoordinate(hoverSample.pixelX, hoverSample.naturalWidth, previewCanvasBuffer.width);
+        const y = mapPixelToBufferCoordinate(hoverSample.pixelY, hoverSample.naturalHeight, previewCanvasBuffer.height);
+        try {
+          const rgba = previewCanvasBuffer.context.getImageData(x, y, 1, 1).data;
+          sampledSurface = rgba[3] <= 8 ? null : rgbToHex(rgba[0], rgba[1], rgba[2]);
+        } catch {
+          sampledSurface = null;
+        }
+        setBoundedCacheValue(surfaceSampleCacheRef.current, surfaceCacheKey, sampledSurface, SURFACE_CACHE_LIMIT);
+        setHoverSurfaceHex((previous) => (previous === sampledSurface ? previous : sampledSurface));
+      }
+    }
+
+    if (!resolvedLayerPixel || layerCanvasBuffers.length === 0) {
+      setHoverLayerColors((previous) => (previous.length === 0 ? previous : []));
+      return;
+    }
+
+    const layerCacheKey = `${resolvedLayerPixel.pixelX},${resolvedLayerPixel.pixelY}`;
+    const cachedLayers = layerSampleCacheRef.current.get(layerCacheKey);
+    if (cachedLayers) {
+      setHoverLayerColors((previous) => (areLayerSamplesEqual(previous, cachedLayers) ? previous : cachedLayers));
+      return;
+    }
+
+    const sampledLayers = layerCanvasBuffers.map((layer, index) => {
+      const x = mapPixelToBufferCoordinate(resolvedLayerPixel.pixelX, layerBaseWidth, layer.width);
+      const y = mapPixelToBufferCoordinate(resolvedLayerPixel.pixelY, layerBaseHeight, layer.height);
+
+      try {
+        const rgba = layer.context.getImageData(x, y, 1, 1).data;
+        const alpha = rgba[3];
+        return {
+          displayIndex: index + 1,
+          layerName: layer.name,
+          colorHex: alpha <= 8 ? null : rgbToHex(rgba[0], rgba[1], rgba[2]),
+        };
+      } catch {
+        return {
+          displayIndex: index + 1,
+          layerName: layer.name,
+          colorHex: null,
+        };
+      }
+    });
+
+    setBoundedCacheValue(layerSampleCacheRef.current, layerCacheKey, sampledLayers, LAYER_CACHE_LIMIT);
+    setHoverLayerColors((previous) => (areLayerSamplesEqual(previous, sampledLayers) ? previous : sampledLayers));
+  }, [
+    hoverSample,
+    previewPixelWidth,
+    previewPixelHeight,
+    previewWidthMm,
+    bedLabel,
+    bedSizes,
+    previewCanvasBuffer,
+    layerCanvasBuffers,
+    SURFACE_CACHE_LIMIT,
+    LAYER_CACHE_LIMIT,
+  ]);
+
+  useEffect(() => {
+    const magnifierCanvas = magnifierCanvasRef.current;
+    const context = magnifierCanvas?.getContext('2d');
+    if (!magnifierCanvas || !context) {
+      return;
+    }
+
+    context.clearRect(0, 0, magnifierCanvas.width, magnifierCanvas.height);
+    if (!hoverSample || !previewCanvasBuffer) {
+      return;
+    }
+
+    const centerX = mapPixelToBufferCoordinate(hoverSample.pixelX, hoverSample.naturalWidth, previewCanvasBuffer.width);
+    const centerY = mapPixelToBufferCoordinate(hoverSample.pixelY, hoverSample.naturalHeight, previewCanvasBuffer.height);
+    const sourceSize = MAGNIFIER_SIZE_PX / MAGNIFIER_ZOOM;
+    const maxSourceX = Math.max(0, previewCanvasBuffer.width - sourceSize);
+    const maxSourceY = Math.max(0, previewCanvasBuffer.height - sourceSize);
+    const sourceX = clampNumber(centerX - sourceSize / 2, 0, maxSourceX);
+    const sourceY = clampNumber(centerY - sourceSize / 2, 0, maxSourceY);
+
+    context.imageSmoothingEnabled = false;
+    context.drawImage(
+      previewCanvasBuffer.context.canvas,
+      sourceX,
+      sourceY,
+      sourceSize,
+      sourceSize,
+      0,
+      0,
+      magnifierCanvas.width,
+      magnifierCanvas.height,
+    );
+
+    const center = magnifierCanvas.width / 2;
+    context.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+    context.lineWidth = 1;
+    context.beginPath();
+    context.moveTo(center, 0);
+    context.lineTo(center, magnifierCanvas.height);
+    context.moveTo(0, center);
+    context.lineTo(magnifierCanvas.width, center);
+    context.stroke();
+  }, [hoverSample, previewCanvasBuffer]);
+
   // Mouse wheel → zoom, centred on cursor
   const handleWheel = useCallback(
     (e: React.WheelEvent<HTMLDivElement>) => {
       e.preventDefault();
+      handleHoverSample(null);
       const container = containerRef.current;
       if (!container) return;
 
@@ -242,12 +608,13 @@ export default function ColorPreview2D() {
         return newZoom;
       });
     },
-    [],
+    [handleHoverSample],
   );
 
   // Pan via drag
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
+      handleHoverSample(null);
       // Only pan with middle button or when zoom is at exactly 1× (no zoom)
       if (e.button !== 1 && zoom === 1) return;
       if (e.button === 2) return; // ignore right-click
@@ -256,23 +623,33 @@ export default function ColorPreview2D() {
       panStartRef.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
       (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
     },
-    [zoom, pan],
+    [zoom, pan, handleHoverSample],
   );
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
-      if (!isPanningRef.current) return;
-      const dx = e.clientX - panStartRef.current.x;
-      const dy = e.clientY - panStartRef.current.y;
-      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) didDragRef.current = true;
-      setPan({ x: panStartRef.current.panX + dx, y: panStartRef.current.panY + dy });
+      if (isPanningRef.current) {
+        const dx = e.clientX - panStartRef.current.x;
+        const dy = e.clientY - panStartRef.current.y;
+        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) didDragRef.current = true;
+        setPan({ x: panStartRef.current.panX + dx, y: panStartRef.current.panY + dy });
+        handleHoverSample(null);
+        return;
+      }
+
+      handleHoverSample(mapPointerToHoverSample(e.clientX, e.clientY));
     },
-    [],
+    [handleHoverSample, mapPointerToHoverSample],
   );
 
   const handlePointerUp = useCallback(() => {
     isPanningRef.current = false;
   }, []);
+
+  const handlePointerLeave = useCallback(() => {
+    isPanningRef.current = false;
+    handleHoverSample(null);
+  }, [handleHoverSample]);
 
   // Double-click to reset zoom/pan
   const handleDoubleClick = useCallback(() => {
@@ -406,6 +783,23 @@ export default function ColorPreview2D() {
     previewPixelHeight,
   ]);
 
+  const hoverInspectorStyle = hoverSample ? computeHoverInspectorStyle(hoverSample) : null;
+  const hoverInspectorOverlay = hoverSample && hoverInspectorStyle && typeof document !== 'undefined'
+    ? createPortal(
+      <PreviewHoverInspector
+        dataTestId="main-2d-hover-inspector"
+        style={hoverInspectorStyle}
+        magnifierCanvasRef={magnifierCanvasRef}
+        pixelX={hoverSample.pixelX}
+        pixelY={hoverSample.pixelY}
+        surfaceHex={hoverSurfaceHex}
+        hoverLayerColors={hoverLayerColors}
+        layerImagesLoading={layerImagesLoading}
+      />,
+      document.body,
+    )
+    : null;
+
 
   if (!displayUrl) {
     return (
@@ -423,46 +817,49 @@ export default function ColorPreview2D() {
   }
 
   return (
-    <div
-      ref={containerRef}
-      className="relative h-full w-full overflow-hidden bg-slate-200/60 dark:bg-slate-900/60"
-      style={{ cursor: zoom > 1 ? 'grab' : 'crosshair' }}
-      onWheel={handleWheel}
-      onClick={handleClick}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onDoubleClick={handleDoubleClick}
-    >
-      {replacePreviewLoading && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/40">
-          <p className="text-xs text-slate-100">{t('lut_grid_loading')}</p>
-        </div>
-      )}
-
+    <>
       <div
-        className="pointer-events-none absolute inset-0 z-20 border-2"
-        style={{ borderColor: 'var(--info-border)' }}
-        aria-hidden="true"
+        ref={containerRef}
+        data-testid="color-preview-2d-container"
+        className="relative h-full w-full overflow-hidden bg-slate-200/60 dark:bg-slate-900/60"
+        style={{ cursor: zoom > 1 ? 'grab' : 'crosshair' }}
+        onWheel={handleWheel}
+        onClick={handleClick}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={handlePointerLeave}
+        onDoubleClick={handleDoubleClick}
       >
-        <div
-          className="absolute right-2 top-2 rounded-full border px-2 py-1 text-[10px] font-semibold"
-          style={{
-            borderColor: 'var(--info-border)',
-            background: 'var(--info-soft)',
-            color: 'var(--surface-text-muted)',
-          }}
-        >
-          {t('preview_debug_main_2d')}
-        </div>
-      </div>
+        {replacePreviewLoading && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/40">
+            <p className="text-xs text-slate-100">{t('lut_grid_loading')}</p>
+          </div>
+        )}
 
-      {/* Zoom indicator */}
-      {zoom !== 1 && (
-        <div className="absolute left-2 top-2 z-20 rounded-full bg-slate-900/60 px-2 py-0.5 text-[10px] text-slate-100 backdrop-blur-sm">
-          {Math.round(zoom * 100)}%
+        <div
+          className="pointer-events-none absolute inset-0 z-20 border-2"
+          style={{ borderColor: 'var(--info-border)' }}
+          aria-hidden="true"
+        >
+          <div
+            className="absolute right-2 top-2 rounded-full border px-2 py-1 text-[10px] font-semibold"
+            style={{
+              borderColor: 'var(--info-border)',
+              background: 'var(--info-soft)',
+              color: 'var(--surface-text-muted)',
+            }}
+          >
+            {t('preview_debug_main_2d')}
+          </div>
         </div>
-      )}
+
+        {/* Zoom indicator */}
+        {zoom !== 1 && (
+          <div className="absolute left-2 top-2 z-20 rounded-full bg-slate-900/60 px-2 py-0.5 text-[10px] text-slate-100 backdrop-blur-sm">
+            {Math.round(zoom * 100)}%
+          </div>
+        )}
 
       {/* Inner wrapper — positioned by zoom/pan transform */}
       <div
@@ -541,6 +938,8 @@ export default function ColorPreview2D() {
           />
         )}
       </div>
-    </div>
+      </div>
+      {hoverInspectorOverlay}
+    </>
   );
 }

@@ -1,7 +1,17 @@
-import { useMemo, useEffect } from "react";
+import { useMemo, useEffect, useRef } from "react";
 import { useThree } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
+import {
+  cloneObjectTreeWithOwnedResources,
+  disposeMaterial,
+  disposeObjectTree,
+} from "../utils/threeDisposal";
+import {
+  debugThreeLog,
+  getLatestResourceTiming,
+  summarizeObjectTree,
+} from "../utils/threeDebug";
 
 type LuminaWindow = Window & { __luminaGenerateStart?: number };
 
@@ -48,14 +58,44 @@ interface ModelViewerProps {
 
 function ModelViewer({ url }: ModelViewerProps) {
   const { scene } = useGLTF(url);
-  const { camera, controls } = useThree();
+  const camera = useThree((state) => state.camera);
+  const controls = useThree((state) => state.controls);
+  const previousUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const previousUrl = previousUrlRef.current;
+    previousUrlRef.current = url;
+    if (previousUrl && previousUrl !== url) {
+      useGLTF.clear(previousUrl);
+    }
+  }, [url]);
+
+  useEffect(() => {
+    debugThreeLog("ModelViewer.lifecycle", {
+      event: "mount",
+      url,
+    });
+    return () => {
+      debugThreeLog("ModelViewer.lifecycle", {
+        event: "unmount",
+        url,
+      });
+    };
+  }, [url]);
+
   useEffect(() => {
     console.timeLog('[LUMINA] generate', 'GLB loaded (useGLTF resolved)');
     _clog('generate: GLB loaded (useGLTF resolved)');
-  }, [scene]);
+    debugThreeLog("ModelViewer.gltf", {
+      url,
+      resource_timing: getLatestResourceTiming(url),
+      source_scene: summarizeObjectTree(scene),
+    });
+  }, [scene, url]);
 
   const preparedScene = useMemo(() => {
-    const clone = scene.clone(true);
+    const buildStart = performance.now();
+    const clone = cloneObjectTreeWithOwnedResources(scene);
 
     // Remove any baked-in bed mesh from old GLB files
     const toRemove: THREE.Object3D[] = [];
@@ -72,16 +112,24 @@ function ModelViewer({ url }: ModelViewerProps) {
     // We replace them with MeshLambertMaterial for a completely matte finish.
     clone.traverse((child) => {
       if (child instanceof THREE.Mesh && child.material) {
-        const mats = Array.isArray(child.material)
-          ? child.material
-          : [child.material];
-        const newMats = mats.map((mat) => {
+        const previousMaterial = child.material;
+        const mats = Array.isArray(previousMaterial)
+          ? previousMaterial
+          : [previousMaterial];
+        const replacedMaterials: THREE.Material[] = [];
+        const newMats = mats.map((mat: THREE.Material) => {
           if (mat instanceof THREE.MeshStandardMaterial) {
+            replacedMaterials.push(mat);
             return new THREE.MeshLambertMaterial({ color: mat.color });
           }
           return mat;
         });
-        child.material = Array.isArray(child.material) ? newMats : newMats[0];
+        if (replacedMaterials.length > 0) {
+          for (const material of replacedMaterials) {
+            disposeMaterial(material);
+          }
+          child.material = Array.isArray(previousMaterial) ? newMats : newMats[0];
+        }
       }
     });
 
@@ -98,22 +146,41 @@ function ModelViewer({ url }: ModelViewerProps) {
     box.getCenter(center);
     clone.position.set(-center.x, -center.y, -box.min.z);
 
+    debugThreeLog("ModelViewer.build", {
+      url,
+      build_ms: +(performance.now() - buildStart).toFixed(2),
+      source_scene: summarizeObjectTree(scene),
+      prepared_scene: summarizeObjectTree(clone),
+      center: {
+        x: +center.x.toFixed(3),
+        y: +center.y.toFixed(3),
+        z: +center.z.toFixed(3),
+      },
+      min_z: +box.min.z.toFixed(3),
+    });
+
     return clone;
-  }, [scene]);
+  }, [scene, url]);
 
   useEffect(() => {
     console.timeLog('[LUMINA] generate', 'GLB scene processed (useMemo done)');
     _clog('generate: GLB scene processed (useMemo done)');
   }, [preparedScene]);
 
+  useEffect(() => {
+    return () => {
+      debugThreeLog("ModelViewer.dispose", {
+        url,
+        prepared_scene: summarizeObjectTree(preparedScene),
+      });
+      disposeObjectTree(preparedScene);
+    };
+  }, [preparedScene, url]);
+
   // Auto-fit camera to model after load
   useEffect(() => {
-    // Need a wrapper to get correct world bounds after position offset
-    const wrapper = new THREE.Group();
-    wrapper.add(preparedScene.clone(true));
-    wrapper.updateMatrixWorld(true);
-
-    const box = new THREE.Box3().setFromObject(wrapper);
+    preparedScene.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(preparedScene);
     const sphere = new THREE.Sphere();
     box.getBoundingSphere(sphere);
 
@@ -141,7 +208,6 @@ function ModelViewer({ url }: ModelViewerProps) {
     console.timeLog('[LUMINA] generate', 'camera fitted (model fully visible)');
     console.timeEnd('[LUMINA] generate');
     _clog('generate: camera fitted (model fully visible)');
-    wrapper.clear();
   }, [preparedScene, camera, controls]);
 
   return <primitive object={preparedScene} />;

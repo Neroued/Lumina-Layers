@@ -1,10 +1,10 @@
-import { Suspense, useRef, useState, useEffect, useCallback } from "react";
-import { Canvas, useThree } from "@react-three/fiber";
+import { Suspense, useRef, useState, useEffect, useCallback, useMemo } from "react";
+import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import { OrbitControls, Environment, Html } from "@react-three/drei";
 import { LIGHTING_CONFIG } from "./lightingConfig";
 import * as THREE from "three";
 import ModelViewer from "./ModelViewer";
-import InteractiveModelViewer, { type ViewerHoverSample } from "./InteractiveModelViewer";
+import InteractiveModelViewer from "./InteractiveModelViewer";
 import BedPlatform from "./BedPlatform";
 import KeychainRing3D from "./KeychainRing3D";
 import { useConverterStore } from "../stores/converter";
@@ -12,6 +12,13 @@ import { computeScaleFactor } from "../utils/scaleUtils";
 import { useI18n } from "../i18n/context";
 import { useThemeConfig } from "../hooks/useThemeConfig";
 import { useWittyMessage } from "../hooks/useWittyMessage";
+import {
+  debugThreeLog,
+  getHeapMemorySnapshot,
+  getRendererInfoSnapshot,
+  getThreePerfDebugConfig,
+  summarizeObjectTree,
+} from "../utils/threeDebug";
 
 declare global {
   interface Window {
@@ -34,11 +41,14 @@ interface Scene3DProps {
 function ScreenshotHelper({
   onGlReady,
 }: {
-  onGlReady: (gl: THREE.WebGLRenderer) => void;
+  onGlReady: (gl: THREE.WebGLRenderer | null) => void;
 }) {
   const { gl } = useThree();
   useEffect(() => {
     onGlReady(gl);
+    return () => {
+      onGlReady(null);
+    };
   }, [gl, onGlReady]);
   return null;
 }
@@ -83,92 +93,110 @@ function ThemeUpdater() {
   return null;
 }
 
-interface LayerHoverColorSample {
-  displayIndex: number;
-  layerName: string;
-  colorHex: string | null;
+interface ScenePerformanceState {
+  previewGlbUrl: string | null;
+  enableOutline: boolean;
+  enableCloisonne: boolean;
+  structureMode: string;
 }
 
-interface LayerCanvasBuffer {
-  layerIndex: number;
-  name: string;
-  width: number;
-  height: number;
-  context: CanvasRenderingContext2D;
-}
+function ScenePerformanceReporter({
+  renderCountRef,
+  stateRef,
+}: {
+  renderCountRef: { current: number };
+  stateRef: { current: ScenePerformanceState };
+}) {
+  const gl = useThree((state) => state.gl);
+  const scene = useThree((state) => state.scene);
+  const camera = useThree((state) => state.camera);
+  const controls = useThree((state) => state.controls);
+  const lastLogAtRef = useRef(performance.now());
+  const frameCountRef = useRef(0);
+  const totalFrameMsRef = useRef(0);
+  const maxFrameMsRef = useRef(0);
+  const slowFrameCountRef = useRef(0);
+  const lastRenderCountRef = useRef(0);
 
-const MAGNIFIER_SIZE_PX = 152;
-const MAGNIFIER_ZOOM = 3;
-const MAGNIFIER_OFFSET_PX = 18;
-const INSPECTOR_WIDTH_PX = 248;
-const INSPECTOR_HEIGHT_PX = 310;
-const HOVER_POPOVER_DELAY_MS = 180;
+  useEffect(() => {
+    debugThreeLog("Scene3D.canvas", {
+      event: "mount",
+      renderer: getRendererInfoSnapshot(gl),
+    });
+    return () => {
+      debugThreeLog("Scene3D.canvas", {
+        event: "unmount",
+      });
+    };
+  }, [gl]);
 
-type HoverPerfWindow = Window & { __luminaHoverPerfDebug?: boolean };
-
-interface SceneHoverPerfStats {
-  layerSampleRuns: number;
-  layerCacheHits: number;
-  layerCacheMisses: number;
-  totalLayerSampleMs: number;
-  maxLayerSampleMs: number;
-  magnifierDrawRuns: number;
-  totalMagnifierDrawMs: number;
-  maxMagnifierDrawMs: number;
-  hoverShowCount: number;
-  hoverHideCount: number;
-  timerScheduleCount: number;
-  timerCancelCount: number;
-  lastLogAt: number;
-}
-
-function isHoverPerfDebugEnabled(): boolean {
-  if (typeof window === "undefined") return false;
-  return Boolean((window as HoverPerfWindow).__luminaHoverPerfDebug);
-}
-
-function clampNumber(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max);
-}
-
-function rgbToHex(r: number, g: number, b: number): string {
-  const toHex = (component: number) => component.toString(16).padStart(2, "0").toUpperCase();
-  return `${toHex(r)}${toHex(g)}${toHex(b)}`;
-}
-
-function areLayerSamplesEqual(
-  left: LayerHoverColorSample[],
-  right: LayerHoverColorSample[],
-): boolean {
-  if (left === right) return true;
-  if (left.length !== right.length) return false;
-  for (let i = 0; i < left.length; i += 1) {
-    const a = left[i];
-    const b = right[i];
-    if (
-      a.displayIndex !== b.displayIndex
-      || a.layerName !== b.layerName
-      || a.colorHex !== b.colorHex
-    ) {
-      return false;
+  useFrame((_, delta) => {
+    const { enabled, intervalMs } = getThreePerfDebugConfig();
+    if (!enabled) {
+      return;
     }
-  }
-  return true;
-}
 
-function areHoverSamplesEqual(
-  left: ViewerHoverSample | null,
-  right: ViewerHoverSample | null,
-): boolean {
-  if (left === right) return true;
-  if (!left || !right) return false;
-  return (
-    left.canvasX === right.canvasX
-    && left.canvasY === right.canvasY
-    && left.pixelX === right.pixelX
-    && left.pixelY === right.pixelY
-    && left.hitColorHex === right.hitColorHex
-  );
+    const deltaMs = delta * 1000;
+    frameCountRef.current += 1;
+    totalFrameMsRef.current += deltaMs;
+    maxFrameMsRef.current = Math.max(maxFrameMsRef.current, deltaMs);
+    if (deltaMs > 25) {
+      slowFrameCountRef.current += 1;
+    }
+
+    const now = performance.now();
+    const elapsed = now - lastLogAtRef.current;
+    if (elapsed < intervalMs) {
+      return;
+    }
+
+    const state = stateRef.current;
+    const renderCountDelta = renderCountRef.current - lastRenderCountRef.current;
+    const orbitTarget =
+      controls && "target" in controls
+        ? (controls as { target?: THREE.Vector3 | null }).target ?? null
+        : null;
+
+    debugThreeLog("Scene3D.runtime", {
+      elapsed_ms: +elapsed.toFixed(1),
+      fps: +((frameCountRef.current * 1000) / Math.max(elapsed, 1)).toFixed(1),
+      avg_frame_ms:
+        frameCountRef.current > 0
+          ? +(totalFrameMsRef.current / frameCountRef.current).toFixed(2)
+          : 0,
+      max_frame_ms: +maxFrameMsRef.current.toFixed(2),
+      slow_frame_count: slowFrameCountRef.current,
+      react_render_count: renderCountDelta,
+      preview_glb_url: state.previewGlbUrl,
+      enable_outline: state.enableOutline,
+      enable_cloisonne: state.enableCloisonne,
+      structure_mode: state.structureMode,
+      camera_position: {
+        x: +camera.position.x.toFixed(2),
+        y: +camera.position.y.toFixed(2),
+        z: +camera.position.z.toFixed(2),
+      },
+      orbit_target: orbitTarget
+        ? {
+            x: +orbitTarget.x.toFixed(2),
+            y: +orbitTarget.y.toFixed(2),
+            z: +orbitTarget.z.toFixed(2),
+          }
+        : null,
+      renderer: getRendererInfoSnapshot(gl),
+      scene: summarizeObjectTree(scene),
+      heap: getHeapMemorySnapshot(),
+    });
+
+    lastLogAtRef.current = now;
+    lastRenderCountRef.current = renderCountRef.current;
+    frameCountRef.current = 0;
+    totalFrameMsRef.current = 0;
+    maxFrameMsRef.current = 0;
+    slowFrameCountRef.current = 0;
+  });
+
+  return null;
 }
 
 function Scene3D({ modelUrl }: Scene3DProps) {
@@ -176,32 +204,7 @@ function Scene3D({ modelUrl }: Scene3DProps) {
   const themeColors = useThemeConfig();
   const containerRef = useRef<HTMLDivElement>(null);
   const glRef = useRef<THREE.WebGLRenderer | null>(null);
-  const magnifierCanvasRef = useRef<HTMLCanvasElement>(null);
-  const layerCanvasBuffersRef = useRef<LayerCanvasBuffer[]>([]);
-  const layerSampleCacheRef = useRef<Map<string, LayerHoverColorSample[]>>(new Map());
-  const pendingHoverSampleRef = useRef<ViewerHoverSample | null>(null);
-  const hoverDelayTimerRef = useRef<number | null>(null);
-  const sceneHoverPerfStatsRef = useRef<SceneHoverPerfStats>({
-    layerSampleRuns: 0,
-    layerCacheHits: 0,
-    layerCacheMisses: 0,
-    totalLayerSampleMs: 0,
-    maxLayerSampleMs: 0,
-    magnifierDrawRuns: 0,
-    totalMagnifierDrawMs: 0,
-    maxMagnifierDrawMs: 0,
-    hoverShowCount: 0,
-    hoverHideCount: 0,
-    timerScheduleCount: 0,
-    timerCancelCount: 0,
-    lastLogAt: performance.now(),
-  });
-  const fetchedLayerSessionRef = useRef<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [hoverSample, setHoverSample] = useState<ViewerHoverSample | null>(null);
-  const [hoverLayerColors, setHoverLayerColors] = useState<LayerHoverColorSample[]>([]);
-  const hoverPixelX = hoverSample?.pixelX ?? null;
-  const hoverPixelY = hoverSample?.pixelY ?? null;
 
   // Witty Loading Messages (Req 1.4 & Enhancements)
   const isLoading = useConverterStore((s) => s.isLoading);
@@ -211,12 +214,6 @@ function Scene3D({ modelUrl }: Scene3DProps) {
   const colorRemapMap = useConverterStore((s) => s.colorRemapMap);
   const colorHeightMap = useConverterStore((s) => s.color_height_map);
   const selectedColor = useConverterStore((s) => s.selectedColor);
-  const sessionId = useConverterStore((s) => s.sessionId);
-  const layerImages = useConverterStore((s) => s.layerImages);
-  const layerImagesLoading = useConverterStore((s) => s.layerImagesLoading);
-  const fetchLayerImages = useConverterStore((s) => s.fetchLayerImages);
-  const previewPixelWidth = useConverterStore((s) => s.previewPixelWidth);
-  const previewPixelHeight = useConverterStore((s) => s.previewPixelHeight);
   const baseHeight = useConverterStore((s) => s.spacer_thick);
   const enableRelief = useConverterStore((s) => s.enable_relief);
   const setSelectedColor = useConverterStore((s) => s.setSelectedColor);
@@ -227,54 +224,42 @@ function Scene3D({ modelUrl }: Scene3DProps) {
   const enableCloisonne = useConverterStore((s) => s.enable_cloisonne);
   const wireWidthMm = useConverterStore((s) => s.wire_width_mm);
   const wireHeightMm = useConverterStore((s) => s.wire_height_mm);
+  const sceneRenderCountRef = useRef(0);
+  sceneRenderCountRef.current += 1;
+  const perfStateRef = useRef<ScenePerformanceState>({
+    previewGlbUrl,
+    enableOutline,
+    enableCloisonne,
+    structureMode,
+  });
 
-  const maybeFlushScenePerfLog = useCallback((force = false) => {
-    if (!isHoverPerfDebugEnabled()) {
-      return;
-    }
+  useEffect(() => {
+    perfStateRef.current = {
+      previewGlbUrl,
+      enableOutline,
+      enableCloisonne,
+      structureMode,
+    };
+  }, [
+    previewGlbUrl,
+    enableOutline,
+    enableCloisonne,
+    structureMode,
+  ]);
 
-    const stats = sceneHoverPerfStatsRef.current;
-    const now = performance.now();
-    const elapsed = Math.max(1, now - stats.lastLogAt);
-    if (!force && elapsed < 1000) {
-      return;
-    }
-
-    const avgLayerSampleMs =
-      stats.layerSampleRuns > 0 ? +(stats.totalLayerSampleMs / stats.layerSampleRuns).toFixed(3) : 0;
-    const avgMagnifierMs =
-      stats.magnifierDrawRuns > 0 ? +(stats.totalMagnifierDrawMs / stats.magnifierDrawRuns).toFixed(3) : 0;
-
-    console.info("[HoverPerf][Scene3D]", {
-      elapsed_ms: +elapsed.toFixed(1),
-      layer_cache_hits: stats.layerCacheHits,
-      layer_cache_misses: stats.layerCacheMisses,
-      layer_sample_runs: stats.layerSampleRuns,
-      layer_sample_avg_ms: avgLayerSampleMs,
-      layer_sample_max_ms: +stats.maxLayerSampleMs.toFixed(3),
-      magnifier_draw_runs: stats.magnifierDrawRuns,
-      magnifier_avg_ms: avgMagnifierMs,
-      magnifier_max_ms: +stats.maxMagnifierDrawMs.toFixed(3),
-      hover_show_count: stats.hoverShowCount,
-      hover_hide_count: stats.hoverHideCount,
-      timer_schedule_count: stats.timerScheduleCount,
-      timer_cancel_count: stats.timerCancelCount,
+  useEffect(() => {
+    debugThreeLog("Scene3D.state", {
+      preview_glb_url: previewGlbUrl,
+      enable_outline: enableOutline,
+      enable_cloisonne: enableCloisonne,
+      structure_mode: structureMode,
     });
-
-    stats.layerSampleRuns = 0;
-    stats.layerCacheHits = 0;
-    stats.layerCacheMisses = 0;
-    stats.totalLayerSampleMs = 0;
-    stats.maxLayerSampleMs = 0;
-    stats.magnifierDrawRuns = 0;
-    stats.totalMagnifierDrawMs = 0;
-    stats.maxMagnifierDrawMs = 0;
-    stats.hoverShowCount = 0;
-    stats.hoverHideCount = 0;
-    stats.timerScheduleCount = 0;
-    stats.timerCancelCount = 0;
-    stats.lastLogAt = now;
-  }, []);
+  }, [
+    previewGlbUrl,
+    enableOutline,
+    enableCloisonne,
+    structureMode,
+  ]);
 
   // Real-time scale dimensions
   const targetWidth = useConverterStore((s) => s.target_width_mm);
@@ -285,6 +270,11 @@ function Scene3D({ modelUrl }: Scene3DProps) {
   const { scaleX, scaleY } = computeScaleFactor(
     targetWidth, targetHeight, previewWidth, previewHeight
   );
+  const canvasCamera = useMemo(
+    () => ({ position: [0, -57, 474] as [number, number, number], fov: 45 }),
+    [],
+  );
+  const canvasGl = useMemo(() => ({ preserveDrawingBuffer: true }), []);
 
   // Keychain ring params
   const addLoop = useConverterStore((s) => s.add_loop);
@@ -305,245 +295,24 @@ function Scene3D({ modelUrl }: Scene3DProps) {
   }, []);
 
   useEffect(() => {
-    if (!sessionId) {
-      fetchedLayerSessionRef.current = null;
-      return;
-    }
-
-    if (!previewGlbUrl || layerImagesLoading || layerImages.length > 0) {
-      return;
-    }
-    if (fetchedLayerSessionRef.current === sessionId) {
-      return;
-    }
-
-    fetchedLayerSessionRef.current = sessionId;
-    void fetchLayerImages();
-  }, [previewGlbUrl, sessionId, layerImagesLoading, layerImages.length, fetchLayerImages]);
-
-  useEffect(() => {
-    if (!previewGlbUrl) {
-      if (hoverDelayTimerRef.current !== null) {
-        window.clearTimeout(hoverDelayTimerRef.current);
-        hoverDelayTimerRef.current = null;
-        sceneHoverPerfStatsRef.current.timerCancelCount += 1;
-      }
-      pendingHoverSampleRef.current = null;
-      layerSampleCacheRef.current.clear();
-      setHoverSample(null);
-      setHoverLayerColors([]);
-    }
-  }, [previewGlbUrl]);
-
-  useEffect(() => {
-    const stats = sceneHoverPerfStatsRef.current;
     return () => {
-      if (hoverDelayTimerRef.current !== null) {
-        window.clearTimeout(hoverDelayTimerRef.current);
-        hoverDelayTimerRef.current = null;
-        stats.timerCancelCount += 1;
+      const canvas = glRef.current?.domElement as (HTMLCanvasElement & {
+        __luminaContextLostHandler?: (e: Event) => void;
+        __luminaContextRestoredHandler?: () => void;
+      }) | undefined;
+      if (canvas?.__luminaContextLostHandler) {
+        canvas.removeEventListener("webglcontextlost", canvas.__luminaContextLostHandler);
+        delete canvas.__luminaContextLostHandler;
       }
-      maybeFlushScenePerfLog(true);
-    };
-  }, [maybeFlushScenePerfLog]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    if (layerImages.length === 0) {
-      layerCanvasBuffersRef.current = [];
-      layerSampleCacheRef.current.clear();
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    const buildBuffers = async () => {
-      const loaded = await Promise.all(
-        layerImages.map(
-          (layer) =>
-            new Promise<LayerCanvasBuffer | null>((resolve) => {
-              const image = new Image();
-              image.onload = () => {
-                const width = image.naturalWidth || image.width;
-                const height = image.naturalHeight || image.height;
-                const canvas = document.createElement("canvas");
-                canvas.width = width;
-                canvas.height = height;
-                const context = canvas.getContext("2d", { willReadFrequently: true });
-                if (!context || width <= 0 || height <= 0) {
-                  resolve(null);
-                  return;
-                }
-                context.drawImage(image, 0, 0);
-                resolve({
-                  layerIndex: layer.layer_index,
-                  name: layer.name,
-                  width,
-                  height,
-                  context,
-                });
-              };
-              image.onerror = () => resolve(null);
-              image.src = layer.url;
-            }),
-        ),
-      );
-
-      if (cancelled) {
-        return;
+      if (canvas?.__luminaContextRestoredHandler) {
+        canvas.removeEventListener("webglcontextrestored", canvas.__luminaContextRestoredHandler);
+        delete canvas.__luminaContextRestoredHandler;
       }
-
-      layerCanvasBuffersRef.current = loaded.filter(
-        (entry): entry is LayerCanvasBuffer => entry !== null,
-      );
-      layerSampleCacheRef.current.clear();
+      glRef.current = null;
     };
+  }, []);
 
-    void buildBuffers();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [layerImages]);
-
-  useEffect(() => {
-    if (hoverPixelX === null || hoverPixelY === null) {
-      setHoverLayerColors((previous) => (previous.length === 0 ? previous : []));
-      return;
-    }
-
-    const buffers = layerCanvasBuffersRef.current;
-    if (buffers.length === 0) {
-      setHoverLayerColors((previous) => (previous.length === 0 ? previous : []));
-      return;
-    }
-
-    const cacheKey = `${hoverPixelX},${hoverPixelY}`;
-    const cached = layerSampleCacheRef.current.get(cacheKey);
-    if (cached) {
-      sceneHoverPerfStatsRef.current.layerCacheHits += 1;
-      setHoverLayerColors((previous) => (areLayerSamplesEqual(previous, cached) ? previous : cached));
-      maybeFlushScenePerfLog(false);
-      return;
-    }
-
-    const sampleStart = performance.now();
-    sceneHoverPerfStatsRef.current.layerCacheMisses += 1;
-    sceneHoverPerfStatsRef.current.layerSampleRuns += 1;
-
-    const sampled = buffers.map((layer, index) => {
-      const baseWidth = previewPixelWidth && previewPixelWidth > 0 ? previewPixelWidth : layer.width;
-      const baseHeight = previewPixelHeight && previewPixelHeight > 0 ? previewPixelHeight : layer.height;
-      const x = clampNumber(
-        Math.round((hoverPixelX / Math.max(baseWidth - 1, 1)) * (layer.width - 1)),
-        0,
-        Math.max(layer.width - 1, 0),
-      );
-      const y = clampNumber(
-        Math.round((hoverPixelY / Math.max(baseHeight - 1, 1)) * (layer.height - 1)),
-        0,
-        Math.max(layer.height - 1, 0),
-      );
-
-      try {
-        const rgba = layer.context.getImageData(x, y, 1, 1).data;
-        const alpha = rgba[3];
-        return {
-          displayIndex: index + 1,
-          layerName: layer.name,
-          colorHex: alpha <= 8 ? null : rgbToHex(rgba[0], rgba[1], rgba[2]),
-        };
-      } catch {
-        return {
-          displayIndex: index + 1,
-          layerName: layer.name,
-          colorHex: null,
-        };
-      }
-    });
-
-    const sampleMs = performance.now() - sampleStart;
-    sceneHoverPerfStatsRef.current.totalLayerSampleMs += sampleMs;
-    sceneHoverPerfStatsRef.current.maxLayerSampleMs = Math.max(
-      sceneHoverPerfStatsRef.current.maxLayerSampleMs,
-      sampleMs,
-    );
-
-    layerSampleCacheRef.current.set(cacheKey, sampled);
-    setHoverLayerColors((previous) => (areLayerSamplesEqual(previous, sampled) ? previous : sampled));
-    maybeFlushScenePerfLog(sampleMs > 8);
-  }, [hoverPixelX, hoverPixelY, previewPixelWidth, previewPixelHeight, layerImages, maybeFlushScenePerfLog]);
-
-  useEffect(() => {
-    const magnifierCanvas = magnifierCanvasRef.current;
-    const context = magnifierCanvas?.getContext("2d");
-    if (!magnifierCanvas || !context) {
-      return;
-    }
-
-    context.clearRect(0, 0, magnifierCanvas.width, magnifierCanvas.height);
-
-    if (!hoverSample) {
-      return;
-    }
-
-    const webglCanvas = glRef.current?.domElement;
-    if (!webglCanvas) {
-      return;
-    }
-
-    const drawStart = performance.now();
-
-    const dpr = window.devicePixelRatio || 1;
-    const sourceSize = (MAGNIFIER_SIZE_PX / MAGNIFIER_ZOOM) * dpr;
-    const maxSourceX = Math.max(0, webglCanvas.width - sourceSize);
-    const maxSourceY = Math.max(0, webglCanvas.height - sourceSize);
-    const sourceX = clampNumber(
-      hoverSample.canvasX * dpr - sourceSize / 2,
-      0,
-      maxSourceX,
-    );
-    const sourceY = clampNumber(
-      hoverSample.canvasY * dpr - sourceSize / 2,
-      0,
-      maxSourceY,
-    );
-
-    context.imageSmoothingEnabled = false;
-    context.drawImage(
-      webglCanvas,
-      sourceX,
-      sourceY,
-      sourceSize,
-      sourceSize,
-      0,
-      0,
-      magnifierCanvas.width,
-      magnifierCanvas.height,
-    );
-
-    const center = magnifierCanvas.width / 2;
-    context.strokeStyle = "rgba(255, 255, 255, 0.9)";
-    context.lineWidth = 1;
-    context.beginPath();
-    context.moveTo(center, 0);
-    context.lineTo(center, magnifierCanvas.height);
-    context.moveTo(0, center);
-    context.lineTo(magnifierCanvas.width, center);
-    context.stroke();
-
-    const drawMs = performance.now() - drawStart;
-    sceneHoverPerfStatsRef.current.magnifierDrawRuns += 1;
-    sceneHoverPerfStatsRef.current.totalMagnifierDrawMs += drawMs;
-    sceneHoverPerfStatsRef.current.maxMagnifierDrawMs = Math.max(
-      sceneHoverPerfStatsRef.current.maxMagnifierDrawMs,
-      drawMs,
-    );
-    maybeFlushScenePerfLog(drawMs > 8);
-  }, [hoverSample, maybeFlushScenePerfLog]);
-
-  const handleGlReady = useCallback((gl: THREE.WebGLRenderer) => {
+  const handleGlReady = useCallback((gl: THREE.WebGLRenderer | null) => {
     glRef.current = gl;
   }, []);
 
@@ -580,77 +349,175 @@ function Scene3D({ modelUrl }: Scene3DProps) {
     [setSelectedColor],
   );
 
-  const handleHoverSample = useCallback((sample: ViewerHoverSample | null) => {
-    const stats = sceneHoverPerfStatsRef.current;
-    pendingHoverSampleRef.current = sample;
-
-    if (hoverDelayTimerRef.current !== null) {
-      window.clearTimeout(hoverDelayTimerRef.current);
-      hoverDelayTimerRef.current = null;
-      stats.timerCancelCount += 1;
-    }
-
-    if (sample === null) {
-      setHoverSample((previous) => {
-        if (previous !== null) {
-          stats.hoverHideCount += 1;
-        }
-        return previous === null ? previous : null;
-      });
-      maybeFlushScenePerfLog(false);
+  const handlePointerMissed = useCallback(() => {
+    const hitRef = (window as unknown as Record<string, unknown>).__luminaColorHitRef as
+      | React.RefObject<boolean>
+      | undefined;
+    if (hitRef?.current) {
+      hitRef.current = false;
       return;
     }
+    setSelectedColor(null);
+  }, [setSelectedColor]);
 
-    setHoverSample((previous) => {
-      if (previous !== null) {
-        stats.hoverHideCount += 1;
-      }
-      return previous === null ? previous : null;
-    });
-
-    stats.timerScheduleCount += 1;
-    hoverDelayTimerRef.current = window.setTimeout(() => {
-      hoverDelayTimerRef.current = null;
-      const pending = pendingHoverSampleRef.current;
-      if (!pending) {
-        return;
-      }
-      setHoverSample((previous) => {
-        const next = areHoverSamplesEqual(previous, pending) ? previous : pending;
-        if (previous === null && next !== null) {
-          stats.hoverShowCount += 1;
-        }
-        return next;
-      });
-      maybeFlushScenePerfLog(false);
-    }, HOVER_POPOVER_DELAY_MS);
-  }, [maybeFlushScenePerfLog]);
+  const handleCanvasCreated = useCallback(
+    ({ gl }: { gl: THREE.WebGLRenderer }) => {
+      gl.setClearColor(themeColors.canvasClearColor);
+      const canvas = gl.domElement;
+      const handleContextLost = (e: Event) => {
+        e.preventDefault();
+      };
+      const handleContextRestored = () => {
+        gl.setSize(canvas.clientWidth, canvas.clientHeight);
+      };
+      canvas.addEventListener("webglcontextlost", handleContextLost);
+      canvas.addEventListener("webglcontextrestored", handleContextRestored);
+      const canvasRecord = canvas as HTMLCanvasElement & {
+        __luminaContextLostHandler?: (e: Event) => void;
+        __luminaContextRestoredHandler?: () => void;
+      };
+      canvasRecord.__luminaContextLostHandler = handleContextLost;
+      canvasRecord.__luminaContextRestoredHandler = handleContextRestored;
+    },
+    [themeColors.canvasClearColor],
+  );
 
   // Check if Fullscreen API is available
   const fullscreenSupported = typeof document.fullscreenElement !== "undefined";
-  const surfaceHex = hoverSample
-    ? (colorRemapMap[hoverSample.hitColorHex] || hoverSample.hitColorHex).toUpperCase()
-    : null;
-  const hoverInspectorStyle = (() => {
-    if (!hoverSample || !containerRef.current) {
-      return null;
-    }
-    const rect = containerRef.current.getBoundingClientRect();
-    const left = clampNumber(
-      hoverSample.canvasX + MAGNIFIER_OFFSET_PX,
-      8,
-      Math.max(8, rect.width - INSPECTOR_WIDTH_PX - 8),
-    );
-    const top = clampNumber(
-      hoverSample.canvasY + MAGNIFIER_OFFSET_PX,
-      8,
-      Math.max(8, rect.height - INSPECTOR_HEIGHT_PX - 8),
-    );
-    return {
-      left: `${left}px`,
-      top: `${top}px`,
-    };
-  })();
+
+  const canvasElement = useMemo(() => (
+    <Canvas
+      camera={canvasCamera}
+      gl={canvasGl}
+      onPointerMissed={handlePointerMissed}
+      onCreated={handleCanvasCreated}
+    >
+      <ScreenshotHelper onGlReady={handleGlReady} />
+      <CameraDebugHelper />
+      <ThemeUpdater />
+      <ScenePerformanceReporter
+        renderCountRef={sceneRenderCountRef}
+        stateRef={perfStateRef}
+      />
+      <Suspense fallback={null}>
+        <Environment
+          files={LIGHTING_CONFIG.environment.hdrFile}
+          background={false}
+          environmentIntensity={themeColors.environmentIntensity}
+        />
+      </Suspense>
+      <directionalLight
+        position={[...LIGHTING_CONFIG.keyLight.position]}
+        intensity={themeColors.keyLightIntensity}
+        color={themeColors.keyLightColor}
+      />
+      <OrbitControls
+        makeDefault
+        enableDamping
+        dampingFactor={0.1}
+        minDistance={10}
+        maxDistance={2000}
+      />
+      <BedPlatform />
+      {modelUrl ? (
+        <Suspense fallback={null}>
+          <ModelViewer url={modelUrl} />
+        </Suspense>
+      ) : previewGlbUrl ? (
+        <Suspense fallback={null}>
+          <InteractiveModelViewer
+            url={previewGlbUrl}
+            colorRemapMap={colorRemapMap}
+            colorHeightMap={colorHeightMap}
+            selectedColor={selectedColor}
+            baseHeight={baseHeight}
+            enableRelief={enableRelief}
+            onColorClick={handleColorClick}
+            scaleX={scaleX}
+            scaleY={scaleY}
+            spacerThick={spacerThick}
+            structureMode={structureMode}
+            enableOutline={enableOutline}
+            outlineWidth={outlineWidth}
+            enableCloisonne={enableCloisonne}
+            wireWidthMm={wireWidthMm}
+            wireHeightMm={wireHeightMm}
+          />
+        </Suspense>
+      ) : null}
+      {addLoop && modelBounds && (
+        <KeychainRing3D
+          enabled={addLoop}
+          width={loopWidth}
+          length={loopLength}
+          hole={loopHole}
+          angle={loopAngle}
+          offsetX={loopOffsetX}
+          offsetY={loopOffsetY}
+          positionPreset={loopPositionPreset}
+          modelBounds={modelBounds}
+        />
+      )}
+
+      {isLoading && (
+        <Html center position={[0, 0, 80]} zIndexRange={[100, 0]}>
+          <div
+            className="flex flex-col items-center justify-center gap-4 select-none pointer-events-none"
+            data-testid="loading-overlay"
+          >
+            <div className="relative flex items-center justify-center p-4">
+              <div className="relative flex h-20 w-20 items-center justify-center">
+                <div className="absolute inset-0 rgb-loader-ring" />
+                <div className="h-3 w-3 rounded-full bg-slate-100/90 dark:bg-slate-50/90" />
+              </div>
+            </div>
+            <div className="rounded-full border border-white/10 bg-gray-900/92 px-4 py-2">
+              <p className="whitespace-nowrap text-sm font-medium tracking-wide text-white">
+                {wittyMsg}
+              </p>
+            </div>
+          </div>
+        </Html>
+      )}
+    </Canvas>
+  ), [
+    canvasCamera,
+    canvasGl,
+    handlePointerMissed,
+    handleCanvasCreated,
+    handleGlReady,
+    themeColors.environmentIntensity,
+    themeColors.keyLightIntensity,
+    themeColors.keyLightColor,
+    modelUrl,
+    previewGlbUrl,
+    colorRemapMap,
+    colorHeightMap,
+    selectedColor,
+    baseHeight,
+    enableRelief,
+    handleColorClick,
+    scaleX,
+    scaleY,
+    spacerThick,
+    structureMode,
+    enableOutline,
+    outlineWidth,
+    enableCloisonne,
+    wireWidthMm,
+    wireHeightMm,
+    addLoop,
+    modelBounds,
+    loopWidth,
+    loopLength,
+    loopHole,
+    loopAngle,
+    loopOffsetX,
+    loopOffsetY,
+    loopPositionPreset,
+    isLoading,
+    wittyMsg,
+  ]);
 
   return (
     <div
@@ -680,232 +547,7 @@ function Scene3D({ modelUrl }: Scene3DProps) {
         </button>
       </div>
 
-      {/* Loading indicator is now 3D-anchored inside Canvas */}
-
-      <Canvas
-        camera={{ position: [0, -57, 474], fov: 45 }}
-        gl={{ preserveDrawingBuffer: true }}
-        onPointerMissed={() => {
-          // Skip deselection if a color mesh was just clicked via native event
-          const hitRef = (window as unknown as Record<string, unknown>).__luminaColorHitRef as
-            | React.RefObject<boolean>
-            | undefined;
-          if (hitRef?.current) {
-            hitRef.current = false;
-            return;
-          }
-          if (hoverDelayTimerRef.current !== null) {
-            window.clearTimeout(hoverDelayTimerRef.current);
-            hoverDelayTimerRef.current = null;
-            sceneHoverPerfStatsRef.current.timerCancelCount += 1;
-          }
-          pendingHoverSampleRef.current = null;
-          setSelectedColor(null);
-          setHoverSample((previous) => {
-            if (previous !== null) {
-              sceneHoverPerfStatsRef.current.hoverHideCount += 1;
-            }
-            return previous === null ? previous : null;
-          });
-          maybeFlushScenePerfLog(false);
-        }}
-        onCreated={({ gl }) => {
-          gl.setClearColor(themeColors.canvasClearColor);
-          const canvas = gl.domElement;
-          canvas.addEventListener("webglcontextlost", (e) => {
-            e.preventDefault();
-          });
-          canvas.addEventListener("webglcontextrestored", () => {
-            gl.setSize(canvas.clientWidth, canvas.clientHeight);
-          });
-        }}
-      >
-        <ScreenshotHelper onGlReady={handleGlReady} />
-        <CameraDebugHelper />
-        <ThemeUpdater />
-        <Suspense fallback={null}>
-          <Environment
-            files={LIGHTING_CONFIG.environment.hdrFile}
-            background={false}
-            environmentIntensity={themeColors.environmentIntensity}
-          />
-        </Suspense>
-        <directionalLight
-          position={[...LIGHTING_CONFIG.keyLight.position]}
-          intensity={themeColors.keyLightIntensity}
-          color={themeColors.keyLightColor}
-        />
-        <OrbitControls
-          makeDefault
-          enableDamping
-          dampingFactor={0.1}
-          minDistance={10}
-          maxDistance={2000}
-        />
-        <BedPlatform />
-        {modelUrl ? (
-          <Suspense fallback={null}>
-            <ModelViewer url={modelUrl} />
-          </Suspense>
-        ) : previewGlbUrl ? (
-          <Suspense fallback={null}>
-            <InteractiveModelViewer
-              url={previewGlbUrl}
-              colorRemapMap={colorRemapMap}
-              colorHeightMap={colorHeightMap}
-              selectedColor={selectedColor}
-              baseHeight={baseHeight}
-              enableRelief={enableRelief}
-              onColorClick={handleColorClick}
-              scaleX={scaleX}
-              scaleY={scaleY}
-              spacerThick={spacerThick}
-              structureMode={structureMode}
-              enableOutline={enableOutline}
-              outlineWidth={outlineWidth}
-              enableCloisonne={enableCloisonne}
-              wireWidthMm={wireWidthMm}
-              wireHeightMm={wireHeightMm}
-              onHoverSample={handleHoverSample}
-            />
-          </Suspense>
-        ) : null}
-        {addLoop && modelBounds && (
-          <KeychainRing3D
-            enabled={addLoop}
-            width={loopWidth}
-            length={loopLength}
-            hole={loopHole}
-            angle={loopAngle}
-            offsetX={loopOffsetX}
-            offsetY={loopOffsetY}
-            positionPreset={loopPositionPreset}
-            modelBounds={modelBounds}
-          />
-        )}
-
-        {/* 3D-Anchored Loading & Witty Messages (Req 1.4) */}
-        {isLoading && (
-          <Html center position={[0, 0, 80]} zIndexRange={[100, 0]}>
-            <div
-              className="flex flex-col items-center justify-center gap-4 select-none pointer-events-none"
-              data-testid="loading-overlay"
-            >
-              <div className="relative flex items-center justify-center p-4">
-                <div className="relative flex h-20 w-20 items-center justify-center">
-                  <div className="absolute inset-0 rgb-loader-ring" />
-                  <div className="h-3 w-3 rounded-full bg-slate-100/90 dark:bg-slate-50/90" />
-                </div>
-              </div>
-              <div className="rounded-full border border-white/10 bg-gray-900/92 px-4 py-2">
-                <p className="whitespace-nowrap text-sm font-medium tracking-wide text-white">
-                  {wittyMsg}
-                </p>
-              </div>
-            </div>
-          </Html>
-        )}
-      </Canvas>
-
-      {hoverSample && hoverInspectorStyle && (
-        <div
-          className="pointer-events-none absolute z-10"
-          style={hoverInspectorStyle}
-          data-testid="viewer-hover-inspector"
-        >
-          <div
-            className="w-[248px] rounded-xl border p-2 shadow-xl backdrop-blur-sm"
-            style={{
-              borderColor: "var(--surface-outline)",
-              background: "var(--surface-panel-strong)",
-              color: "var(--surface-text-muted)",
-            }}
-          >
-            <div
-              className="relative overflow-hidden rounded-md border"
-              style={{ borderColor: "var(--surface-outline)" }}
-            >
-              <canvas
-                ref={magnifierCanvasRef}
-                width={MAGNIFIER_SIZE_PX}
-                height={MAGNIFIER_SIZE_PX}
-                className="h-[152px] w-[152px]"
-                aria-label={t("viewer_hover_magnifier")}
-              />
-              <span
-                className="absolute left-2 top-2 rounded border px-1.5 py-0.5 text-[10px]"
-                style={{
-                  borderColor: "var(--surface-outline)",
-                  background: "var(--surface-section-muted)",
-                }}
-              >
-                {t("viewer_hover_magnifier")}
-              </span>
-            </div>
-
-            <div className="mt-2 space-y-1 text-[11px]">
-              <div className="flex items-center justify-between">
-                <span>{t("viewer_hover_pixel")}</span>
-                <span className="font-mono">({hoverSample.pixelX}, {hoverSample.pixelY})</span>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <span>{t("viewer_hover_surface_color")}</span>
-                <span className="inline-flex items-center gap-1.5 font-mono">
-                  <span
-                    className="h-3 w-3 rounded border"
-                    style={{
-                      borderColor: "var(--surface-outline)",
-                      backgroundColor: surfaceHex ? `#${surfaceHex}` : "transparent",
-                    }}
-                  />
-                  {surfaceHex ? `#${surfaceHex}` : t("viewer_hover_transparent")}
-                </span>
-              </div>
-            </div>
-
-            <div
-              className="mt-2 border-t pt-2"
-              style={{ borderColor: "var(--surface-outline)" }}
-            >
-              <div className="mb-1 text-[11px] font-semibold">
-                {t("viewer_hover_layers_title")}
-              </div>
-              {layerImagesLoading && hoverLayerColors.length === 0 ? (
-                <p className="text-[11px]">
-                  {t("viewer_hover_loading_layers")}
-                </p>
-              ) : hoverLayerColors.length > 0 ? (
-                <ul className="max-h-28 space-y-1 overflow-y-auto pr-1 text-[11px]">
-                  {hoverLayerColors.map((layer) => (
-                    <li
-                      key={`${layer.displayIndex}-${layer.layerName}`}
-                      className="flex items-center justify-between gap-2"
-                    >
-                      <span className="truncate">
-                        {t("action_layer_nth")}{layer.displayIndex}{t("action_layer_unit")}
-                      </span>
-                      <span className="inline-flex items-center gap-1.5 font-mono">
-                        <span
-                          className="h-2.5 w-2.5 rounded border"
-                          style={{
-                            borderColor: "var(--surface-outline)",
-                            backgroundColor: layer.colorHex ? `#${layer.colorHex}` : "transparent",
-                          }}
-                        />
-                        {layer.colorHex ? `#${layer.colorHex}` : t("viewer_hover_transparent")}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-[11px]">
-                  {t("viewer_hover_no_layer_data")}
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {canvasElement}
     </div>
   );
 }

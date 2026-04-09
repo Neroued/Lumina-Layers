@@ -6,6 +6,7 @@ import {
   greedyRectMerge,
   extrudeRectangles,
 } from "./OutlineFrame3D";
+import { debugThreeLog, summarizeMeshList } from "../utils/threeDebug";
 
 // ========== Exported pure utility functions (testable without React) ==========
 
@@ -429,6 +430,7 @@ export default function CloisonneWire3D({
   spacerThick,
 }: CloisonneWire3DProps) {
   const geometry = useMemo(() => {
+    const buildStart = performance.now();
     // Guard: early returns for invalid states
     if (!enabled) return null;
     if (colorMeshes.length === 0) return null;
@@ -478,6 +480,23 @@ export default function CloisonneWire3D({
     // 8. Translate geometry so bottom sits at Z = spacerThick + COLOR_LAYER_HEIGHT
     const baseZ = spacerThick + COLOR_LAYER_HEIGHT;
     geo.translate(0, 0, baseZ);
+
+    const position = geo.getAttribute("position");
+    const triangleCount = geo.getIndex()
+      ? Math.floor(geo.getIndex()!.count / 3)
+      : Math.floor(position.count / 3);
+    debugThreeLog("CloisonneWire3D.build", {
+      build_ms: +(performance.now() - buildStart).toFixed(2),
+      wire_width_mm: wireWidthMm,
+      wire_height_mm: wireHeightMm,
+      grid_w: gridW,
+      grid_h: gridH,
+      dilate_pixels: dilatePixels,
+      rect_count: rects.length,
+      vertex_count: position.count,
+      triangle_count: triangleCount,
+      color_meshes: summarizeMeshList(colorMeshes),
+    });
 
     return geo;
   }, [enabled, wireWidthMm, wireHeightMm, colorMeshes, backingPlateMesh, spacerThick]);

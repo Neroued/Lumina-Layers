@@ -1,0 +1,123 @@
+import { useI18n } from "../../i18n/context"
+import type { HoverLayerColorSample } from "./previewHoverInspectorUtils"
+import { MAGNIFIER_SIZE_PX } from "./previewHoverInspectorUtils"
+
+interface PreviewHoverInspectorProps {
+  dataTestId: string
+  style: { left: string; top: string }
+  magnifierCanvasRef: React.RefObject<HTMLCanvasElement | null>
+  pixelX: number
+  pixelY: number
+  surfaceHex: string | null
+  hoverLayerColors: HoverLayerColorSample[]
+  layerImagesLoading: boolean
+}
+
+export default function PreviewHoverInspector({
+  dataTestId,
+  style,
+  magnifierCanvasRef,
+  pixelX,
+  pixelY,
+  surfaceHex,
+  hoverLayerColors,
+  layerImagesLoading,
+}: PreviewHoverInspectorProps) {
+  const { t } = useI18n()
+
+  return (
+    <div
+      className="pointer-events-none fixed z-[60]"
+      style={style}
+      data-testid={dataTestId}
+    >
+      <div
+        className="w-[248px] rounded-xl border p-2 shadow-xl backdrop-blur-sm"
+        style={{
+          borderColor: "var(--surface-outline)",
+          background: "var(--surface-panel-strong)",
+          color: "var(--surface-text-muted)",
+        }}
+      >
+        <div
+          className="relative overflow-hidden rounded-md border"
+          style={{ borderColor: "var(--surface-outline)" }}
+        >
+          <canvas
+            ref={magnifierCanvasRef}
+            width={MAGNIFIER_SIZE_PX}
+            height={MAGNIFIER_SIZE_PX}
+            className="h-[152px] w-[152px]"
+            aria-label={t("viewer_hover_magnifier")}
+          />
+          <span
+            className="absolute left-2 top-2 rounded border px-1.5 py-0.5 text-[10px]"
+            style={{
+              borderColor: "var(--surface-outline)",
+              background: "var(--surface-section-muted)",
+            }}
+          >
+            {t("viewer_hover_magnifier")}
+          </span>
+        </div>
+
+        <div className="mt-2 space-y-1 text-[11px]">
+          <div className="flex items-center justify-between">
+            <span>{t("viewer_hover_pixel")}</span>
+            <span className="font-mono">({pixelX}, {pixelY})</span>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <span>{t("viewer_hover_surface_color")}</span>
+            <span className="inline-flex items-center gap-1.5 font-mono">
+              <span
+                className="h-3 w-3 rounded border"
+                style={{
+                  borderColor: "var(--surface-outline)",
+                  backgroundColor: surfaceHex ? `#${surfaceHex}` : "transparent",
+                }}
+              />
+              {surfaceHex ? `#${surfaceHex}` : t("viewer_hover_transparent")}
+            </span>
+          </div>
+        </div>
+
+        <div
+          className="mt-2 border-t pt-2"
+          style={{ borderColor: "var(--surface-outline)" }}
+        >
+          <div className="mb-1 text-[11px] font-semibold">
+            {t("viewer_hover_layers_title")}
+          </div>
+          {layerImagesLoading && hoverLayerColors.length === 0 ? (
+            <p className="text-[11px]">{t("viewer_hover_loading_layers")}</p>
+          ) : hoverLayerColors.length > 0 ? (
+            <ul className="max-h-28 space-y-1 overflow-y-auto pr-1 text-[11px]">
+              {hoverLayerColors.map((layer) => (
+                <li
+                  key={`${layer.displayIndex}-${layer.layerName}`}
+                  className="flex items-center justify-between gap-2"
+                >
+                  <span className="truncate">
+                    {t("action_layer_nth")}{layer.displayIndex}{t("action_layer_unit")}
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 font-mono">
+                    <span
+                      className="h-2.5 w-2.5 rounded border"
+                      style={{
+                        borderColor: "var(--surface-outline)",
+                        backgroundColor: layer.colorHex ? `#${layer.colorHex}` : "transparent",
+                      }}
+                    />
+                    {layer.colorHex ? `#${layer.colorHex}` : t("viewer_hover_transparent")}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-[11px]">{t("viewer_hover_no_layer_data")}</p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}

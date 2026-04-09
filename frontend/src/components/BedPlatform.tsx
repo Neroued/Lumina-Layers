@@ -2,6 +2,7 @@ import { useMemo, useEffect } from "react";
 import { useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { useConverterStore } from "../stores/converter";
+import { disposeMeshResources } from "../utils/threeDisposal";
 import { computeFitDistance } from "./ModelViewer";
 import { useThemeConfig } from "../hooks/useThemeConfig";
 import type { ThemeColors } from "./themeConfig";
@@ -126,7 +127,8 @@ export default function BedPlatform() {
   const bedSizes = useConverterStore((s) => s.bedSizes);
   const modelUrl = useConverterStore((s) => s.modelUrl);
   const previewGlbUrl = useConverterStore((s) => s.previewGlbUrl);
-  const { camera, controls } = useThree();
+  const camera = useThree((state) => state.camera);
+  const controls = useThree((state) => state.controls);
   const themeColors = useThemeConfig();
 
   // Find current bed dimensions
@@ -144,6 +146,12 @@ export default function BedPlatform() {
     mesh.position.set(0, 0, -0.1);
     return mesh;
   }, [bedDims, themeColors]);
+
+  useEffect(() => {
+    return () => {
+      disposeMeshResources(bedMesh);
+    };
+  }, [bedMesh]);
 
   // Auto-fit camera when bed changes and no model is loaded
   useEffect(() => {

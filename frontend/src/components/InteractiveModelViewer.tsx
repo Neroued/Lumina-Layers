@@ -3,8 +3,20 @@ import { useThree, useFrame } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { useConverterStore } from "../stores/converter";
+import {
+  cloneObjectTreeWithOwnedResources,
+  disposeMaterial,
+  disposeMeshResources,
+  disposeObjectTree,
+} from "../utils/threeDisposal";
 import OutlineFrame3D from "./OutlineFrame3D";
 import CloisonneWire3D from "./CloisonneWire3D";
+import {
+  debugThreeLog,
+  getLatestResourceTiming,
+  summarizeMeshList,
+  summarizeObjectTree,
+} from "../utils/threeDebug";
 
 // ========== Exported pure utility functions (testable without Three.js) ==========
 
@@ -32,6 +44,27 @@ export function toggleColorSelection(
   clickedHex: string,
 ): string | null {
   return currentSelected === clickedHex ? null : clickedHex;
+}
+
+/**
+ * Determine whether a pointer interaction should still be treated as a click.
+ * 判断一次指针交互是否仍应视为点击，而非拖拽。
+ *
+ * @param startX - Pointer-down X coordinate in CSS pixels. (按下时 X 坐标，单位 CSS 像素)
+ * @param startY - Pointer-down Y coordinate in CSS pixels. (按下时 Y 坐标，单位 CSS 像素)
+ * @param endX - Current or release X coordinate in CSS pixels. (当前或抬起时 X 坐标，单位 CSS 像素)
+ * @param endY - Current or release Y coordinate in CSS pixels. (当前或抬起时 Y 坐标，单位 CSS 像素)
+ * @param thresholdPx - Maximum movement allowed for a click. (判定为点击时允许的最大移动距离)
+ * @returns True when the interaction stays within the click threshold. (位移未超过点击阈值时返回 true)
+ */
+export function isClickWithoutDrag(
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+  thresholdPx: number = 4,
+): boolean {
+  return Math.hypot(endX - startX, endY - startY) <= thresholdPx;
 }
 
 // ========== Component ==========
@@ -81,6 +114,15 @@ interface HoverPerfStats {
   lastLogAt: number;
 }
 
+interface ClickGestureState {
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  dragged: boolean;
+}
+
+const CLICK_DRAG_THRESHOLD_PX = 4;
+
 function isHoverPerfDebugEnabled(): boolean {
   if (typeof window === "undefined") return false;
   return Boolean((window as HoverPerfWindow).__luminaHoverPerfDebug);
@@ -107,12 +149,45 @@ function InteractiveModelViewer({
 }: InteractiveModelViewerProps) {
   const { scene } = useGLTF(url);
   const groupRef = useRef<THREE.Group>(null);
+  const camera = useThree((state) => state.camera);
+  const gl = useThree((state) => state.gl);
+  const previousUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const previousUrl = previousUrlRef.current;
+    previousUrlRef.current = url;
+    if (previousUrl && previousUrl !== url) {
+      useGLTF.clear(previousUrl);
+    }
+  }, [url]);
+
+  useEffect(() => {
+    debugThreeLog("InteractiveModelViewer.lifecycle", {
+      event: "mount",
+      url,
+    });
+    return () => {
+      debugThreeLog("InteractiveModelViewer.lifecycle", {
+        event: "unmount",
+        url,
+      });
+    };
+  }, [url]);
+
+  useEffect(() => {
+    debugThreeLog("InteractiveModelViewer.gltf", {
+      url,
+      resource_timing: getLatestResourceTiming(url),
+      source_scene: summarizeObjectTree(scene),
+    });
+  }, [scene, url]);
 
   // Clone scene once per URL load, apply rotation/centering,
   // and clone each color mesh's material to avoid shared-material mutations.
   // Also separate color_ meshes from non-color children for individual JSX rendering.
   const { nonColorObject, colorMeshes, modelBounds, sceneCenter, backingPlateMesh } = useMemo(() => {
-    const clone = scene.clone(true);
+    const buildStart = performance.now();
+    const clone = cloneObjectTreeWithOwnedResources(scene);
 
     // Remove any baked-in bed mesh
     const toRemove: THREE.Object3D[] = [];
@@ -130,16 +205,24 @@ function InteractiveModelViewer({
     // Skip backing_plate — it gets its own independent material below.
     clone.traverse((child) => {
       if (child instanceof THREE.Mesh && child.material && child.name !== "backing_plate") {
-        const mats = Array.isArray(child.material)
-          ? child.material
-          : [child.material];
-        const newMats = mats.map((mat) => {
+        const previousMaterial = child.material;
+        const mats = Array.isArray(previousMaterial)
+          ? previousMaterial
+          : [previousMaterial];
+        const replacedMaterials: THREE.Material[] = [];
+        const newMats = mats.map((mat: THREE.Material) => {
           if (mat instanceof THREE.MeshStandardMaterial) {
+            replacedMaterials.push(mat);
             return new THREE.MeshLambertMaterial({ color: mat.color });
           }
           return mat;
         });
-        child.material = Array.isArray(child.material) ? newMats : newMats[0];
+        if (replacedMaterials.length > 0) {
+          for (const material of replacedMaterials) {
+            disposeMaterial(material);
+          }
+          child.material = Array.isArray(previousMaterial) ? newMats : newMats[0];
+        }
       }
     });
 
@@ -182,10 +265,12 @@ function InteractiveModelViewer({
       bp.removeFromParent();
 
       // Apply independent MeshLambertMaterial (Requirement 4.1, 4.2, 4.3)
+      const previousBackingMaterial = bp.material;
       const backingMat = new THREE.MeshLambertMaterial({
         color: 0xf5f5f5,
       });
       bp.material = backingMat;
+      disposeMaterial(previousBackingMaterial);
     }
 
     // Separate color_ meshes from the rest (excluding backing_plate)
@@ -194,11 +279,6 @@ function InteractiveModelViewer({
 
     clone.traverse((child) => {
       if (child instanceof THREE.Mesh && child.name.startsWith("color_")) {
-        // Clone material so mutations don't affect the GLTF cache
-        if (child.material) {
-          const cloned = (child.material as THREE.Material).clone();
-          child.material = cloned;
-        }
         colorMeshList.push(child);
         if (child.parent) {
           colorMeshParents.push({ mesh: child, parent: child.parent });
@@ -250,6 +330,24 @@ function InteractiveModelViewer({
           maxZ: boundsBox.max.z, // thickness direction (toward camera)
         };
 
+    const buildSummary = {
+      url,
+      build_ms: +(performance.now() - buildStart).toFixed(2),
+      source_scene: summarizeObjectTree(scene),
+      non_color_scene: summarizeObjectTree(clone),
+      color_meshes: summarizeMeshList(colorMeshList),
+      backing_plate: summarizeMeshList(
+        extractedBackingPlate ? [extractedBackingPlate as THREE.Mesh] : [],
+      ),
+      model_bounds: bounds,
+      scene_center: {
+        x: +center.x.toFixed(3),
+        y: +center.y.toFixed(3),
+        z: +center.z.toFixed(3),
+      },
+    };
+    debugThreeLog("InteractiveModelViewer.build", buildSummary);
+
     return {
       nonColorObject: clone,
       colorMeshes: colorMeshList,
@@ -257,12 +355,30 @@ function InteractiveModelViewer({
       sceneCenter: center,
       backingPlateMesh: extractedBackingPlate as THREE.Mesh | null,
     };
-  }, [scene]);
+  }, [scene, url]);
 
   // Expose model bounds to store for KeychainRing3D positioning
   useEffect(() => {
     useConverterStore.getState().setModelBounds(modelBounds);
   }, [modelBounds]);
+
+  useEffect(() => {
+    return () => {
+      debugThreeLog("InteractiveModelViewer.dispose", {
+        url,
+        non_color_scene: summarizeObjectTree(nonColorObject),
+        color_meshes: summarizeMeshList(colorMeshes),
+        backing_plate: summarizeMeshList(backingPlateMesh ? [backingPlateMesh] : []),
+      });
+      disposeObjectTree(nonColorObject);
+      for (const mesh of colorMeshes) {
+        disposeMeshResources(mesh);
+      }
+      if (backingPlateMesh) {
+        disposeMeshResources(backingPlateMesh);
+      }
+    };
+  }, [nonColorObject, colorMeshes, backingPlateMesh, url]);
 
   // ---- White backing plate mesh ----
   const isDoubleSided = structureMode === "Double-sided";
@@ -291,6 +407,14 @@ function InteractiveModelViewer({
     return mesh;
   }, [backingPlateMesh, modelBounds, spacerThick]);
 
+  useEffect(() => {
+    return () => {
+      if (backingMesh && backingMesh !== backingPlateMesh) {
+        disposeMeshResources(backingMesh);
+      }
+    };
+  }, [backingMesh, backingPlateMesh]);
+
   // Camera is managed by BedPlatform's default view — skip auto-fit here
   // so the viewport stays stable when a preview model loads.
 
@@ -311,12 +435,10 @@ function InteractiveModelViewer({
   const raycasterRef = useRef(new THREE.Raycaster());
   const pointerRef = useRef(new THREE.Vector2());
 
-  // Store Three.js context for manual raycasting
-  const threeCtx = useThree();
-
   // Flag to suppress onPointerMissed when a color mesh was clicked via native event.
   // We store this on the converterStore so Scene3D can read it.
   const colorHitRef = useRef(false);
+  const clickGestureRef = useRef<ClickGestureState | null>(null);
   const hoverPointerRef = useRef<{ clientX: number; clientY: number } | null>(null);
   const hoverRafRef = useRef<number | null>(null);
   const lastHoverSignatureRef = useRef<string>("");
@@ -412,53 +534,6 @@ function InteractiveModelViewer({
     stats.lastLogAt = now;
   }, []);
 
-  const handlePointerDown = useCallback(
-    (event: PointerEvent) => {
-      if (event.button !== 0) return; // Only left click
-      colorHitRef.current = false;
-
-      const canvas = threeCtx.gl.domElement;
-      const rect = canvas.getBoundingClientRect();
-      pointerRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      pointerRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-      raycasterRef.current.setFromCamera(pointerRef.current, threeCtx.camera);
-      const intersects = raycasterRef.current.intersectObjects(colorMeshes, false);
-
-      if (intersects.length > 0) {
-        const hitMesh = intersects[0].object as THREE.Mesh;
-        if (hitMesh.name.startsWith("color_")) {
-          colorHitRef.current = true;
-          const previewPixel = mapWorldToPreviewPixel(intersects[0].point);
-
-          if (selectionMode === "current" || selectionMode === "region" || selectionMode === "multi-select") {
-            if (previewPixel) {
-              if (selectionMode === "multi-select") {
-                detectAndAccumulateRegion(previewPixel.x, previewPixel.y);
-              } else {
-                detectRegion(previewPixel.x, previewPixel.y);
-              }
-            }
-          } else {
-            // 全选模式: 3D 点击 → 切换颜色多选
-            const hex = extractHexFromMeshName(hitMesh.name);
-            toggleColorInSelection(hex);
-            // Keep selectedColor in sync for detail display & recommendations
-            if (selectedColors.has(hex)) {
-              // Was selected, now toggled off
-              const remaining = Array.from(selectedColors).filter((c) => c !== hex);
-              onColorClick(remaining.length > 0 ? remaining[remaining.length - 1] : null);
-            } else {
-              // Newly selected
-              onColorClick(hex);
-            }
-          }
-        }
-      }
-    },
-    [threeCtx.gl, threeCtx.camera, colorMeshes, selectedColors, toggleColorInSelection, onColorClick, selectionMode, detectRegion, detectAndAccumulateRegion, mapWorldToPreviewPixel],
-  );
-
   const emitHoverSample = useCallback(
     (sample: ViewerHoverSample | null) => {
       if (!onHoverSample) return;
@@ -492,6 +567,171 @@ function InteractiveModelViewer({
     [onHoverSample, maybeFlushHoverPerfLog],
   );
 
+  const cancelHoverSampling = useCallback(() => {
+    hoverPointerRef.current = null;
+    if (hoverRafRef.current !== null) {
+      window.cancelAnimationFrame(hoverRafRef.current);
+      hoverRafRef.current = null;
+    }
+    emitHoverSample(null);
+    maybeFlushHoverPerfLog(false);
+  }, [emitHoverSample, maybeFlushHoverPerfLog]);
+
+  const selectColorAtPointerPosition = useCallback(
+    (clientX: number, clientY: number) => {
+      const canvas = gl.domElement;
+      const rect = canvas.getBoundingClientRect();
+      pointerRef.current.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      pointerRef.current.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+
+      raycasterRef.current.setFromCamera(pointerRef.current, camera);
+      const intersects = raycasterRef.current.intersectObjects(colorMeshes, false);
+      if (intersects.length === 0) {
+        return;
+      }
+
+      const hitMesh = intersects[0].object as THREE.Mesh;
+      if (!hitMesh.name.startsWith("color_")) {
+        return;
+      }
+
+      colorHitRef.current = true;
+      const previewPixel = mapWorldToPreviewPixel(intersects[0].point);
+
+      if (selectionMode === "current" || selectionMode === "region" || selectionMode === "multi-select") {
+        if (!previewPixel) {
+          return;
+        }
+
+        if (selectionMode === "multi-select") {
+          detectAndAccumulateRegion(previewPixel.x, previewPixel.y);
+        } else {
+          detectRegion(previewPixel.x, previewPixel.y);
+        }
+        return;
+      }
+
+      const hex = extractHexFromMeshName(hitMesh.name);
+      toggleColorInSelection(hex);
+      if (selectedColors.has(hex)) {
+        const remaining = Array.from(selectedColors).filter((c) => c !== hex);
+        onColorClick(remaining.length > 0 ? remaining[remaining.length - 1] : null);
+      } else {
+        onColorClick(hex);
+      }
+    },
+    [
+      gl,
+      camera,
+      colorMeshes,
+      selectedColors,
+      toggleColorInSelection,
+      onColorClick,
+      selectionMode,
+      detectRegion,
+      detectAndAccumulateRegion,
+      mapWorldToPreviewPixel,
+    ],
+  );
+
+  const handlePointerDown = useCallback(
+    (event: PointerEvent) => {
+      if (onHoverSample) {
+        cancelHoverSampling();
+      }
+      if (event.button !== 0) return; // Only left click
+      colorHitRef.current = false;
+      clickGestureRef.current = {
+        pointerId: event.pointerId,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        dragged: false,
+      };
+      return;
+
+      const canvas = gl.domElement;
+      const rect = canvas.getBoundingClientRect();
+      pointerRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      pointerRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+      raycasterRef.current.setFromCamera(pointerRef.current, camera);
+      const intersects = raycasterRef.current.intersectObjects(colorMeshes, false);
+
+      if (intersects.length > 0) {
+        const hitMesh = intersects[0].object as THREE.Mesh;
+        if (hitMesh.name.startsWith("color_")) {
+          colorHitRef.current = true;
+          const previewPixel = mapWorldToPreviewPixel(intersects[0].point);
+
+          if (selectionMode === "current" || selectionMode === "region" || selectionMode === "multi-select") {
+            if (previewPixel) {
+              if (selectionMode === "multi-select") {
+                detectAndAccumulateRegion(previewPixel.x, previewPixel.y);
+              } else {
+                detectRegion(previewPixel.x, previewPixel.y);
+              }
+            }
+          } else {
+            // 全选模式: 3D 点击 → 切换颜色多选
+            const hex = extractHexFromMeshName(hitMesh.name);
+            toggleColorInSelection(hex);
+            // Keep selectedColor in sync for detail display & recommendations
+            if (selectedColors.has(hex)) {
+              // Was selected, now toggled off
+              const remaining = Array.from(selectedColors).filter((c) => c !== hex);
+              onColorClick(remaining.length > 0 ? remaining[remaining.length - 1] : null);
+            } else {
+              // Newly selected
+              onColorClick(hex);
+            }
+          }
+        }
+      }
+    },
+    [
+      onHoverSample,
+      cancelHoverSampling,
+      gl,
+      camera,
+      colorMeshes,
+      selectedColors,
+      toggleColorInSelection,
+      onColorClick,
+      selectionMode,
+      detectRegion,
+      detectAndAccumulateRegion,
+      mapWorldToPreviewPixel,
+    ],
+  );
+
+  const handlePointerUp = useCallback(
+    (event: PointerEvent) => {
+      if (event.button !== 0) {
+        return;
+      }
+
+      const gesture = clickGestureRef.current;
+      clickGestureRef.current = null;
+      if (!gesture || gesture.pointerId !== event.pointerId) {
+        return;
+      }
+
+      const isClick = !gesture.dragged && isClickWithoutDrag(
+        gesture.startClientX,
+        gesture.startClientY,
+        event.clientX,
+        event.clientY,
+        CLICK_DRAG_THRESHOLD_PX,
+      );
+      if (!isClick) {
+        return;
+      }
+
+      selectColorAtPointerPosition(event.clientX, event.clientY);
+    },
+    [selectColorAtPointerPosition],
+  );
+
   const processHoverPointer = useCallback(() => {
     if (!onHoverSample) return;
     const processStart = performance.now();
@@ -509,7 +749,7 @@ function InteractiveModelViewer({
       return;
     }
 
-    const canvas = threeCtx.gl.domElement;
+    const canvas = gl.domElement;
     const rect = canvas.getBoundingClientRect();
     const relativeX = pending.clientX - rect.left;
     const relativeY = pending.clientY - rect.top;
@@ -517,7 +757,7 @@ function InteractiveModelViewer({
     pointerRef.current.x = (relativeX / rect.width) * 2 - 1;
     pointerRef.current.y = -(relativeY / rect.height) * 2 + 1;
 
-    raycasterRef.current.setFromCamera(pointerRef.current, threeCtx.camera);
+    raycasterRef.current.setFromCamera(pointerRef.current, camera);
     const intersects = raycasterRef.current.intersectObjects(colorMeshes, false);
 
     if (intersects.length === 0) {
@@ -564,12 +804,28 @@ function InteractiveModelViewer({
     stats.totalProcessMs += totalMs;
     stats.maxProcessMs = Math.max(stats.maxProcessMs, totalMs);
     maybeFlushHoverPerfLog(totalMs > 8);
-  }, [threeCtx.gl, threeCtx.camera, colorMeshes, mapWorldToPreviewPixel, onHoverSample, emitHoverSample, maybeFlushHoverPerfLog]);
+  }, [gl, camera, colorMeshes, mapWorldToPreviewPixel, onHoverSample, emitHoverSample, maybeFlushHoverPerfLog]);
 
   const handlePointerMove = useCallback(
     (event: PointerEvent) => {
+      const gesture = clickGestureRef.current;
+      if (gesture && gesture.pointerId === event.pointerId && !gesture.dragged) {
+        gesture.dragged = !isClickWithoutDrag(
+          gesture.startClientX,
+          gesture.startClientY,
+          event.clientX,
+          event.clientY,
+          CLICK_DRAG_THRESHOLD_PX,
+        );
+      }
+
       if (!onHoverSample) return;
       hoverPerfStatsRef.current.pointerMoveCount += 1;
+
+      if (event.buttons !== 0) {
+        cancelHoverSampling();
+        return;
+      }
 
       hoverPointerRef.current = { clientX: event.clientX, clientY: event.clientY };
 
@@ -582,31 +838,28 @@ function InteractiveModelViewer({
         processHoverPointer();
       });
     },
-    [onHoverSample, processHoverPointer],
+    [onHoverSample, cancelHoverSampling, processHoverPointer],
   );
 
   const handleWheel = useCallback(() => {
     hoverPerfStatsRef.current.wheelCount += 1;
-    hoverPointerRef.current = null;
-    if (hoverRafRef.current !== null) {
-      window.cancelAnimationFrame(hoverRafRef.current);
-      hoverRafRef.current = null;
-    }
-    emitHoverSample(null);
-    maybeFlushHoverPerfLog(false);
-  }, [emitHoverSample, maybeFlushHoverPerfLog]);
+    clickGestureRef.current = null;
+    cancelHoverSampling();
+  }, [cancelHoverSampling]);
 
   const handlePointerLeave = useCallback(() => {
-    hoverPointerRef.current = null;
-    if (hoverRafRef.current !== null) {
-      window.cancelAnimationFrame(hoverRafRef.current);
-      hoverRafRef.current = null;
-    }
-    emitHoverSample(null);
-  }, [emitHoverSample]);
+    clickGestureRef.current = null;
+    cancelHoverSampling();
+  }, [cancelHoverSampling]);
+
+  const handlePointerCancel = useCallback(() => {
+    clickGestureRef.current = null;
+    cancelHoverSampling();
+  }, [cancelHoverSampling]);
 
   useEffect(() => {
     return () => {
+      clickGestureRef.current = null;
       if (hoverRafRef.current !== null) {
         window.cancelAnimationFrame(hoverRafRef.current);
         hoverRafRef.current = null;
@@ -625,18 +878,22 @@ function InteractiveModelViewer({
 
   // Attach/detach native pointer event for color mesh click detection
   useEffect(() => {
-    const canvas = threeCtx.gl.domElement;
+    const canvas = gl.domElement;
     canvas.addEventListener("pointerdown", handlePointerDown);
+    canvas.addEventListener("pointerup", handlePointerUp);
     canvas.addEventListener("pointermove", handlePointerMove);
     canvas.addEventListener("wheel", handleWheel, { passive: true });
     canvas.addEventListener("pointerleave", handlePointerLeave);
+    canvas.addEventListener("pointercancel", handlePointerCancel);
     return () => {
       canvas.removeEventListener("pointerdown", handlePointerDown);
+      canvas.removeEventListener("pointerup", handlePointerUp);
       canvas.removeEventListener("pointermove", handlePointerMove);
       canvas.removeEventListener("wheel", handleWheel);
       canvas.removeEventListener("pointerleave", handlePointerLeave);
+      canvas.removeEventListener("pointercancel", handlePointerCancel);
     };
-  }, [threeCtx.gl, handlePointerDown, handlePointerMove, handleWheel, handlePointerLeave]);
+  }, [gl, handlePointerDown, handlePointerUp, handlePointerMove, handleWheel, handlePointerLeave, handlePointerCancel]);
 
   // Edge outline LineSegments for selected color regions.
   const outlineObjsRef = useRef<THREE.LineSegments[]>([]);

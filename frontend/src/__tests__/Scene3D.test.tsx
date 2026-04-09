@@ -41,17 +41,52 @@ vi.mock("@react-three/drei", () => ({
 
 // Override the global Canvas mock to capture onPointerMissed
 let capturedCanvasProps: Record<string, unknown> = {};
+function createMockGl() {
+  const domElement = document.createElement("canvas");
+  domElement.width = 800;
+  domElement.height = 600;
+  return {
+    domElement,
+    setClearColor: vi.fn(),
+    getPixelRatio: vi.fn(() => 1),
+    getContextAttributes: vi.fn(() => ({ preserveDrawingBuffer: true })),
+    info: {
+      memory: {
+        geometries: 0,
+        textures: 0,
+      },
+      programs: [],
+      render: {
+        calls: 0,
+        triangles: 0,
+        lines: 0,
+        points: 0,
+        frame: 0,
+      },
+    },
+  };
+}
+
 vi.mock("@react-three/fiber", () => ({
   Canvas: (props: Record<string, unknown> & { children?: React.ReactNode }) => {
     capturedCanvasProps = props;
     return <div data-testid="mock-canvas">{props.children}</div>;
   },
-  useThree: () => ({
-    gl: {
-      domElement: document.createElement("canvas"),
-      setClearColor: vi.fn(),
-    },
-  }),
+  useThree: (selector?: (state: {
+    gl: ReturnType<typeof createMockGl>;
+    scene: { children: [] };
+    camera: { position: { x: number; y: number; z: number } };
+    controls: null;
+  }) => unknown) => {
+    const state = {
+      gl: createMockGl(),
+      scene: { children: [] },
+      camera: { position: { x: 0, y: 0, z: 0 } },
+      controls: null,
+    };
+    return selector ? selector(state) : state;
+  },
+  useFrame: vi.fn(),
 }));
 
 // Must import Scene3D after mocks are set up
@@ -153,56 +188,17 @@ describe("Scene3D", () => {
     });
   });
 
-  describe("hover inspector", () => {
-    it("shows hover inspector when InteractiveModelViewer reports hover and hides on pointer missed", () => {
-      vi.useFakeTimers();
-
+  describe("hover inspector removal", () => {
+    it("does not pass hover sampling callback into InteractiveModelViewer", () => {
       useConverterStore.setState({
         previewGlbUrl: "/api/files/mock-preview.glb",
-        colorRemapMap: { ff0000: "00ff00" },
       });
 
       render(<Scene3D />);
 
-      const hoverHandler = capturedInteractiveViewerProps?.onHoverSample as
-        | ((sample: {
-          canvasX: number;
-          canvasY: number;
-          pixelX: number;
-          pixelY: number;
-          hitColorHex: string;
-        }) => void)
-        | undefined;
-
-      expect(hoverHandler).toBeTypeOf("function");
-
-      act(() => {
-        hoverHandler?.({
-          canvasX: 24,
-          canvasY: 36,
-          pixelX: 10,
-          pixelY: 20,
-          hitColorHex: "ff0000",
-        });
-      });
-
+      expect(capturedInteractiveViewerProps).not.toBeNull();
+      expect(capturedInteractiveViewerProps?.onHoverSample).toBeUndefined();
       expect(screen.queryByTestId("viewer-hover-inspector")).not.toBeInTheDocument();
-
-      act(() => {
-        vi.advanceTimersByTime(220);
-      });
-
-      expect(screen.getByTestId("viewer-hover-inspector")).toBeInTheDocument();
-      expect(screen.getByText("(10, 20)")).toBeInTheDocument();
-      expect(screen.getByText("#00FF00")).toBeInTheDocument();
-
-      act(() => {
-        (capturedCanvasProps.onPointerMissed as () => void)();
-      });
-
-      expect(screen.queryByTestId("viewer-hover-inspector")).not.toBeInTheDocument();
-
-      vi.useRealTimers();
     });
   });
 

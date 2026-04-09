@@ -247,21 +247,23 @@ function AppContent() {
 
       <main className="relative flex-1 min-h-0 overflow-hidden bg-slate-50 dark:bg-slate-950">
         {/* Converter: WidgetWorkspace + Scene3D */}
-        <div className={activeTab !== 'converter' ? 'hidden' : 'h-full min-h-0'}>
-          <WidgetWorkspace>
-            <SceneErrorBoundary
-              fallback={
-                <div className="absolute inset-0 flex items-center justify-center bg-gray-100 dark:bg-gray-950">
-                  <p className="text-red-400 text-sm">{t("app_3d_scene_error")}</p>
-                </div>
-              }
-            >
-              <Suspense fallback={<LoadingSpinner />}>
-                <Scene3D />
-              </Suspense>
-            </SceneErrorBoundary>
-          </WidgetWorkspace>
-        </div>
+        {activeTab === 'converter' && (
+          <div className="h-full min-h-0">
+            <WidgetWorkspace>
+              <SceneErrorBoundary
+                fallback={
+                  <div className="absolute inset-0 flex items-center justify-center bg-gray-100 dark:bg-gray-950">
+                    <p className="text-red-400 text-sm">{t("app_3d_scene_error")}</p>
+                  </div>
+                }
+              >
+                <Suspense fallback={<LoadingSpinner />}>
+                  <Scene3D />
+                </Suspense>
+              </SceneErrorBoundary>
+            </WidgetWorkspace>
+          </div>
+        )}
 
         {activeTab === 'calibration' && <CalibrationPanel />}
 
