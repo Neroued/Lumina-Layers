@@ -501,6 +501,12 @@ def run_extraction(
     extracted = np.zeros((grid_size, grid_size, 3), dtype=np.uint8)
     vis = warped.copy()
 
+    # ROI 自适应：取色块中心 60%，避免边框污染同时充分采样
+    _ROI_FRAC = 0.6
+    cell_px = DST_SIZE / physical_grid
+    half_roi = max(4, int(cell_px * _ROI_FRAC / 2))
+    marker_size = max(8, int(cell_px * 0.3))
+
     # BW模式特殊处理：只提取前 32 个色块
     if color_mode == "BW (Black & White)" or color_mode == "BW":
         cells_to_extract = 32
@@ -531,14 +537,16 @@ def run_extraction(
             cy = (dy + 1) / 2 * DST_SIZE + offset_y
 
             if 0 <= cx < DST_SIZE and 0 <= cy < DST_SIZE:
-                x0, y0 = int(max(0, cx - 4)), int(max(0, cy - 4))
-                x1, y1 = int(min(DST_SIZE, cx + 4)), int(min(DST_SIZE, cy + 4))
+                x0 = int(max(0, cx - half_roi))
+                y0 = int(max(0, cy - half_roi))
+                x1 = int(min(DST_SIZE, cx + half_roi))
+                y1 = int(min(DST_SIZE, cy + half_roi))
                 reg = warped[y0:y1, x0:x1]
                 if reg.size > 0:
                     avg = _linear_to_srgb(_srgb_to_linear(reg).mean(axis=(0, 1)))
                 else:
                     avg = [0, 0, 0]
-                cv2.drawMarker(vis, (int(cx), int(cy)), (0, 255, 0), cv2.MARKER_CROSS, 8, 1)
+                cv2.drawMarker(vis, (int(cx), int(cy)), (0, 255, 0), cv2.MARKER_CROSS, marker_size, 1)
                 _draw_dashed_rect(vis, (x0, y0), (x1, y1), (0, 255, 0), 1, 4)
             else:
                 avg = [0, 0, 0]
