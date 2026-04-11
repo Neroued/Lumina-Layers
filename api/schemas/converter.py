@@ -280,8 +280,8 @@ class ConvertGenerateRequest(BaseModel):
     coating_height_mm: float = Field(0.08, ge=0.04, le=0.12, description="涂层高度 (mm)")
     replacement_regions: Optional[List[ColorReplacementItem]] = Field(None, description="颜色替换列表")
     free_color_set: Optional[Set[str]] = Field(None, description="自由色集合 (hex)")
-    printer_id: str = Field("bambu-h2d", description="????? ID")
-    slicer: str = Field("BambuStudio", description="??????")
+    printer_id: str = Field("bambu-h2d", description="Printer profile ID")
+    slicer: str = Field("BambuStudio", description="Slicer software name")
     use_cached_matched_rgb: bool = Field(
         False,
         description="使用 Session 缓存的 matched_rgb 而非从原始图像重新处理",
@@ -311,6 +311,104 @@ class LargeFormatGenerateRequest(BaseModel):
     tile_width_mm: float = Field(250.0, gt=0, description="切片宽度 (mm)")
     tile_height_mm: float = Field(250.0, gt=0, description="切片高度 (mm)")
     params: ConvertGenerateRequest = Field(..., description="生成参数")
+
+
+class PuzzleStyle(str, Enum):
+    """Puzzle layout style.
+    拼图布局风格。
+
+    Attributes:
+        REGULAR: Regular row-column puzzle. (规则行列拼图)
+        IRREGULAR: Perturbed row-column puzzle. (扰动网格拼图)
+    """
+
+    REGULAR = "regular"
+    IRREGULAR = "irregular"
+
+
+class PuzzleSizingMode(str, Enum):
+    """Puzzle sizing control mode.
+    拼图尺寸控制模式。
+
+    Attributes:
+        PIECE_SIZE: Resolve rows/cols from average piece size.
+            (根据平均块尺寸推导行列)
+        GRID: Use explicit row and column counts. (直接使用行列数)
+        PIECE_COUNT: Resolve the closest row-column grid from target count.
+            (根据目标片数推导最接近的行列网格)
+    """
+
+    PIECE_SIZE = "piece_size"
+    GRID = "grid"
+    PIECE_COUNT = "piece_count"
+
+
+class PuzzleConnectorStyle(str, Enum):
+    """Puzzle connector style preset.
+    拼图连接器风格预设。
+
+    Attributes:
+        CLASSIC: Classic rounded connector. (经典圆润连接器)
+        EASY_CUT: Shallower and easier-to-print connector.
+            (更浅、更容易打印的简化连接器)
+    """
+
+    CLASSIC = "classic"
+    EASY_CUT = "easy_cut"
+
+
+class PuzzleLayoutPreviewRequest(BaseModel):
+    """Request model for puzzle layout overlay preview.
+    拼图布局叠线预览请求模型。
+
+    Attributes:
+        target_height_mm: Intended total output height in millimeters.
+            (期望总输出高度，单位毫米)
+        puzzle_style: Puzzle style selector. (拼图风格选择)
+        sizing_mode: Active sizing mode. (当前尺寸模式)
+        piece_width_mm: Requested average piece width. (请求的平均块宽度)
+        piece_height_mm: Requested average piece height. (请求的平均块高度)
+        rows: Requested row count in grid mode. (grid 模式下的目标行数)
+        cols: Requested column count in grid mode. (grid 模式下的目标列数)
+        target_piece_count: Requested target piece count. (目标片数)
+        seed: Deterministic random seed. (确定性的随机种子)
+        connector_style: Connector preset. (连接器预设)
+        labels_enabled: Whether labels should be shown on the overlay.
+            (是否在叠线图中显示编号)
+        engrave_back_labels: Reserved flag for future underside label engraving.
+            (为未来背面刻号预留的标志位，当前版本未实现)
+        irregularity_strength: Perturbation strength for irregular layouts.
+            (不规则布局扰动强度)
+        min_neck_width_mm: Minimum printable neck width.
+            (最小可打印脖颈宽度)
+    """
+
+    target_height_mm: float = Field(..., gt=0, description="拼图总高度 (mm)")
+    puzzle_style: PuzzleStyle = Field(PuzzleStyle.REGULAR, description="拼图风格")
+    sizing_mode: PuzzleSizingMode = Field(PuzzleSizingMode.PIECE_SIZE, description="尺寸模式")
+    piece_width_mm: float = Field(20.0, gt=0, description="平均块宽度 (mm)")
+    piece_height_mm: float = Field(20.0, gt=0, description="平均块高度 (mm)")
+    rows: int = Field(3, ge=1, description="行数")
+    cols: int = Field(3, ge=1, description="列数")
+    target_piece_count: int = Field(12, ge=1, description="目标片数")
+    seed: int = Field(0, ge=0, le=999999, description="随机种子")
+    connector_style: PuzzleConnectorStyle = Field(PuzzleConnectorStyle.CLASSIC, description="连接器风格")
+    labels_enabled: bool = Field(False, description="显示编号")
+    engrave_back_labels: bool = Field(False, description="背面刻号（预留，当前未实现）")
+    irregularity_strength: float = Field(0.35, ge=0.0, le=1.0, description="不规则强度")
+    min_neck_width_mm: float = Field(1.2, gt=0, le=10.0, description="最小脖颈宽度 (mm)")
+
+
+class PuzzleGenerateRequest(PuzzleLayoutPreviewRequest):
+    """Request model for puzzle piece generation.
+    拼图分块生成请求模型。
+
+    Attributes:
+        params: Shared generate parameters for each piece.
+            (每个拼图块共享的生成参数)
+    """
+
+    params: ConvertGenerateRequest = Field(..., description="每块共享的生成参数")
 
 
 class ConvertBatchRequest(BaseModel):

@@ -32,6 +32,7 @@ import {
   setBoundedCacheValue,
 } from '../ui/previewHoverInspectorUtils';
 import { resolvePreviewHoverPixel } from './actionBarHoverUtils';
+import { readPixelColor } from './colorPreview2DUtils';
 
 /**
  * Convert a click on an <img> with object-contain to image pixel coordinates.
@@ -79,34 +80,6 @@ export function imgClickToPixel(
     Math.max(0, Math.min(naturalW - 1, pixelX)),
     Math.max(0, Math.min(naturalH - 1, pixelY)),
   ];
-}
-
-/**
- * Read the color of a pixel from an image via an off-screen canvas.
- * 通过离屏 canvas 读取图像某像素的颜色。
- *
- * @param imgEl - A loaded <img> element.
- * @param x - Pixel X coordinate.
- * @param y - Pixel Y coordinate.
- * @returns Hex string without '#' (e.g. "ff0000"), or null on failure.
- */
-export function readPixelColor(
-  imgEl: HTMLImageElement,
-  x: number,
-  y: number,
-): string | null {
-  try {
-    const canvas = document.createElement('canvas');
-    canvas.width = imgEl.naturalWidth;
-    canvas.height = imgEl.naturalHeight;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return null;
-    ctx.drawImage(imgEl, 0, 0);
-    const [r, g, b] = ctx.getImageData(x, y, 1, 1).data;
-    return [r, g, b].map((c) => c.toString(16).padStart(2, '0')).join('');
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -165,6 +138,7 @@ export default function ColorPreview2D({
   const LAYER_CACHE_LIMIT = 128;
   const hoverInspectorEnabled = showMagnifier || showLayerDetails;
   const { t } = useI18n();
+  const previewAltText = t('converter_preview_2d_alt');
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
 
@@ -915,7 +889,7 @@ export default function ColorPreview2D({
             <img
               ref={imgRef}
               src={displayUrl ?? undefined}
-              alt="2D color preview"
+              alt={previewAltText}
               crossOrigin="anonymous"
               onLoad={handleImgLoad}
               className="block h-full w-full"
@@ -968,7 +942,7 @@ export default function ColorPreview2D({
           <img
             ref={imgRef}
             src={displayUrl ?? undefined}
-            alt="2D color preview"
+            alt={previewAltText}
             crossOrigin="anonymous"
             onLoad={handleImgLoad}
             className="max-h-full max-w-full"

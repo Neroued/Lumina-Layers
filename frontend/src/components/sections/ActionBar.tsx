@@ -1,6 +1,6 @@
 import { useMemo, useState, useRef, useEffect, useCallback, type ReactNode } from "react"
 import { createPortal } from "react-dom"
-import { useConverterStore } from "../../stores/converter"
+import { buildLayerImagesSourceKey, useConverterStore } from "../../stores/converter"
 import Button from "../ui/Button"
 import BatchResultSummary from "../ui/BatchResultSummary"
 import ZoomableImage, { type ZoomableImageHoverSample } from "../ui/ZoomableImage"
@@ -30,6 +30,8 @@ import { useI18n } from "../../i18n/context"
 import { useWorkspaceMode } from "../../hooks/useWorkspaceMode"
 import { exportShareCard, exportSidecar } from "../../recipe/importFlow"
 
+const EMPTY_LAYER_IMAGES: { layer_index: number; name: string; url: string }[] = []
+
 export default function ActionBar() {
   const SURFACE_CACHE_LIMIT = 256
   const LAYER_CACHE_LIMIT = 128
@@ -37,7 +39,7 @@ export default function ActionBar() {
   const workspace = useWorkspaceMode()
   const [zoomedLayerIdx, setZoomedLayerIdx] = useState<number | null>(null)
   const [hoverSample, setHoverSample] = useState<ZoomableImageHoverSample | null>(null)
-  const [hoverLayerColors, setHoverLayerColors] = useState<LayerHoverColorSample[]>([])
+  const [hoverLayerColors, setHoverLayerColors] = useState<HoverLayerColorSample[]>([])
   const [hoverSurfaceHex, setHoverSurfaceHex] = useState<string | null>(null)
   const [previewCanvasBuffer, setPreviewCanvasBuffer] = useState<PreviewCanvasBuffer | null>(null)
   const [layerCanvasBuffers, setLayerCanvasBuffers] = useState<LayerCanvasBuffer[]>([])
@@ -45,10 +47,11 @@ export default function ActionBar() {
   const hoverDelayTimerRef = useRef<number | null>(null)
   const hoverResourceReleaseTimerRef = useRef<number | null>(null)
   const magnifierCanvasRef = useRef<HTMLCanvasElement>(null)
-  const fetchedLayerSessionRef = useRef<string | null>(null)
+  const fetchedLayerSourceRef = useRef<string | null>(null)
   const needsLayerHoverData = hoverSample !== null
-  const layerSampleCacheRef = useRef<Map<string, LayerHoverColorSample[]>>(new Map())
+  const layerSampleCacheRef = useRef<Map<string, HoverLayerColorSample[]>>(new Map())
   const surfaceSampleCacheRef = useRef<Map<string, string | null>>(new Map())
+
   const imageFile = useConverterStore((s) => s.imageFile)
   const lut_name = useConverterStore((s) => s.lut_name)
   const isLoading = useConverterStore((s) => s.isLoading)
@@ -61,6 +64,7 @@ export default function ActionBar() {
   const previewWidthMm = useConverterStore((s) => s.preview_width_mm)
   const previewPixelWidth = useConverterStore((s) => s.previewPixelWidth)
   const previewPixelHeight = useConverterStore((s) => s.previewPixelHeight)
+  const puzzleOverlayUrl = useConverterStore((s) => s.puzzleOverlayUrl)
   const bedLabel = useConverterStore((s) => s.bed_label)
   const bedSizes = useConverterStore((s) => s.bedSizes)
   const submitPreview = useConverterStore((s) => s.submitPreview)
@@ -80,21 +84,28 @@ export default function ActionBar() {
   const fetchLayerImages = useConverterStore((s) => s.fetchLayerImages)
   const layerImagesLoading = useConverterStore((s) => s.layerImagesLoading)
   const layerImages = useConverterStore((s) => s.layerImages)
+  const layerImagesSourceKey = useConverterStore((s) => s.layerImagesSourceKey)
+  const layerImagesCurrentKey = useConverterStore(buildLayerImagesSourceKey)
 
   const [isExporting, setIsExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
 
   const canSubmit = !!imageFile && !!lut_name
   const canBatchSubmit = batchFiles.length > 0 && !!lut_name
-  const previewDisplayUrl = selectionMode === "multi-select"
-    ? (previewImageUrl ?? previewBaseImageUrl)
-    : previewImageUrl
+  const previewDisplayUrl = puzzleOverlayUrl
+    ? (previewBaseImageUrl ?? previewImageUrl)
+    : selectionMode === "multi-select"
+      ? (previewImageUrl ?? previewBaseImageUrl)
+      : previewImageUrl
+  const activeLayerImages =
+    layerImagesSourceKey === layerImagesCurrentKey ? layerImages : EMPTY_LAYER_IMAGES
   const hasPreview = !!previewDisplayUrl && !!sessionId
-  const activeMultiSelectRegionId = selectionMode === "multi-select" && selectedRegions.length > 0
-    ? selectedRegions[selectedRegions.length - 1].regionId
-    : null
+  const activeMultiSelectRegionId =
+    selectionMode === "multi-select" && selectedRegions.length > 0
+      ? selectedRegions[selectedRegions.length - 1].regionId
+      : null
 
-  const previewOverlay = useMemo(() => {
+  const selectionOverlay = useMemo(() => {
     if (
       selectionMode !== "multi-select" ||
       selectedRegions.length === 0 ||
@@ -162,7 +173,34 @@ export default function ActionBar() {
         {polygons}
       </svg>
     )
-  }, [activeMultiSelectRegionId, previewPixelHeight, previewPixelWidth, previewWidthMm, selectedRegions, selectionMode])
+  }, [
+    activeMultiSelectRegionId,
+    previewPixelHeight,
+    previewPixelWidth,
+    previewWidthMm,
+    selectedRegions,
+    selectionMode,
+  ])
+
+  const previewOverlay = useMemo(() => {
+    if (!puzzleOverlayUrl && !selectionOverlay) {
+      return null
+    }
+
+    return (
+      <>
+        {puzzleOverlayUrl ? (
+          <img
+            src={puzzleOverlayUrl}
+            alt=""
+            className="pointer-events-none absolute inset-0 h-full w-full"
+            draggable={false}
+          />
+        ) : null}
+        {selectionOverlay}
+      </>
+    )
+  }, [puzzleOverlayUrl, selectionOverlay])
 
   const previewDebugOverlay = useMemo(() => (
     <div
@@ -197,21 +235,46 @@ export default function ActionBar() {
 
   useEffect(() => {
     if (!sessionId) {
-      fetchedLayerSessionRef.current = null
+      fetchedLayerSourceRef.current = null
       return
     }
 
-    if (!needsLayerHoverData || !hasPreview || layerImagesLoading || layerImages.length > 0) {
+    if (
+      !hasPreview ||
+      !layerImagesCurrentKey ||
+      layerImagesLoading ||
+      activeLayerImages.length > 0
+    ) {
       return
     }
 
-    if (fetchedLayerSessionRef.current === sessionId) {
+    if (fetchedLayerSourceRef.current === layerImagesCurrentKey) {
       return
     }
 
-    fetchedLayerSessionRef.current = sessionId
-    void fetchLayerImages()
-  }, [hasPreview, sessionId, needsLayerHoverData, layerImagesLoading, layerImages.length, fetchLayerImages])
+    fetchedLayerSourceRef.current = layerImagesCurrentKey
+    void fetchLayerImages(layerImagesCurrentKey)
+  }, [
+    activeLayerImages.length,
+    fetchLayerImages,
+    hasPreview,
+    layerImagesCurrentKey,
+    layerImagesLoading,
+    sessionId,
+  ])
+
+  useEffect(() => {
+    setZoomedLayerIdx(null)
+  }, [sessionId])
+
+  useEffect(() => {
+    setZoomedLayerIdx((previous) => {
+      if (previous === null) {
+        return previous
+      }
+      return activeLayerImages[previous] ? previous : null
+    })
+  }, [activeLayerImages])
 
   useEffect(() => {
     if (hoverResourceReleaseTimerRef.current !== null) {
@@ -246,7 +309,7 @@ export default function ActionBar() {
       }
     }
 
-    if (layerImages.length === 0) {
+    if (activeLayerImages.length === 0) {
       setLayerCanvasBuffers([])
       layerSampleCacheRef.current.clear()
       return () => {
@@ -256,7 +319,7 @@ export default function ActionBar() {
 
     const buildBuffers = async () => {
       const loaded = await Promise.all(
-        layerImages.map(
+        activeLayerImages.map(
           (layer) =>
             new Promise<LayerCanvasBuffer | null>((resolve) => {
               const image = new Image()
@@ -301,7 +364,7 @@ export default function ActionBar() {
     return () => {
       cancelled = true
     }
-  }, [layerImages, needsLayerHoverData])
+  }, [activeLayerImages, needsLayerHoverData])
 
   useEffect(() => {
     return () => {
@@ -331,8 +394,10 @@ export default function ActionBar() {
       bedLabel,
       bedSizes,
     })
-    const layerBaseWidth = previewPixelWidth && previewPixelWidth > 0 ? previewPixelWidth : hoverSample.naturalWidth
-    const layerBaseHeight = previewPixelHeight && previewPixelHeight > 0 ? previewPixelHeight : hoverSample.naturalHeight
+    const layerBaseWidth =
+      previewPixelWidth && previewPixelWidth > 0 ? previewPixelWidth : hoverSample.naturalWidth
+    const layerBaseHeight =
+      previewPixelHeight && previewPixelHeight > 0 ? previewPixelHeight : hoverSample.naturalHeight
 
     const previewBuffer = previewCanvasBuffer
     if (!previewBuffer) {
@@ -343,15 +408,28 @@ export default function ActionBar() {
         setHoverSurfaceHex((previous) => (previous === cachedSurface ? previous : cachedSurface))
       } else {
         let sampledSurface: string | null = null
-        const x = mapPixelToBufferCoordinate(hoverSample.pixelX, hoverSample.naturalWidth, previewBuffer.width)
-        const y = mapPixelToBufferCoordinate(hoverSample.pixelY, hoverSample.naturalHeight, previewBuffer.height)
+        const x = mapPixelToBufferCoordinate(
+          hoverSample.pixelX,
+          hoverSample.naturalWidth,
+          previewBuffer.width,
+        )
+        const y = mapPixelToBufferCoordinate(
+          hoverSample.pixelY,
+          hoverSample.naturalHeight,
+          previewBuffer.height,
+        )
         try {
           const rgba = previewBuffer.context.getImageData(x, y, 1, 1).data
           sampledSurface = rgba[3] <= 8 ? null : rgbToHex(rgba[0], rgba[1], rgba[2])
         } catch {
           sampledSurface = null
         }
-        setBoundedCacheValue(surfaceSampleCacheRef.current, surfaceCacheKey, sampledSurface, SURFACE_CACHE_LIMIT)
+        setBoundedCacheValue(
+          surfaceSampleCacheRef.current,
+          surfaceCacheKey,
+          sampledSurface,
+          SURFACE_CACHE_LIMIT,
+        )
         setHoverSurfaceHex((previous) => (previous === sampledSurface ? previous : sampledSurface))
       }
     }
@@ -365,7 +443,9 @@ export default function ActionBar() {
     const layerCacheKey = `${resolvedLayerPixel.pixelX},${resolvedLayerPixel.pixelY}`
     const cachedLayers = layerSampleCacheRef.current.get(layerCacheKey)
     if (cachedLayers) {
-      setHoverLayerColors((previous) => (areLayerSamplesEqual(previous, cachedLayers) ? previous : cachedLayers))
+      setHoverLayerColors((previous) => (
+        areLayerSamplesEqual(previous, cachedLayers) ? previous : cachedLayers
+      ))
       return
     }
 
@@ -390,8 +470,15 @@ export default function ActionBar() {
       }
     })
 
-    setBoundedCacheValue(layerSampleCacheRef.current, layerCacheKey, sampledLayers, LAYER_CACHE_LIMIT)
-    setHoverLayerColors((previous) => (areLayerSamplesEqual(previous, sampledLayers) ? previous : sampledLayers))
+    setBoundedCacheValue(
+      layerSampleCacheRef.current,
+      layerCacheKey,
+      sampledLayers,
+      LAYER_CACHE_LIMIT,
+    )
+    setHoverLayerColors((previous) => (
+      areLayerSamplesEqual(previous, sampledLayers) ? previous : sampledLayers
+    ))
   }, [
     hoverSample,
     previewPixelWidth,
@@ -423,8 +510,16 @@ export default function ActionBar() {
       return
     }
 
-    const centerX = mapPixelToBufferCoordinate(hoverSample.pixelX, hoverSample.naturalWidth, previewBuffer.width)
-    const centerY = mapPixelToBufferCoordinate(hoverSample.pixelY, hoverSample.naturalHeight, previewBuffer.height)
+    const centerX = mapPixelToBufferCoordinate(
+      hoverSample.pixelX,
+      hoverSample.naturalWidth,
+      previewBuffer.width,
+    )
+    const centerY = mapPixelToBufferCoordinate(
+      hoverSample.pixelY,
+      hoverSample.naturalHeight,
+      previewBuffer.height,
+    )
 
     const sourceSize = MAGNIFIER_SIZE_PX / MAGNIFIER_ZOOM
     const maxSourceX = Math.max(0, previewBuffer.width - sourceSize)
@@ -515,7 +610,9 @@ export default function ActionBar() {
       {batchMode ? (
         <>
           {!canBatchSubmit && (
-            <p className="text-xs text-yellow-600 dark:text-yellow-400">{t("action_batch_upload_hint")}</p>
+            <p className="text-xs text-yellow-600 dark:text-yellow-400">
+              {t("action_batch_upload_hint")}
+            </p>
           )}
 
           <div className={`gap-2 ${workspace.isCompact ? "grid grid-cols-1" : "flex flex-wrap"}`}>
@@ -563,7 +660,7 @@ export default function ActionBar() {
               <Button
                 label={layerImagesLoading ? t("action_layers_loading") : t("action_view_layers")}
                 variant="secondary"
-                onClick={() => void fetchLayerImages()}
+                onClick={() => void fetchLayerImages(layerImagesCurrentKey)}
                 disabled={layerImagesLoading}
                 loading={layerImagesLoading}
                 className="w-full"
@@ -634,14 +731,18 @@ export default function ActionBar() {
       )}
       {hoverInspectorOverlay}
 
-      {layerImages.length > 0 && (
+      {activeLayerImages.length > 0 && (
         <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
-          <h4 className="mb-2 text-xs font-medium text-gray-600 dark:text-gray-400">{t("action_layers_title")}</h4>
-          <div className={`grid gap-2 ${workspace.isCompact ? "grid-cols-2 sm:grid-cols-3" : "grid-cols-3 sm:grid-cols-4 md:grid-cols-5"}`}>
-            {layerImages.map((layer, idx) => (
+          <h4 className="mb-2 text-xs font-medium text-gray-600 dark:text-gray-400">
+            {t("action_layers_title")}
+          </h4>
+          <div
+            className={`grid gap-2 ${workspace.isCompact ? "grid-cols-2 sm:grid-cols-3" : "grid-cols-3 sm:grid-cols-4 md:grid-cols-5"}`}
+          >
+            {activeLayerImages.map((layer, idx) => (
               <div
                 key={layer.layer_index}
-                className="group cursor-pointer flex flex-col items-center gap-1"
+                className="group flex cursor-pointer flex-col items-center gap-1"
                 onClick={() => setZoomedLayerIdx(idx)}
               >
                 <div className="relative w-full overflow-hidden rounded border border-gray-200 dark:border-gray-600">
@@ -652,7 +753,9 @@ export default function ActionBar() {
                     draggable={false}
                   />
                   <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors group-hover:bg-black/20">
-                    <span className="text-sm text-white opacity-0 transition-opacity group-hover:opacity-100">{t("action_zoom_icon")}</span>
+                    <span className="text-sm text-white opacity-0 transition-opacity group-hover:opacity-100">
+                      {t("action_zoom_icon")}
+                    </span>
                   </div>
                 </div>
                 <span className="text-[11px] text-gray-600 dark:text-gray-400">
@@ -664,7 +767,7 @@ export default function ActionBar() {
         </div>
       )}
 
-      {zoomedLayerIdx !== null && layerImages[zoomedLayerIdx] && createPortal(
+      {zoomedLayerIdx !== null && activeLayerImages[zoomedLayerIdx] && createPortal(
         <div
           className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80"
           onClick={() => setZoomedLayerIdx(null)}
@@ -677,7 +780,9 @@ export default function ActionBar() {
               <span className="text-base font-medium text-white">
                 {t("action_layer_nth")}{zoomedLayerIdx + 1}{t("action_layer_unit")}
               </span>
-              <div className={`items-center gap-2 ${workspace.isCompact ? "grid grid-cols-[1fr_auto] gap-y-1" : "flex"}`}>
+              <div
+                className={`items-center gap-2 ${workspace.isCompact ? "grid grid-cols-[1fr_auto] gap-y-1" : "flex"}`}
+              >
                 <button
                   className="rounded-lg px-3 py-1 text-sm text-white/80 hover:bg-slate-200/15 disabled:opacity-30 dark:hover:bg-slate-700/30"
                   onClick={() => setZoomedLayerIdx(Math.max(0, zoomedLayerIdx - 1))}
@@ -685,11 +790,13 @@ export default function ActionBar() {
                 >
                   {t("action_layer_prev_arrow")} {t("action_layer_prev")}
                 </button>
-                <span className="text-sm text-white/60">{zoomedLayerIdx + 1} / {layerImages.length}</span>
+                <span className="text-sm text-white/60">
+                  {zoomedLayerIdx + 1} / {activeLayerImages.length}
+                </span>
                 <button
                   className="rounded-lg px-3 py-1 text-sm text-white/80 hover:bg-slate-200/15 disabled:opacity-30 dark:hover:bg-slate-700/30"
-                  onClick={() => setZoomedLayerIdx(Math.min(layerImages.length - 1, zoomedLayerIdx + 1))}
-                  disabled={zoomedLayerIdx === layerImages.length - 1}
+                  onClick={() => setZoomedLayerIdx(Math.min(activeLayerImages.length - 1, zoomedLayerIdx + 1))}
+                  disabled={zoomedLayerIdx === activeLayerImages.length - 1}
                 >
                   {t("action_layer_next")} {t("action_layer_next_arrow")}
                 </button>
@@ -703,7 +810,7 @@ export default function ActionBar() {
               </div>
             </div>
             <img
-              src={layerImages[zoomedLayerIdx].url}
+              src={activeLayerImages[zoomedLayerIdx].url}
               alt={`${t("action_layer_nth")}${zoomedLayerIdx + 1}${t("action_layer_unit")}`}
               className="max-h-[85vh] max-w-full rounded-lg object-contain"
               draggable={false}
@@ -726,4 +833,3 @@ export default function ActionBar() {
     </div>
   )
 }
-

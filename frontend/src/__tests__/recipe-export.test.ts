@@ -122,6 +122,33 @@ describe("recipe/exportRecipe", () => {
       expect(recipe.large_format.tile_height_mm).toBe(140);
     });
 
+    it("exports puzzle parameters", () => {
+      const state = makeState({
+        puzzleEnabled: true,
+        puzzleStyle: "irregular",
+        puzzleSizingMode: "grid",
+        puzzleRows: 4,
+        puzzleCols: 6,
+        targetPieceCount: 24,
+        connectorStyle: "easy_cut",
+        labelsEnabled: true,
+        engraveBackLabels: true,
+        irregularityStrength: 0.42,
+        minNeckWidthMm: 1.5,
+      });
+
+      const recipe = exportConverterRecipe(state, makeSettings(), "fp");
+      expect(recipe.puzzle.puzzle_enabled).toBe(true);
+      expect(recipe.puzzle.puzzle_style).toBe("irregular");
+      expect(recipe.puzzle.puzzle_sizing_mode).toBe("grid");
+      expect(recipe.puzzle.puzzle_rows).toBe(4);
+      expect(recipe.puzzle.puzzle_cols).toBe(6);
+      expect(recipe.puzzle.puzzle_seed).toBe(0);
+      expect(recipe.puzzle.connector_style).toBe("easy_cut");
+      expect(recipe.puzzle.labels_enabled).toBe(true);
+      expect(recipe.puzzle.engrave_back_labels).toBe(false);
+    });
+
     it("does NOT include UI-only state fields", () => {
       const state = makeState();
       const recipe = exportConverterRecipe(state, makeSettings(), "fp");

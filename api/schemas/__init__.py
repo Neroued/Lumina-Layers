@@ -24,6 +24,11 @@ from api.schemas.converter import (
     ConvertBatchRequest,
     ConvertGenerateRequest,
     ConvertPreviewRequest,
+    PuzzleConnectorStyle,
+    PuzzleGenerateRequest,
+    PuzzleLayoutPreviewRequest,
+    PuzzleSizingMode,
+    PuzzleStyle,
     ModelingMode,
     StructureMode,
 )
@@ -62,6 +67,8 @@ from api.schemas.responses import (
     ManualFixResponse,
     MergePreviewResponse,
     PreviewResponse,
+    PuzzleGenerateResponse,
+    PuzzleLayoutPreviewResponse,
 )
 
 __all__ = [
@@ -77,6 +84,11 @@ __all__ = [
     "ConvertBatchRequest",
     "ColorReplaceRequest",
     "ColorMergePreviewRequest",
+    "PuzzleStyle",
+    "PuzzleSizingMode",
+    "PuzzleConnectorStyle",
+    "PuzzleLayoutPreviewRequest",
+    "PuzzleGenerateRequest",
     # --- Extractor enums ---
     "CalibrationColorMode",
     "ExtractorPage",
@@ -112,6 +124,8 @@ __all__ = [
     "ColorReplaceResponse",
     "MergePreviewResponse",
     "GenerateResponse",
+    "PuzzleLayoutPreviewResponse",
+    "PuzzleGenerateResponse",
     "BatchItemResult",
     "BatchResponse",
     "LUTListResponse",

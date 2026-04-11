@@ -100,7 +100,7 @@ describe('ColorPreview2D hover inspector', () => {
     render(<ColorPreview2D />);
 
     const container = screen.getByTestId('color-preview-2d-container');
-    const image = screen.getByAltText('2D color preview');
+    const image = screen.getByAltText('converter_preview_2d_alt');
 
     Object.defineProperty(image, 'naturalWidth', { configurable: true, value: 100 });
     Object.defineProperty(image, 'naturalHeight', { configurable: true, value: 100 });
@@ -144,7 +144,7 @@ describe('ColorPreview2D hover inspector', () => {
     render(<ColorPreview2D showMagnifier={false} showLayerDetails={false} />);
 
     const container = screen.getByTestId('color-preview-2d-container');
-    const image = screen.getByAltText('2D color preview');
+    const image = screen.getByAltText('converter_preview_2d_alt');
 
     Object.defineProperty(image, 'naturalWidth', { configurable: true, value: 100 });
     Object.defineProperty(image, 'naturalHeight', { configurable: true, value: 100 });

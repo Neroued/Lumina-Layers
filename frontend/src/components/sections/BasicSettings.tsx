@@ -97,6 +97,7 @@ export default function BasicSettings() {
     batchMode,
     batchFiles,
     largeFormatEnabled,
+    puzzleEnabled,
     tileWidthMm,
     tileHeightMm,
     previewImageUrl,
@@ -118,6 +119,7 @@ export default function BasicSettings() {
     batchMode: s.batchMode,
     batchFiles: s.batchFiles,
     largeFormatEnabled: s.largeFormatEnabled,
+    puzzleEnabled: s.puzzleEnabled,
     tileWidthMm: s.tileWidthMm,
     tileHeightMm: s.tileHeightMm,
     previewImageUrl: s.previewImageUrl,
@@ -331,8 +333,15 @@ export default function BasicSettings() {
         label={t("basic_large_format")}
         checked={largeFormatEnabled}
         onChange={setLargeFormatEnabled}
+        disabled={puzzleEnabled}
         tooltip={t("basic_large_format_hint")}
       />
+
+      {puzzleEnabled && !largeFormatEnabled && (
+        <div className="-mt-2 px-1 text-xs text-slate-500 dark:text-slate-400">
+          {t("puzzle_large_format_disabled_hint")}
+        </div>
+      )}
 
       {largeFormatEnabled && (
         <div className="flex flex-col gap-3 rounded-lg border border-slate-200/60 bg-slate-100/50 p-3 dark:border-slate-700/40 dark:bg-slate-900/40">

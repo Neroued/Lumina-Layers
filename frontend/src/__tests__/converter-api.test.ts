@@ -3,12 +3,16 @@ import apiClient from "../api/client";
 import {
   convertPreview,
   convertGenerate,
+  convertGeneratePuzzle,
+  convertPuzzleLayoutPreview,
   fetchLutList,
   getFileUrl,
 } from "../api/converter";
 import {
   ColorMode,
   ModelingMode,
+  type PuzzleGenerateRequest,
+  type PuzzleLayoutPreviewRequest,
   StructureMode,
   type ConvertPreviewRequest,
   type ConvertGenerateRequest,
@@ -197,6 +201,115 @@ describe("convertGenerate", () => {
     await expect(convertGenerate("sess-2", generateParams)).rejects.toThrow(
       "Request failed with status code 500"
     );
+  });
+});
+
+describe("convertPuzzleLayoutPreview", () => {
+  it("sends session_id with puzzle preview params", async () => {
+    const params: PuzzleLayoutPreviewRequest = {
+      target_height_mm: 60,
+      puzzle_style: "regular",
+      sizing_mode: "grid",
+      piece_width_mm: 20,
+      piece_height_mm: 20,
+      rows: 2,
+      cols: 3,
+      target_piece_count: 6,
+      seed: 12,
+      connector_style: "classic",
+      labels_enabled: true,
+      engrave_back_labels: false,
+      irregularity_strength: 0.35,
+      min_neck_width_mm: 1.2,
+    };
+    const fakeResponse = {
+      status: "ok",
+      message: "Puzzle layout preview generated",
+      overlay_url: "/api/files/puzzle-overlay",
+      piece_count: 6,
+      grid_cols: 3,
+      grid_rows: 2,
+      derived_piece_width_mm: 20,
+      derived_piece_height_mm: 30,
+      warnings: [],
+    };
+    mockPost.mockResolvedValueOnce({ data: fakeResponse });
+
+    const result = await convertPuzzleLayoutPreview("sess-puzzle", params);
+
+    expect(mockPost).toHaveBeenCalledOnce();
+    const [url, body, config] = mockPost.mock.calls[0];
+    expect(url).toBe("/convert/puzzle-layout-preview");
+    expect(body).toEqual({ session_id: "sess-puzzle", params });
+    expect(config).toMatchObject({ timeout: 30_000 });
+    expect(result).toEqual(fakeResponse);
+  });
+});
+
+describe("convertGeneratePuzzle", () => {
+  it("sends puzzle generation params and receives a single 3MF payload", async () => {
+    const params: PuzzleGenerateRequest = {
+      target_height_mm: 60,
+      puzzle_style: "regular",
+      sizing_mode: "grid",
+      piece_width_mm: 20,
+      piece_height_mm: 20,
+      rows: 2,
+      cols: 3,
+      target_piece_count: 6,
+      seed: 12,
+      connector_style: "classic",
+      labels_enabled: true,
+      engrave_back_labels: false,
+      irregularity_strength: 0.35,
+      min_neck_width_mm: 1.2,
+      params: {
+        lut_name: "gen-lut",
+        target_width_mm: 100,
+        auto_bg: false,
+        bg_tol: 30,
+        color_mode: ColorMode.EIGHT_COLOR,
+        modeling_mode: ModelingMode.PIXEL,
+        quantize_colors: 64,
+        enable_cleanup: false,
+        spacer_thick: 1.2,
+        structure_mode: StructureMode.DOUBLE_SIDED,
+        separate_backing: true,
+        add_loop: false,
+        loop_width: 4,
+        loop_length: 8,
+        loop_hole: 2.5,
+        enable_relief: false,
+        heightmap_max_height: 5.0,
+        enable_outline: false,
+        outline_width: 2.0,
+        enable_cloisonne: false,
+        wire_width_mm: 0.4,
+        wire_height_mm: 0.4,
+        enable_coating: false,
+        coating_height_mm: 0.08,
+      },
+    };
+    const fakeResponse = {
+      status: "ok",
+      message: "Generated 6 puzzle pieces into a single 3MF",
+      download_url: "/api/files/puzzle-3mf",
+      threemf_disk_path: "E:/tmp/puzzle.3mf",
+      piece_count: 6,
+      grid_cols: 3,
+      grid_rows: 2,
+      warnings: [],
+    };
+    mockPost.mockResolvedValueOnce({ data: fakeResponse });
+
+    const result = await convertGeneratePuzzle("sess-puzzle", params);
+
+    expect(mockPost).toHaveBeenCalledOnce();
+    const [url, body, config] = mockPost.mock.calls[0];
+    expect(url).toBe("/convert/generate-puzzle");
+    expect(body).toEqual({ session_id: "sess-puzzle", params });
+    expect(config).toMatchObject({ timeout: 0 });
+    expect(result.threemf_disk_path).toBe("E:/tmp/puzzle.3mf");
   });
 });
 

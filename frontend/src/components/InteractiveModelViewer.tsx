@@ -17,6 +17,7 @@ import {
   summarizeMeshList,
   summarizeObjectTree,
 } from "../utils/threeDebug";
+import PuzzleOverlay3D from "./PuzzleOverlay3D";
 
 // ========== Exported pure utility functions (testable without Three.js) ==========
 
@@ -86,7 +87,10 @@ export interface InteractiveModelViewerProps {
   enableCloisonne?: boolean;   // 是否启用景泰蓝预览，默认 false
   wireWidthMm?: number;        // 金丝宽度 (mm)，默认 0.4
   wireHeightMm?: number;       // 金丝高度 (mm)，默认 0.1
+  puzzleOverlayEnabled?: boolean;
+  puzzleOverlayUrl?: string | null;
   onHoverSample?: (sample: ViewerHoverSample | null) => void;
+  hoverEnabled?: boolean;
 }
 
 export interface ViewerHoverSample {
@@ -118,6 +122,7 @@ interface ClickGestureState {
   pointerId: number;
   startClientX: number;
   startClientY: number;
+  startedOnColor: boolean;
   dragged: boolean;
 }
 
@@ -146,6 +151,9 @@ function InteractiveModelViewer({
   enableCloisonne = false,
   wireWidthMm = 0.4,
   wireHeightMm = 0.1,
+  puzzleOverlayEnabled = false,
+  puzzleOverlayUrl = null,
+  hoverEnabled = true,
 }: InteractiveModelViewerProps) {
   const { scene } = useGLTF(url);
   const groupRef = useRef<THREE.Group>(null);
@@ -160,6 +168,14 @@ function InteractiveModelViewer({
       useGLTF.clear(previousUrl);
     }
   }, [url]);
+
+  useEffect(() => {
+    return () => {
+      if (previousUrlRef.current) {
+        useGLTF.clear(previousUrlRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     debugThreeLog("InteractiveModelViewer.lifecycle", {
@@ -577,7 +593,7 @@ function InteractiveModelViewer({
     maybeFlushHoverPerfLog(false);
   }, [emitHoverSample, maybeFlushHoverPerfLog]);
 
-  const selectColorAtPointerPosition = useCallback(
+  const getColorHitAtPointerPosition = useCallback(
     (clientX: number, clientY: number) => {
       const canvas = gl.domElement;
       const rect = canvas.getBoundingClientRect();
@@ -587,20 +603,35 @@ function InteractiveModelViewer({
       raycasterRef.current.setFromCamera(pointerRef.current, camera);
       const intersects = raycasterRef.current.intersectObjects(colorMeshes, false);
       if (intersects.length === 0) {
-        return;
+        return null;
       }
 
       const hitMesh = intersects[0].object as THREE.Mesh;
       if (!hitMesh.name.startsWith("color_")) {
-        return;
+        return null;
+      }
+
+      return {
+        hitMesh,
+        previewPixel: mapWorldToPreviewPixel(intersects[0].point),
+      };
+    },
+    [gl, camera, colorMeshes, mapWorldToPreviewPixel],
+  );
+
+  const selectColorAtPointerPosition = useCallback(
+    (clientX: number, clientY: number) => {
+      const hit = getColorHitAtPointerPosition(clientX, clientY);
+      if (!hit) {
+        return false;
       }
 
       colorHitRef.current = true;
-      const previewPixel = mapWorldToPreviewPixel(intersects[0].point);
+      const { hitMesh, previewPixel } = hit;
 
       if (selectionMode === "current" || selectionMode === "region" || selectionMode === "multi-select") {
         if (!previewPixel) {
-          return;
+          return false;
         }
 
         if (selectionMode === "multi-select") {
@@ -608,7 +639,7 @@ function InteractiveModelViewer({
         } else {
           detectRegion(previewPixel.x, previewPixel.y);
         }
-        return;
+        return true;
       }
 
       const hex = extractHexFromMeshName(hitMesh.name);
@@ -619,18 +650,16 @@ function InteractiveModelViewer({
       } else {
         onColorClick(hex);
       }
+      return true;
     },
     [
-      gl,
-      camera,
-      colorMeshes,
+      getColorHitAtPointerPosition,
       selectedColors,
       toggleColorInSelection,
       onColorClick,
       selectionMode,
       detectRegion,
       detectAndAccumulateRegion,
-      mapWorldToPreviewPixel,
     ],
   );
 
@@ -641,66 +670,20 @@ function InteractiveModelViewer({
       }
       if (event.button !== 0) return; // Only left click
       colorHitRef.current = false;
+      const startHit = getColorHitAtPointerPosition(event.clientX, event.clientY);
+      colorHitRef.current = startHit !== null;
       clickGestureRef.current = {
         pointerId: event.pointerId,
         startClientX: event.clientX,
         startClientY: event.clientY,
+        startedOnColor: startHit !== null,
         dragged: false,
       };
-      return;
-
-      const canvas = gl.domElement;
-      const rect = canvas.getBoundingClientRect();
-      pointerRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      pointerRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-      raycasterRef.current.setFromCamera(pointerRef.current, camera);
-      const intersects = raycasterRef.current.intersectObjects(colorMeshes, false);
-
-      if (intersects.length > 0) {
-        const hitMesh = intersects[0].object as THREE.Mesh;
-        if (hitMesh.name.startsWith("color_")) {
-          colorHitRef.current = true;
-          const previewPixel = mapWorldToPreviewPixel(intersects[0].point);
-
-          if (selectionMode === "current" || selectionMode === "region" || selectionMode === "multi-select") {
-            if (previewPixel) {
-              if (selectionMode === "multi-select") {
-                detectAndAccumulateRegion(previewPixel.x, previewPixel.y);
-              } else {
-                detectRegion(previewPixel.x, previewPixel.y);
-              }
-            }
-          } else {
-            // 全选模式: 3D 点击 → 切换颜色多选
-            const hex = extractHexFromMeshName(hitMesh.name);
-            toggleColorInSelection(hex);
-            // Keep selectedColor in sync for detail display & recommendations
-            if (selectedColors.has(hex)) {
-              // Was selected, now toggled off
-              const remaining = Array.from(selectedColors).filter((c) => c !== hex);
-              onColorClick(remaining.length > 0 ? remaining[remaining.length - 1] : null);
-            } else {
-              // Newly selected
-              onColorClick(hex);
-            }
-          }
-        }
-      }
     },
     [
       onHoverSample,
       cancelHoverSampling,
-      gl,
-      camera,
-      colorMeshes,
-      selectedColors,
-      toggleColorInSelection,
-      onColorClick,
-      selectionMode,
-      detectRegion,
-      detectAndAccumulateRegion,
-      mapWorldToPreviewPixel,
+      getColorHitAtPointerPosition,
     ],
   );
 
@@ -724,16 +707,20 @@ function InteractiveModelViewer({
         CLICK_DRAG_THRESHOLD_PX,
       );
       if (!isClick) {
+        colorHitRef.current = false;
         return;
       }
 
-      selectColorAtPointerPosition(event.clientX, event.clientY);
+      if (gesture.startedOnColor) {
+        colorHitRef.current = true;
+      }
+      selectColorAtPointerPosition(gesture.startClientX, gesture.startClientY);
     },
     [selectColorAtPointerPosition],
   );
 
   const processHoverPointer = useCallback(() => {
-    if (!onHoverSample) return;
+    if (!onHoverSample || !hoverEnabled) return;
     const processStart = performance.now();
     const stats = hoverPerfStatsRef.current;
     stats.processCount += 1;
@@ -804,7 +791,7 @@ function InteractiveModelViewer({
     stats.totalProcessMs += totalMs;
     stats.maxProcessMs = Math.max(stats.maxProcessMs, totalMs);
     maybeFlushHoverPerfLog(totalMs > 8);
-  }, [gl, camera, colorMeshes, mapWorldToPreviewPixel, onHoverSample, emitHoverSample, maybeFlushHoverPerfLog]);
+  }, [gl, camera, colorMeshes, mapWorldToPreviewPixel, onHoverSample, hoverEnabled, emitHoverSample, maybeFlushHoverPerfLog]);
 
   const handlePointerMove = useCallback(
     (event: PointerEvent) => {
@@ -817,9 +804,12 @@ function InteractiveModelViewer({
           event.clientY,
           CLICK_DRAG_THRESHOLD_PX,
         );
+        if (gesture.dragged) {
+          colorHitRef.current = false;
+        }
       }
 
-      if (!onHoverSample) return;
+      if (!onHoverSample || !hoverEnabled) return;
       hoverPerfStatsRef.current.pointerMoveCount += 1;
 
       if (event.buttons !== 0) {
@@ -838,24 +828,39 @@ function InteractiveModelViewer({
         processHoverPointer();
       });
     },
-    [onHoverSample, cancelHoverSampling, processHoverPointer],
+    [onHoverSample, hoverEnabled, cancelHoverSampling, processHoverPointer],
   );
 
   const handleWheel = useCallback(() => {
     hoverPerfStatsRef.current.wheelCount += 1;
     clickGestureRef.current = null;
+    colorHitRef.current = false;
     cancelHoverSampling();
   }, [cancelHoverSampling]);
 
   const handlePointerLeave = useCallback(() => {
     clickGestureRef.current = null;
+    colorHitRef.current = false;
     cancelHoverSampling();
   }, [cancelHoverSampling]);
 
   const handlePointerCancel = useCallback(() => {
     clickGestureRef.current = null;
+    colorHitRef.current = false;
     cancelHoverSampling();
   }, [cancelHoverSampling]);
+
+  useEffect(() => {
+    if (hoverEnabled) {
+      return;
+    }
+    hoverPointerRef.current = null;
+    if (hoverRafRef.current !== null) {
+      window.cancelAnimationFrame(hoverRafRef.current);
+      hoverRafRef.current = null;
+    }
+    emitHoverSample(null);
+  }, [hoverEnabled, emitHoverSample]);
 
   useEffect(() => {
     return () => {
@@ -1163,6 +1168,17 @@ function InteractiveModelViewer({
         colorMeshes={colorMeshes}
         backingPlateMesh={backingMesh}
         spacerThick={spacerThick}
+      />
+      <PuzzleOverlay3D
+        enabled={puzzleOverlayEnabled}
+        overlayUrl={puzzleOverlayUrl}
+        modelBounds={modelBounds}
+        spacerThick={spacerThick}
+        enableRelief={enableRelief}
+        colorHeightMap={colorHeightMap}
+        enableOutline={enableOutline}
+        enableCloisonne={enableCloisonne}
+        wireHeightMm={wireHeightMm}
       />
     </group>
   );

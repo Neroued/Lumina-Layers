@@ -95,6 +95,15 @@ describe("recipe round-trip properties", () => {
       largeFormatEnabled: fc.boolean(),
       tileWidthMm: fc.integer({ min: 50, max: 500 }),
       tileHeightMm: fc.integer({ min: 50, max: 500 }),
+      puzzleEnabled: fc.boolean(),
+      puzzleStyle: fc.constantFrom("regular", "irregular" as const),
+      puzzleSizingMode: fc.constantFrom("piece_size", "grid", "piece_count" as const),
+      puzzleRows: fc.integer({ min: 1, max: 20 }),
+      puzzleCols: fc.integer({ min: 1, max: 20 }),
+      targetPieceCount: fc.integer({ min: 2, max: 100 }),
+      connectorStyle: fc.constantFrom("classic", "easy_cut" as const),
+      labelsEnabled: fc.boolean(),
+      engraveBackLabels: fc.boolean(),
     });
 
     const localLuts: LutInfo[] = [
@@ -108,6 +117,7 @@ describe("recipe round-trip properties", () => {
       fc.property(arbState, (overrides) => {
         const state = { ...DEFAULT_STATE, ...overrides } as ConverterState;
         const recipe = exportConverterRecipe(state, DEFAULT_SETTINGS, fpForLut[overrides.lut_name]);
+        expect(recipe.puzzle.engrave_back_labels).toBe(false);
 
         // Build a minimal LuminaRecipe wrapper for restoreConverterRecipe
         const fullRecipe = {
@@ -137,6 +147,12 @@ describe("recipe round-trip properties", () => {
         };
 
         const { state: restored } = restoreConverterRecipe(fullRecipe, localLuts, localFP);
+        const expectedLargeFormatEnabled = overrides.puzzleEnabled
+          ? false
+          : overrides.largeFormatEnabled;
+        const expectedAddLoop = overrides.puzzleEnabled
+          ? false
+          : overrides.add_loop;
 
         // Key parameters must survive round-trip
         expect(restored.lut_name).toBe(overrides.lut_name);
@@ -148,15 +164,24 @@ describe("recipe round-trip properties", () => {
         expect(restored.enable_cleanup).toBe(overrides.enable_cleanup);
         expect(restored.hue_enable).toBe(overrides.hue_enable);
         expect(restored.chroma_gate).toBe(overrides.chroma_gate);
-        expect(restored.add_loop).toBe(overrides.add_loop);
+        expect(restored.add_loop).toBe(expectedAddLoop);
         expect(restored.loop_angle).toBe(overrides.loop_angle);
         expect(restored.enable_relief).toBe(overrides.enable_relief);
         expect(restored.enable_outline).toBe(overrides.enable_outline);
         expect(restored.enable_cloisonne).toBe(overrides.enable_cloisonne);
         expect(restored.enable_coating).toBe(overrides.enable_coating);
-        expect(restored.largeFormatEnabled).toBe(overrides.largeFormatEnabled);
+        expect(restored.largeFormatEnabled).toBe(expectedLargeFormatEnabled);
         expect(restored.tileWidthMm).toBe(overrides.tileWidthMm);
         expect(restored.tileHeightMm).toBe(overrides.tileHeightMm);
+        expect(restored.puzzleEnabled).toBe(overrides.puzzleEnabled);
+        expect(restored.puzzleStyle).toBe(overrides.puzzleStyle);
+        expect(restored.puzzleSizingMode).toBe(overrides.puzzleSizingMode);
+        expect(restored.puzzleRows).toBe(overrides.puzzleRows);
+        expect(restored.puzzleCols).toBe(overrides.puzzleCols);
+        expect(restored.targetPieceCount).toBe(overrides.targetPieceCount);
+        expect(restored.connectorStyle).toBe(overrides.connectorStyle);
+        expect(restored.labelsEnabled).toBe(overrides.labelsEnabled);
+        expect(restored.engraveBackLabels).toBe(false);
       }),
       { numRuns: 50 },
     );

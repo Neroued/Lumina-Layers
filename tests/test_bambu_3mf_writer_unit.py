@@ -60,6 +60,39 @@ def _make_anycubic_writer(tmp_path) -> BambuStudio3MFWriter:
 
 
 class TestAnycubicWriterMetadata:
+    def test_shared_material_palette_deduplicates_project_filaments(self) -> None:
+        writer = BambuStudio3MFWriter(
+            "shared-materials.3mf",
+            settings={},
+            color_mode="8-Color",
+            printer_id="bambu-h2d",
+            slicer="BambuStudio",
+        )
+
+        first = trimesh.creation.box(extents=[1, 1, 1])
+        first.metadata["bambu_material_name"] = "Slot 1 (White)"
+        writer.add_mesh(first, "A1__Slot 1 (White)", (255, 255, 255))
+
+        second = trimesh.creation.box(extents=[1, 1, 1])
+        second.apply_translation([2, 0, 0])
+        second.metadata["bambu_material_name"] = "Slot 1 (White)"
+        writer.add_mesh(second, "A2__Slot 1 (White)", (255, 255, 255))
+
+        third = trimesh.creation.box(extents=[1, 1, 1])
+        third.apply_translation([4, 0, 0])
+        third.metadata["bambu_material_name"] = "Slot 2 (Black)"
+        writer.add_mesh(third, "A1__Slot 2 (Black)", (0, 0, 0))
+
+        settings = json.loads(writer._build_project_settings_bytes().decode("utf-8"))
+        assert settings["filament_colour"] == ["#FFFFFF", "#000000"]
+
+        root = ET.fromstring(writer._build_model_settings_bytes([1, 2, 3], 4, [0, 0, 1]))
+        part_extruders = [
+            _metadata_values(part)["extruder"]
+            for part in root.findall("./object/part")
+        ]
+        assert part_extruders == ["1", "1", "2"]
+
     def test_anycubic_model_settings_match_sample_shape(self, tmp_path) -> None:
         writer = _make_anycubic_writer(tmp_path)
 
@@ -106,6 +139,56 @@ class TestAnycubicWriterMetadata:
         assert settings["filament_colour"] == ["#FF0000", "#00FF00"]
         assert all(value != "Bambu Lab" for value in settings["filament_vendor"])
         assert all(value != "GFA00" for value in settings["filament_ids"])
+
+    def test_export_scene_uses_global_slot_number_for_sparse_slots(self, monkeypatch) -> None:
+        captured_colors: list[tuple[str, tuple[int, int, int]]] = []
+
+        class _FakeWriter:
+            def __init__(
+                self,
+                output_path: str,
+                settings=None,
+                color_mode: str = "4-Color",
+                printer_id: str = "bambu-h2d",
+                slicer: str = "BambuStudio",
+                watermark: str = "LuminaStudio",
+            ) -> None:
+                self.output_path = output_path
+
+            def add_mesh(self, mesh, name: str, color_rgb: tuple[int, int, int]) -> None:
+                captured_colors.append((name, color_rgb))
+
+            def export(self) -> str:
+                return self.output_path
+
+        monkeypatch.setattr(writer_module, "BambuStudio3MFWriter", _FakeWriter)
+
+        scene = trimesh.Scene()
+        scene.add_geometry(trimesh.creation.box(extents=[1, 1, 1]), geom_name="Slot 1 (White)")
+        shifted = trimesh.creation.box(extents=[1, 1, 1])
+        shifted.apply_translation([2, 0, 0])
+        scene.add_geometry(shifted, geom_name="Slot 3 (Green)")
+
+        out_path = writer_module.export_scene_with_bambu_metadata(
+            scene=scene,
+            output_path="sparse-slots.3mf",
+            slot_names=["Slot 1 (White)", "Slot 3 (Green)"],
+            preview_colors={
+                0: (255, 255, 255, 255),
+                1: (0, 0, 0, 255),
+                2: (0, 174, 66, 255),
+            },
+            settings={},
+            color_mode="8-Color",
+            printer_id="bambu-h2d",
+            slicer="BambuStudio",
+        )
+
+        assert out_path == "sparse-slots.3mf"
+        assert captured_colors == [
+            ("Slot 1 (White)", (255, 255, 255)),
+            ("Slot 3 (Green)", (0, 174, 66)),
+        ]
 
     def test_anycubic_slice_info_and_custom_parts_use_acnext_layout(
         self,

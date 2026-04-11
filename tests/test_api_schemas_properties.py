@@ -253,7 +253,7 @@ def test_schema_serialization_round_trip(instance: BaseModel) -> None:
 
 # ===========================================================================
 # Property 2: Valid Data Passes Validation
-# Feature: fastapi-backend-scaffold, Property 2: 鏈夋晥鏁版嵁楠岃瘉閫氳繃
+# Feature: fastapi-backend-scaffold, Property 2: 有效数据验证通过
 # ===========================================================================
 
 

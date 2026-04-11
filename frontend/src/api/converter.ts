@@ -6,6 +6,10 @@ import type {
   GenerateResponse,
   LargeFormatGenerateRequest,
   LargeFormatGenerateResponse,
+  PuzzleGenerateRequest,
+  PuzzleGenerateResponse,
+  PuzzleLayoutPreviewRequest,
+  PuzzleLayoutPreviewResponse,
   LutListResponse,
   BedSizeListResponse,
   HeightmapUploadResponse,
@@ -62,6 +66,32 @@ export async function convertGenerateLargeFormat(
 ): Promise<LargeFormatGenerateResponse> {
   const response = await apiClient.post<LargeFormatGenerateResponse>(
     "/convert/generate-large-format",
+    { session_id: sessionId, params },
+    { timeout: 0 },
+  );
+  return response.data;
+}
+
+/** 拼图模式：生成叠线预览覆盖图 */
+export async function convertPuzzleLayoutPreview(
+  sessionId: string,
+  params: PuzzleLayoutPreviewRequest,
+): Promise<PuzzleLayoutPreviewResponse> {
+  const response = await apiClient.post<PuzzleLayoutPreviewResponse>(
+    "/convert/puzzle-layout-preview",
+    { session_id: sessionId, params },
+    { timeout: 30_000 },
+  );
+  return response.data;
+}
+
+/** 拼图模式：逐块生成并导出单个 3MF */
+export async function convertGeneratePuzzle(
+  sessionId: string,
+  params: PuzzleGenerateRequest,
+): Promise<PuzzleGenerateResponse> {
+  const response = await apiClient.post<PuzzleGenerateResponse>(
+    "/convert/generate-puzzle",
     { session_id: sessionId, params },
     { timeout: 0 },
   );

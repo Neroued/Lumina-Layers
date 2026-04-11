@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import apiClient from "./api/client";
 import type { HealthResponse } from "./api/types";
 import { useAutoPreview } from "./hooks/useAutoPreview";
+import { usePuzzleLayoutPreview } from "./hooks/usePuzzleLayoutPreview";
 import { useWorkspaceMode } from "./hooks/useWorkspaceMode";
 import Scene3D from "./components/Scene3D";
 import ExtractorCanvas from "./components/ExtractorCanvas";
@@ -180,6 +181,7 @@ function WidgetToggles() {
 function AppContent() {
   const { t } = useI18n();
   useAutoPreview();
+  usePuzzleLayoutPreview();
   const workspace = useWorkspaceMode();
 
   const [connected, setConnected] = useState<boolean | null>(null);

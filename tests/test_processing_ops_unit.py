@@ -183,6 +183,25 @@ class TestKmeansQuantizer:
         assert result.shape == (1, 1, 3)
         assert result.dtype == np.uint8
 
+    def test_n_colors_larger_than_pixel_count_is_clamped(self):
+        """Requested colors above pixel count should not crash OpenCV kmeans."""
+        from core.pipeline.processing_ops.kmeans_quantizer import quantize_colors
+
+        rgb = np.array(
+            [
+                [[255, 0, 0], [0, 255, 0]],
+                [[0, 0, 255], [255, 255, 0]],
+            ],
+            dtype=np.uint8,
+        )
+
+        result = quantize_colors(rgb, n_colors=48)
+
+        assert result.shape == rgb.shape
+        assert result.dtype == np.uint8
+        unique = np.unique(result.reshape(-1, 3), axis=0)
+        assert len(unique) <= rgb.shape[0] * rgb.shape[1]
+
     def test_all_black_image(self):
         """全黑图像量化后仍为全黑。"""
         from core.pipeline.processing_ops.kmeans_quantizer import quantize_colors
@@ -295,3 +314,17 @@ class TestImageScaler:
             modeling_mode=ModelingMode.HIGH_FIDELITY,
         )
         assert target_w == target_h
+
+    def test_high_fidelity_rounds_float_epsilon_to_expected_pixel_width(self):
+        """Float epsilon in physical width must not shrink the target by one pixel."""
+        from core.pipeline.processing_ops.image_scaler import calculate_target_dimensions
+
+        target_w, target_h, _ = calculate_target_dimensions(
+            img_width=78,
+            img_height=56,
+            target_width_mm=7.799999999999997,
+            modeling_mode=ModelingMode.HIGH_FIDELITY,
+        )
+
+        assert target_w == 78
+        assert target_h == 56
