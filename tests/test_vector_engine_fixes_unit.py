@@ -872,8 +872,6 @@ class TestSameColorStrokeCompensation:
         assert len(base_shapes) == 1
         assert len(stroked_shapes) == 1
         assert stroked_shapes[0]["poly"].area > base_shapes[0]["poly"].area
-
-
 # ---------------------------------------------------------------------------
 # Fix 9: Merged LUT palette override in vector pipeline
 # ---------------------------------------------------------------------------
