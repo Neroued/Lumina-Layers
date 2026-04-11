@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   extractHexFromMeshName,
+  isClickWithoutDrag,
   toggleColorSelection,
 } from "../components/InteractiveModelViewer";
 
@@ -43,5 +44,19 @@ describe("toggleColorSelection", () => {
 
   it("returns clicked hex when selected is different", () => {
     expect(toggleColorSelection("111111", "222222")).toBe("222222");
+  });
+});
+
+describe("isClickWithoutDrag", () => {
+  it("returns true when pointer movement stays within the threshold", () => {
+    expect(isClickWithoutDrag(10, 10, 12, 13, 4)).toBe(true);
+  });
+
+  it("returns true when pointer movement is exactly on the threshold", () => {
+    expect(isClickWithoutDrag(0, 0, 3, 4, 5)).toBe(true);
+  });
+
+  it("returns false when pointer movement exceeds the threshold", () => {
+    expect(isClickWithoutDrag(0, 0, 4, 4, 5)).toBe(false);
   });
 });

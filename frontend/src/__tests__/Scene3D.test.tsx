@@ -45,17 +45,52 @@ vi.mock("@react-three/drei", () => ({
 
 // Override the global Canvas mock to capture onPointerMissed
 let capturedCanvasProps: Record<string, unknown> = {};
+function createMockGl() {
+  const domElement = document.createElement("canvas");
+  domElement.width = 800;
+  domElement.height = 600;
+  return {
+    domElement,
+    setClearColor: vi.fn(),
+    getPixelRatio: vi.fn(() => 1),
+    getContextAttributes: vi.fn(() => ({ preserveDrawingBuffer: true })),
+    info: {
+      memory: {
+        geometries: 0,
+        textures: 0,
+      },
+      programs: [],
+      render: {
+        calls: 0,
+        triangles: 0,
+        lines: 0,
+        points: 0,
+        frame: 0,
+      },
+    },
+  };
+}
+
 vi.mock("@react-three/fiber", () => ({
   Canvas: (props: Record<string, unknown> & { children?: React.ReactNode }) => {
     capturedCanvasProps = props;
     return <div data-testid="mock-canvas">{props.children}</div>;
   },
-  useThree: () => ({
-    gl: {
-      domElement: document.createElement("canvas"),
-      setClearColor: vi.fn(),
-    },
-  }),
+  useThree: (selector?: (state: {
+    gl: ReturnType<typeof createMockGl>;
+    scene: { children: [] };
+    camera: { position: { x: number; y: number; z: number } };
+    controls: null;
+  }) => unknown) => {
+    const state = {
+      gl: createMockGl(),
+      scene: { children: [] },
+      camera: { position: { x: 0, y: 0, z: 0 } },
+      controls: null,
+    };
+    return selector ? selector(state) : state;
+  },
+  useFrame: vi.fn(),
 }));
 
 // Must import Scene3D after mocks are set up
@@ -188,6 +223,7 @@ describe("Scene3D", () => {
         | undefined;
 
       expect(hoverHandler).toBeTypeOf("function");
+      expect(screen.queryByTestId("viewer-hover-inspector")).not.toBeInTheDocument();
 
       act(() => {
         hoverHandler?.({
@@ -198,8 +234,6 @@ describe("Scene3D", () => {
           hitColorHex: "ff0000",
         });
       });
-
-      expect(screen.queryByTestId("viewer-hover-inspector")).not.toBeInTheDocument();
 
       act(() => {
         vi.advanceTimersByTime(220);
@@ -214,7 +248,6 @@ describe("Scene3D", () => {
       });
 
       expect(screen.queryByTestId("viewer-hover-inspector")).not.toBeInTheDocument();
-
       vi.useRealTimers();
     });
   });

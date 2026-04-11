@@ -1,6 +1,7 @@
 import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
+import { debugThreeLog, getThreePerfDebugConfig } from "../utils/threeDebug";
 
 // ========== Constants ==========
 
@@ -519,8 +520,13 @@ export default function OutlineFrame3D({
 }: OutlineFrame3DProps) {
   const meshRef = useRef<THREE.Mesh>(null);
   const tmpColor = useRef(new THREE.Color());
+  const animationFrameCountRef = useRef(0);
+  const animationTotalMsRef = useRef(0);
+  const animationMaxMsRef = useRef(0);
+  const animationLastLogAtRef = useRef(performance.now());
 
   const geometry = useMemo(() => {
+    const buildStart = performance.now();
     if (!enabled || !backingPlateMesh || outlineWidth <= 0 || modelMaxZ <= 0) {
       return null;
     }
@@ -598,6 +604,22 @@ export default function OutlineFrame3D({
     }
     geo.userData.hueParams = hueParams;
 
+    const triangleCount = geo.getIndex()
+      ? Math.floor(geo.getIndex()!.count / 3)
+      : Math.floor(posAttr.count / 3);
+    debugThreeLog("OutlineFrame3D.build", {
+      build_ms: +(performance.now() - buildStart).toFixed(2),
+      outline_width_mm: outlineWidth,
+      outline_width_px: outlineWidthPx,
+      grid_w: origW,
+      grid_h: origH,
+      padded_w: paddedW,
+      padded_h: paddedH,
+      rect_count: rects.length,
+      vertex_count: posAttr.count,
+      triangle_count: triangleCount,
+    });
+
     return geo;
   }, [enabled, backingPlateMesh, outlineWidth, modelMaxZ]);
 
@@ -606,6 +628,7 @@ export default function OutlineFrame3D({
   const birthTime = useRef(0);
   useFrame(() => {
     if (!meshRef.current || !geometry) return;
+    const animationStart = performance.now();
     const colorAttr = geometry.getAttribute("color") as THREE.BufferAttribute;
     const hueParams = geometry.userData.hueParams as Float32Array | undefined;
     if (!colorAttr || !hueParams) return;
@@ -634,6 +657,34 @@ export default function OutlineFrame3D({
       arr[i * 3 + 2] = c.b;
     }
     colorAttr.needsUpdate = true;
+
+    const { enabled: debugEnabled, intervalMs } = getThreePerfDebugConfig();
+    if (!debugEnabled) {
+      return;
+    }
+    const animationMs = performance.now() - animationStart;
+    animationFrameCountRef.current += 1;
+    animationTotalMsRef.current += animationMs;
+    animationMaxMsRef.current = Math.max(animationMaxMsRef.current, animationMs);
+    const nowForLog = performance.now();
+    const elapsed = nowForLog - animationLastLogAtRef.current;
+    if (elapsed < intervalMs) {
+      return;
+    }
+    debugThreeLog("OutlineFrame3D.animation", {
+      elapsed_ms: +elapsed.toFixed(1),
+      frame_count: animationFrameCountRef.current,
+      avg_update_ms:
+        animationFrameCountRef.current > 0
+          ? +(animationTotalMsRef.current / animationFrameCountRef.current).toFixed(3)
+          : 0,
+      max_update_ms: +animationMaxMsRef.current.toFixed(3),
+      vertex_count: hueParams.length,
+    });
+    animationFrameCountRef.current = 0;
+    animationTotalMsRef.current = 0;
+    animationMaxMsRef.current = 0;
+    animationLastLogAtRef.current = nowForLog;
   });
 
   if (!geometry) return null;

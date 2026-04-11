@@ -2,6 +2,7 @@ import { useConverterStore } from "../../stores/converter";
 import type { PaletteEntry } from "../../api/types";
 import Slider from "../ui/Slider";
 import Button from "../ui/Button";
+import Switch from "../ui/Switch";
 import { useI18n } from "../../i18n/context";
 import { cx, workstationInsetCardClass, workstationPanelCardClass } from "../ui/panelPrimitives";
 
@@ -146,7 +147,19 @@ function FreeColorSummary({ freeColors }: { freeColors: Set<string> }) {
 
 // ========== PalettePanel ==========
 
-export default function PalettePanel() {
+interface PalettePanelProps {
+  showHoverMagnifier?: boolean;
+  showHoverLayerDetails?: boolean;
+  onToggleHoverMagnifier?: (checked: boolean) => void;
+  onToggleHoverLayerDetails?: (checked: boolean) => void;
+}
+
+export default function PalettePanel({
+  showHoverMagnifier = true,
+  showHoverLayerDetails = true,
+  onToggleHoverMagnifier,
+  onToggleHoverLayerDetails,
+}: PalettePanelProps) {
   const { t } = useI18n();
   const palette = useConverterStore((s) => s.palette);
   const selectedColor = useConverterStore((s) => s.selectedColor);
@@ -210,15 +223,15 @@ export default function PalettePanel() {
   };
 
   return (
-    <div className={workstationPanelCardClass}>
+    <div className={cx(workstationPanelCardClass, "flex h-full min-h-0 flex-col")}>
       {palette.length === 0 ? (
         <p className="py-4 text-sm text-slate-500 dark:text-slate-400">
           {t("palette_no_data")}
         </p>
       ) : (
-        <div className="flex h-full flex-col gap-1.5">
+        <div className="flex min-h-0 flex-1 flex-col gap-1.5">
           {/* Toolbar: selected color detail + action buttons + mode buttons (single row) */}
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="shrink-0 flex flex-wrap items-center gap-2">
             {/* Inline selected color swatches */}
             {selectedColor && (() => {
               const selectedEntry = palette.find(
@@ -300,10 +313,34 @@ export default function PalettePanel() {
               onClick={clearFreeColors}
               disabled={free_color_set.size === 0}
             />
+            <div className={cx(workstationInsetCardClass, "w-full flex flex-wrap items-center gap-2 px-2 py-1.5")}>
+              <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                {t("viewer_hover_toggle_group")}
+              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  {t("viewer_hover_toggle_magnifier")}
+                </span>
+                <Switch
+                  checked={showHoverMagnifier}
+                  onChange={(checked) => onToggleHoverMagnifier?.(checked)}
+                />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  {t("viewer_hover_toggle_layers")}
+                </span>
+                <Switch
+                  checked={showHoverLayerDetails}
+                  onChange={(checked) => onToggleHoverLayerDetails?.(checked)}
+                />
+              </div>
+            </div>
           </div>
 
-          {/* Select-all multi-color indicator */}
-          {selectionMode === 'select-all' && selectedColors.size > 0 && (
+          <div className="shrink-0 flex flex-col gap-1.5">
+            {/* Select-all multi-color indicator */}
+            {selectionMode === 'select-all' && selectedColors.size > 0 && (
             <div className={cx(workstationInsetCardClass, "flex flex-wrap items-center gap-2 px-3 py-2.5")}>
               <span className="text-[clamp(0.55rem,0.75vw,0.625rem)] font-medium text-amber-500 dark:text-amber-400">
                 {t("palette_multi_select_count").replace("{count}", String(selectedColors.size))}
@@ -321,8 +358,8 @@ export default function PalettePanel() {
             </div>
           )}
 
-          {/* Multi-select region indicator */}
-          {selectionMode === 'multi-select' && selectedRegions.length > 0 && (
+            {/* Multi-select region indicator */}
+            {selectionMode === 'multi-select' && selectedRegions.length > 0 && (
             <div className={cx(workstationInsetCardClass, "flex flex-wrap items-center gap-2 px-3 py-2.5")}>
               <span className="text-[clamp(0.55rem,0.75vw,0.625rem)] font-medium text-amber-500 dark:text-amber-400">
                 {t("palette_multi_select_region_count").replace("{count}", String(selectedRegions.length))}
@@ -343,8 +380,9 @@ export default function PalettePanel() {
             </div>
           )}
 
-          {/* Free color summary */}
-          <FreeColorSummary freeColors={free_color_set} />
+            {/* Free color summary */}
+            <FreeColorSummary freeColors={free_color_set} />
+          </div>
 
           {/* Palette items */}
           <div

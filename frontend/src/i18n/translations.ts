@@ -1351,6 +1351,18 @@ export const translations: Record<string, Record<"zh" | "en", string>> = {
     zh: "关闭",
     en: "Close",
   },
+  viewer_hover_toggle_group: {
+    zh: "悬停信息",
+    en: "Hover Info",
+  },
+  viewer_hover_toggle_magnifier: {
+    zh: "放大镜",
+    en: "Magnifier",
+  },
+  viewer_hover_toggle_layers: {
+    zh: "查看分层",
+    en: "Layers",
+  },
   color_2d_tab_preview: {
     zh: "2D 预览",
     en: "2D Preview",
