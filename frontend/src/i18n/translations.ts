@@ -803,6 +803,10 @@ export const translations: Record<string, Record<"zh" | "en", string>> = {
     zh: "✅ 已应用: {merged} 种颜色被合并",
     en: "✅ Applied: {merged} colors merged",
   },
+  converter_preview_2d_alt: {
+    zh: "2D 颜色预览",
+    en: "2D color preview",
+  },
   merge_status_reverted: {
     zh: "↩️ 已恢复到原始颜色",
     en: "↩️ Reverted to original colors",
@@ -1197,6 +1201,10 @@ export const translations: Record<string, Record<"zh" | "en", string>> = {
     zh: "操作栏",
     en: "Actions",
   },
+  "widget.puzzleSettings": {
+    zh: "拼图设置",
+    en: "Puzzle Settings",
+  },
   "widget.colorWorkstation": {
     zh: "颜色工作站",
     en: "Color Workstation",
@@ -1207,6 +1215,134 @@ export const translations: Record<string, Record<"zh" | "en", string>> = {
   },
 
   // ==================== 2D Color Overlay ====================
+  puzzle_enable: {
+    zh: "启用拼图模式",
+    en: "Enable Puzzle Mode",
+  },
+  puzzle_batch_disabled_hint: {
+    zh: "批量模式下暂不支持拼图模式。",
+    en: "Puzzle mode is unavailable while batch mode is active.",
+  },
+  puzzle_style: {
+    zh: "拼图风格",
+    en: "Puzzle Style",
+  },
+  puzzle_style_regular: {
+    zh: "规则拼图",
+    en: "Regular Puzzle",
+  },
+  puzzle_style_irregular: {
+    zh: "不规则拼图",
+    en: "Irregular Puzzle",
+  },
+  puzzle_sizing_mode: {
+    zh: "尺寸控制方式",
+    en: "Sizing Mode",
+  },
+  puzzle_sizing_piece_size: {
+    zh: "按块尺寸",
+    en: "By Piece Size",
+  },
+  puzzle_sizing_grid: {
+    zh: "按行列",
+    en: "By Grid",
+  },
+  puzzle_sizing_piece_count: {
+    zh: "按总片数",
+    en: "By Piece Count",
+  },
+  puzzle_piece_width: {
+    zh: "平均块宽",
+    en: "Average Piece Width",
+  },
+  puzzle_piece_height: {
+    zh: "平均块高",
+    en: "Average Piece Height",
+  },
+  puzzle_rows: {
+    zh: "行数",
+    en: "Rows",
+  },
+  puzzle_cols: {
+    zh: "列数",
+    en: "Columns",
+  },
+  puzzle_target_piece_count: {
+    zh: "目标片数",
+    en: "Target Piece Count",
+  },
+  puzzle_connector_style: {
+    zh: "连接器风格",
+    en: "Connector Style",
+  },
+  puzzle_connector_classic: {
+    zh: "经典风格",
+    en: "Classic",
+  },
+  puzzle_connector_easy_cut: {
+    zh: "易切割风格",
+    en: "Easy Cut",
+  },
+  puzzle_seed: {
+    zh: "随机种子",
+    en: "Seed",
+  },
+  puzzle_randomize_seed: {
+    zh: "重新随机",
+    en: "Randomize",
+  },
+  puzzle_labels: {
+    zh: "显示编号",
+    en: "Show Piece Labels",
+  },
+  puzzle_engrave_back_labels: {
+    zh: "背面刻号",
+    en: "Engrave Back Labels",
+  },
+  puzzle_back_engrave_unavailable_hint: {
+    zh: "背面刻号尚未写入导出几何，当前版本暂不可用。",
+    en: "Back-label engraving is not embedded into exported geometry yet, so it is disabled for now.",
+  },
+  puzzle_irregularity_strength: {
+    zh: "不规则强度",
+    en: "Irregularity Strength",
+  },
+  puzzle_min_neck_width: {
+    zh: "最小脖颈宽度",
+    en: "Minimum Neck Width",
+  },
+  puzzle_summary_grid: {
+    zh: "解析网格",
+    en: "Resolved Grid",
+  },
+  puzzle_summary_requested_grid: {
+    zh: "目标网格",
+    en: "Requested Grid",
+  },
+  puzzle_summary_requested_piece_count: {
+    zh: "目标片数",
+    en: "Requested Piece Count",
+  },
+  puzzle_summary_piece_count: {
+    zh: "最终片数",
+    en: "Resolved Piece Count",
+  },
+  puzzle_summary_piece_size: {
+    zh: "平均块尺寸",
+    en: "Derived Piece Size",
+  },
+  puzzle_warnings: {
+    zh: "几何警告",
+    en: "Geometry Warnings",
+  },
+  puzzle_large_format_disabled_hint: {
+    zh: "拼图模式开启时，大画幅模式会被禁用。",
+    en: "Large Format is disabled while puzzle mode is enabled.",
+  },
+  puzzle_loop_disabled_hint: {
+    zh: "拼图模式开启时，挂件环会被禁用。",
+    en: "Keychain Loop is disabled while puzzle mode is enabled.",
+  },
   color_2d_overlay_title: {
     zh: "颜色工作站",
     en: "Color Workstation",

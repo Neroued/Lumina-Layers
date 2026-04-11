@@ -1,6 +1,6 @@
 /**
  * TabNavBar - Top navigation bar for switching between TAB pages.
- * ???????????? TAB ???????
+ * 顶部导航栏，用于切换不同 TAB 页面。
  */
 import { useI18n } from '../../i18n/context';
 import type { TabId } from '../../types/widget';

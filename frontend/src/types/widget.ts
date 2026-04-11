@@ -23,6 +23,7 @@ export type WidgetId =
   | 'cloisonne-settings'
   | 'coating-settings'
   | 'keychain-loop'
+  | 'puzzle-settings'
   | 'action-bar'
   | 'calibration'
   | 'extractor'

@@ -6,6 +6,7 @@ import Slider from "../ui/Slider";
 export default function KeychainLoopSettings() {
   const { t } = useI18n();
   const add_loop = useConverterStore((s) => s.add_loop);
+  const puzzleEnabled = useConverterStore((s) => s.puzzleEnabled);
   const loop_width = useConverterStore((s) => s.loop_width);
   const loop_length = useConverterStore((s) => s.loop_length);
   const loop_hole = useConverterStore((s) => s.loop_hole);
@@ -22,7 +23,17 @@ export default function KeychainLoopSettings() {
 
   return (
     <div className="flex flex-col gap-4">
-      <Checkbox label={t("loop_enable")} checked={add_loop} onChange={setAddLoop} />
+      <Checkbox
+        label={t("loop_enable")}
+        checked={add_loop}
+        onChange={setAddLoop}
+        disabled={puzzleEnabled}
+      />
+      {puzzleEnabled && !add_loop && (
+        <p className="-mt-2 px-1 text-xs text-slate-500 dark:text-slate-400">
+          {t("puzzle_loop_disabled_hint")}
+        </p>
+      )}
       {add_loop && (
         <>
           <Slider label={t("loop_width")} value={loop_width} min={2} max={10} step={0.5} unit="mm" onChange={setLoopWidth} />

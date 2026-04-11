@@ -1,0 +1,499 @@
+import { act, renderHook } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const cleanupSessionFilesMock = vi.hoisted(() => vi.fn());
+const fetchLayerImagesMock = vi.hoisted(() => vi.fn());
+const beaconCleanupSessionFilesMock = vi.hoisted(() => vi.fn());
+const convertPuzzleLayoutPreviewMock = vi.hoisted(() => vi.fn());
+
+vi.mock("../api/converter", async () => {
+  const actual = await vi.importActual<typeof import("../api/converter")>("../api/converter");
+  return {
+    ...actual,
+    cleanupSessionFiles: cleanupSessionFilesMock,
+    fetchLayerImages: fetchLayerImagesMock,
+    beaconCleanupSessionFiles: beaconCleanupSessionFilesMock,
+    convertPuzzleLayoutPreview: convertPuzzleLayoutPreviewMock,
+  };
+});
+
+async function loadStore() {
+  const mod = await import("../stores/converter");
+  return mod.useConverterStore;
+}
+
+async function loadPuzzlePreviewHook() {
+  const mod = await import("../hooks/usePuzzleLayoutPreview");
+  return mod.usePuzzleLayoutPreview;
+}
+
+describe("converter store cleanup behavior", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("preserves layer preview files during cleanup after download", async () => {
+    const useConverterStore = await loadStore();
+
+    useConverterStore.setState({
+      sessionId: "sess-keep",
+      downloadUrl: "/api/files/download-1",
+      previewImageUrl: "/api/files/preview-1",
+      previewBaseImageUrl: "/api/files/preview-base-1",
+      originalPreviewUrl: "/api/files/original-1",
+      previewGlbUrl: "/api/files/glb-1",
+      puzzleOverlayUrl: "/api/files/puzzle-overlay-1",
+      regionData: {
+        regionId: "region-a",
+        colorHex: "FF0000",
+        pixelCount: 12,
+        previewUrl: "/api/files/region-preview-1",
+      },
+      selectedRegions: [
+        {
+          regionId: "region-b",
+          colorHex: "00FF00",
+          pixelCount: 8,
+          previewUrl: "/api/files/region-preview-2",
+        },
+      ],
+      layerImages: [
+        { layer_index: 0, name: "Layer 1", url: "/api/files/layer-1" },
+        { layer_index: 1, name: "Layer 2", url: "/api/files/layer-2" },
+      ],
+    });
+
+    useConverterStore.getState().cleanupAfterDownload();
+
+    expect(cleanupSessionFilesMock).toHaveBeenCalledOnce();
+    expect(cleanupSessionFilesMock).toHaveBeenCalledWith(
+      "sess-keep",
+      expect.arrayContaining([
+        "download-1",
+        "preview-1",
+        "preview-base-1",
+        "original-1",
+        "glb-1",
+        "puzzle-overlay-1",
+        "region-preview-1",
+        "region-preview-2",
+        "layer-1",
+        "layer-2",
+      ]),
+    );
+  });
+
+  it("ignores stale layer image responses after the session changes", async () => {
+    const useConverterStore = await loadStore();
+    let resolveFetch: ((value: { session_id: string; layers: { layer_index: number; name: string; url: string }[] }) => void) | null = null;
+
+    fetchLayerImagesMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+
+    useConverterStore.setState({
+      sessionId: "session-a",
+      previewGlbUrl: "/api/files/preview-a.glb",
+      layerImages: [],
+      layerImagesLoading: false,
+      layerImagesOpen: false,
+    });
+
+    const fetchPromise = useConverterStore.getState().fetchLayerImages();
+
+    await Promise.resolve();
+    expect(fetchLayerImagesMock).toHaveBeenCalledWith("session-a");
+
+    useConverterStore.setState({
+      sessionId: "session-b",
+      previewGlbUrl: "/api/files/preview-b.glb",
+      layerImages: [],
+      layerImagesLoading: false,
+      layerImagesOpen: false,
+    });
+
+    resolveFetch?.({
+      session_id: "session-a",
+      layers: [{ layer_index: 0, name: "Layer stale", url: "/api/files/stale-layer" }],
+    });
+
+    await fetchPromise;
+
+    const state = useConverterStore.getState();
+    expect(state.sessionId).toBe("session-b");
+    expect(state.layerImages).toEqual([]);
+    expect(state.layerImagesLoading).toBe(false);
+    expect(state.layerImagesOpen).toBe(false);
+  });
+
+  it("ignores stale layer image responses after the preview source changes within the same session", async () => {
+    const { buildLayerImagesSourceKey, useConverterStore } = await import("../stores/converter");
+    let resolveFetch:
+      | ((value: {
+          session_id: string;
+          layers: { layer_index: number; name: string; url: string }[];
+        }) => void)
+      | null = null;
+
+    fetchLayerImagesMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+
+    useConverterStore.setState({
+      sessionId: "session-a",
+      previewGlbUrl: "/api/files/preview-a.glb",
+      previewImageUrl: "/api/files/preview-a.png",
+      previewBaseImageUrl: "/api/files/preview-a.png",
+      layerImages: [{ layer_index: 0, name: "Layer A", url: "/api/files/layer-a" }],
+      layerImagesLoading: false,
+      layerImagesOpen: true,
+    });
+    useConverterStore.setState({
+      layerImagesSourceKey: buildLayerImagesSourceKey(useConverterStore.getState()),
+    });
+
+    const fetchPromise = useConverterStore.getState().fetchLayerImages();
+
+    await Promise.resolve();
+    expect(fetchLayerImagesMock).toHaveBeenCalledWith("session-a");
+
+    useConverterStore.setState({
+      previewGlbUrl: "/api/files/preview-b.glb",
+    });
+
+    resolveFetch?.({
+      session_id: "session-a",
+      layers: [{ layer_index: 1, name: "Layer stale", url: "/api/files/stale-layer" }],
+    });
+
+    await fetchPromise;
+
+    const state = useConverterStore.getState();
+    expect(state.previewGlbUrl).toBe("/api/files/preview-b.glb");
+    expect(state.layerImages).toEqual([
+      { layer_index: 0, name: "Layer A", url: "/api/files/layer-a" },
+    ]);
+    expect(state.layerImagesSourceKey).not.toBe(
+      buildLayerImagesSourceKey(state),
+    );
+    expect(state.layerImagesLoading).toBe(false);
+  });
+
+  it("ignores stale layer image responses after the preview GLB changes within the same session", async () => {
+    const useConverterStore = await loadStore();
+    let resolveFetch: ((value: { session_id: string; layers: { layer_index: number; name: string; url: string }[] }) => void) | null =
+      null;
+
+    fetchLayerImagesMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+
+    useConverterStore.setState({
+      sessionId: "session-a",
+      previewGlbUrl: "/api/files/preview-a.glb",
+      layerImages: [],
+      layerImagesLoading: false,
+      layerImagesOpen: false,
+    });
+
+    const fetchPromise = useConverterStore.getState().fetchLayerImages("/api/files/preview-a.glb");
+
+    await Promise.resolve();
+    expect(fetchLayerImagesMock).toHaveBeenCalledWith("session-a");
+
+    useConverterStore.setState({
+      sessionId: "session-a",
+      previewGlbUrl: "/api/files/preview-b.glb",
+      layerImages: [],
+      layerImagesLoading: false,
+      layerImagesOpen: false,
+    });
+
+    resolveFetch?.({
+      session_id: "session-a",
+      layers: [{ layer_index: 0, name: "Layer stale", url: "/api/files/stale-layer" }],
+    });
+
+    await fetchPromise;
+
+    const state = useConverterStore.getState();
+    expect(state.previewGlbUrl).toBe("/api/files/preview-b.glb");
+    expect(state.layerImages).toEqual([]);
+    expect(state.layerImagesLoading).toBe(false);
+    expect(state.layerImagesOpen).toBe(false);
+  });
+
+  it("ignores stale puzzle overlay responses after the session changes", async () => {
+    const useConverterStore = await loadStore();
+    let resolvePreview:
+      | ((value: {
+        overlay_url: string;
+        warnings: string[];
+        grid_rows: number;
+        grid_cols: number;
+        piece_count: number;
+        derived_piece_width_mm: number;
+        derived_piece_height_mm: number;
+      }) => void)
+      | null = null;
+
+    convertPuzzleLayoutPreviewMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolvePreview = resolve;
+        }),
+    );
+
+    useConverterStore.setState({
+      sessionId: "session-a",
+      puzzleEnabled: true,
+      target_height_mm: 60,
+      puzzleStyle: "regular",
+      puzzleSizingMode: "grid",
+      pieceWidthMm: 20,
+      pieceHeightMm: 20,
+      puzzleRows: 2,
+      puzzleCols: 3,
+      targetPieceCount: 6,
+      connectorStyle: "classic",
+      labelsEnabled: false,
+      engraveBackLabels: false,
+      irregularityStrength: 0.35,
+      minNeckWidthMm: 1.2,
+      puzzleOverlayUrl: null,
+      puzzleWarnings: [],
+      puzzleResolvedRows: null,
+      puzzleResolvedCols: null,
+      puzzleResolvedPieceCount: null,
+      puzzleDerivedPieceWidthMm: null,
+      puzzleDerivedPieceHeightMm: null,
+    });
+
+    const previewPromise = useConverterStore.getState().submitPuzzleLayoutPreview();
+
+    expect(convertPuzzleLayoutPreviewMock).toHaveBeenCalledWith(
+      "session-a",
+      expect.objectContaining({
+        puzzle_style: "regular",
+        sizing_mode: "grid",
+        rows: 2,
+        cols: 3,
+      }),
+    );
+
+    useConverterStore.setState({
+      sessionId: "session-b",
+      puzzleEnabled: true,
+      puzzleOverlayUrl: null,
+      puzzleWarnings: [],
+      puzzleResolvedRows: null,
+      puzzleResolvedCols: null,
+      puzzleResolvedPieceCount: null,
+      puzzleDerivedPieceWidthMm: null,
+      puzzleDerivedPieceHeightMm: null,
+    });
+
+    resolvePreview?.({
+      overlay_url: "/api/files/stale-puzzle-overlay",
+      warnings: ["stale"],
+      grid_rows: 2,
+      grid_cols: 3,
+      piece_count: 6,
+      derived_piece_width_mm: 20,
+      derived_piece_height_mm: 30,
+    });
+
+    await previewPromise;
+
+    const state = useConverterStore.getState();
+    expect(state.sessionId).toBe("session-b");
+    expect(state.puzzleOverlayUrl).toBeNull();
+    expect(state.puzzleWarnings).toEqual([]);
+    expect(state.puzzleResolvedRows).toBeNull();
+  });
+
+  it("does not let a stale failed puzzle request clear a newer successful overlay", async () => {
+    const useConverterStore = await loadStore();
+    let rejectFirst: ((reason?: unknown) => void) | null = null;
+    let resolveSecond:
+      | ((value: {
+        overlay_url: string;
+        warnings: string[];
+        grid_rows: number;
+        grid_cols: number;
+        piece_count: number;
+        derived_piece_width_mm: number;
+        derived_piece_height_mm: number;
+      }) => void)
+      | null = null;
+
+    convertPuzzleLayoutPreviewMock
+      .mockImplementationOnce(
+        () =>
+          new Promise((_, reject) => {
+            rejectFirst = reject;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecond = resolve;
+          }),
+      );
+
+    useConverterStore.setState({
+      sessionId: "session-a",
+      error: null,
+      puzzleEnabled: true,
+      target_height_mm: 60,
+      puzzleStyle: "regular",
+      puzzleSizingMode: "grid",
+      pieceWidthMm: 20,
+      pieceHeightMm: 20,
+      puzzleRows: 2,
+      puzzleCols: 3,
+      targetPieceCount: 6,
+      connectorStyle: "classic",
+      labelsEnabled: false,
+      engraveBackLabels: false,
+      irregularityStrength: 0.35,
+      minNeckWidthMm: 1.2,
+      puzzleOverlayUrl: null,
+      puzzleWarnings: [],
+      puzzleResolvedRows: null,
+      puzzleResolvedCols: null,
+      puzzleResolvedPieceCount: null,
+      puzzleDerivedPieceWidthMm: null,
+      puzzleDerivedPieceHeightMm: null,
+    });
+
+    const firstPromise = useConverterStore.getState().submitPuzzleLayoutPreview();
+
+    useConverterStore.setState({
+      puzzleCols: 4,
+    });
+    const secondPromise = useConverterStore.getState().submitPuzzleLayoutPreview();
+
+    resolveSecond?.({
+      overlay_url: "/api/files/fresh-puzzle-overlay",
+      warnings: ["fresh"],
+      grid_rows: 2,
+      grid_cols: 4,
+      piece_count: 8,
+      derived_piece_width_mm: 15,
+      derived_piece_height_mm: 30,
+    });
+    await secondPromise;
+
+    rejectFirst?.(new Error("stale failure"));
+    await firstPromise;
+
+    const state = useConverterStore.getState();
+    expect(state.puzzleOverlayUrl).toBe("/api/files/fresh-puzzle-overlay");
+    expect(state.puzzleWarnings).toEqual(["fresh"]);
+    expect(state.puzzleResolvedCols).toBe(4);
+    expect(state.error).toBeNull();
+  });
+
+  it("retries one failed puzzle preview request for the same params", async () => {
+    vi.useFakeTimers();
+    const useConverterStore = await loadStore();
+    const usePuzzleLayoutPreview = await loadPuzzlePreviewHook();
+
+    convertPuzzleLayoutPreviewMock
+      .mockRejectedValueOnce(new Error("temporary failure"))
+      .mockResolvedValueOnce({
+        overlay_url: "/api/files/retried-puzzle-overlay",
+        warnings: [],
+        grid_rows: 2,
+        grid_cols: 3,
+        piece_count: 6,
+        derived_piece_width_mm: 20,
+        derived_piece_height_mm: 30,
+      });
+
+    useConverterStore.setState({
+      sessionId: "session-retry",
+      puzzleEnabled: true,
+      target_height_mm: 60,
+      puzzleStyle: "regular",
+      puzzleSizingMode: "grid",
+      pieceWidthMm: 20,
+      pieceHeightMm: 20,
+      puzzleRows: 2,
+      puzzleCols: 3,
+      targetPieceCount: 6,
+      connectorStyle: "classic",
+      labelsEnabled: false,
+      engraveBackLabels: false,
+      irregularityStrength: 0.35,
+      minNeckWidthMm: 1.2,
+      puzzleOverlayUrl: null,
+      puzzleWarnings: [],
+      puzzleResolvedRows: null,
+      puzzleResolvedCols: null,
+      puzzleResolvedPieceCount: null,
+      puzzleDerivedPieceWidthMm: null,
+      puzzleDerivedPieceHeightMm: null,
+    });
+
+    renderHook(() => usePuzzleLayoutPreview());
+
+    await act(async () => {
+      vi.advanceTimersByTime(250);
+      await Promise.resolve();
+    });
+    expect(convertPuzzleLayoutPreviewMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(250);
+      await Promise.resolve();
+    });
+    expect(convertPuzzleLayoutPreviewMock).toHaveBeenCalledTimes(2);
+
+    const state = useConverterStore.getState();
+    expect(state.puzzleOverlayUrl).toBe("/api/files/retried-puzzle-overlay");
+    expect(state.error).toBeNull();
+  });
+
+  it("clears back-label engraving when piece labels are turned off", async () => {
+    const useConverterStore = await loadStore();
+
+    useConverterStore.setState({
+      labelsEnabled: true,
+      engraveBackLabels: true,
+    });
+
+    useConverterStore.getState().setLabelsEnabled(false);
+
+    const state = useConverterStore.getState();
+    expect(state.labelsEnabled).toBe(false);
+    expect(state.engraveBackLabels).toBe(false);
+  });
+
+  it("keeps back-label engraving disabled even when toggled directly", async () => {
+    const useConverterStore = await loadStore();
+
+    useConverterStore.setState({
+      engraveBackLabels: false,
+    });
+
+    useConverterStore.getState().setEngraveBackLabels(true);
+
+    expect(useConverterStore.getState().engraveBackLabels).toBe(false);
+  });
+});

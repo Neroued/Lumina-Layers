@@ -1,4 +1,4 @@
-import { Suspense, useRef, useState, useEffect, useCallback } from "react";
+import { Suspense, useRef, useState, useEffect, useCallback, useMemo } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, Environment, Html } from "@react-three/drei";
 import { LIGHTING_CONFIG } from "./lightingConfig";
@@ -7,7 +7,7 @@ import ModelViewer from "./ModelViewer";
 import InteractiveModelViewer, { type ViewerHoverSample } from "./InteractiveModelViewer";
 import BedPlatform from "./BedPlatform";
 import KeychainRing3D from "./KeychainRing3D";
-import { useConverterStore } from "../stores/converter";
+import { buildLayerImagesSourceKey, useConverterStore } from "../stores/converter";
 import { computeScaleFactor } from "../utils/scaleUtils";
 import { useI18n } from "../i18n/context";
 import { useThemeConfig } from "../hooks/useThemeConfig";
@@ -26,6 +26,8 @@ declare global {
 interface Scene3DProps {
   modelUrl?: string;
 }
+
+const EMPTY_LAYER_IMAGES: { layer_index: number; name: string; url: string }[] = [];
 
 /**
  * Helper component rendered inside <Canvas> to expose the gl context
@@ -196,8 +198,10 @@ function Scene3D({ modelUrl }: Scene3DProps) {
     timerCancelCount: 0,
     lastLogAt: performance.now(),
   });
-  const fetchedLayerSessionRef = useRef<string | null>(null);
+  const activeLayerPreviewRef = useRef<string | null>(null);
+  const fetchedLayerPreviewRef = useRef<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isOrbiting, setIsOrbiting] = useState(false);
   const [hoverSample, setHoverSample] = useState<ViewerHoverSample | null>(null);
   const [hoverLayerColors, setHoverLayerColors] = useState<LayerHoverColorSample[]>([]);
   const hoverPixelX = hoverSample?.pixelX ?? null;
@@ -214,7 +218,10 @@ function Scene3D({ modelUrl }: Scene3DProps) {
   const sessionId = useConverterStore((s) => s.sessionId);
   const layerImages = useConverterStore((s) => s.layerImages);
   const layerImagesLoading = useConverterStore((s) => s.layerImagesLoading);
+  const layerImagesSourceKey = useConverterStore((s) => s.layerImagesSourceKey);
+  const layerImagesCurrentKey = useConverterStore(buildLayerImagesSourceKey);
   const fetchLayerImages = useConverterStore((s) => s.fetchLayerImages);
+  const resetLayerImages = useConverterStore((s) => s.resetLayerImages);
   const previewPixelWidth = useConverterStore((s) => s.previewPixelWidth);
   const previewPixelHeight = useConverterStore((s) => s.previewPixelHeight);
   const baseHeight = useConverterStore((s) => s.spacer_thick);
@@ -227,6 +234,12 @@ function Scene3D({ modelUrl }: Scene3DProps) {
   const enableCloisonne = useConverterStore((s) => s.enable_cloisonne);
   const wireWidthMm = useConverterStore((s) => s.wire_width_mm);
   const wireHeightMm = useConverterStore((s) => s.wire_height_mm);
+  const puzzleEnabled = useConverterStore((s) => s.puzzleEnabled);
+  const puzzleOverlayUrl = useConverterStore((s) => s.puzzleOverlayUrl);
+  const activeLayerImages = useMemo(
+    () => (layerImagesSourceKey === layerImagesCurrentKey ? layerImages : EMPTY_LAYER_IMAGES),
+    [layerImagesSourceKey, layerImagesCurrentKey, layerImages],
+  );
 
   const maybeFlushScenePerfLog = useCallback((force = false) => {
     if (!isHoverPerfDebugEnabled()) {
@@ -306,23 +319,43 @@ function Scene3D({ modelUrl }: Scene3DProps) {
 
   useEffect(() => {
     if (!sessionId) {
-      fetchedLayerSessionRef.current = null;
+      activeLayerPreviewRef.current = null;
+      fetchedLayerPreviewRef.current = null;
       return;
     }
 
-    if (!previewGlbUrl || layerImagesLoading || layerImages.length > 0) {
+    if (
+      !previewGlbUrl ||
+      !layerImagesCurrentKey ||
+      layerImagesLoading ||
+      activeLayerImages.length > 0
+    ) {
       return;
     }
-    if (fetchedLayerSessionRef.current === sessionId) {
+    if (fetchedLayerPreviewRef.current === layerImagesCurrentKey) {
       return;
     }
 
-    fetchedLayerSessionRef.current = sessionId;
-    void fetchLayerImages();
-  }, [previewGlbUrl, sessionId, layerImagesLoading, layerImages.length, fetchLayerImages]);
+    fetchedLayerPreviewRef.current = layerImagesCurrentKey;
+    void fetchLayerImages(layerImagesCurrentKey);
+  }, [
+    previewGlbUrl,
+    sessionId,
+    layerImagesCurrentKey,
+    layerImagesLoading,
+    activeLayerImages.length,
+    fetchLayerImages,
+  ]);
 
   useEffect(() => {
+    if (activeLayerPreviewRef.current && activeLayerPreviewRef.current !== previewGlbUrl) {
+      fetchedLayerPreviewRef.current = null;
+      resetLayerImages();
+    }
+    activeLayerPreviewRef.current = previewGlbUrl;
+
     if (!previewGlbUrl) {
+      fetchedLayerPreviewRef.current = null;
       if (hoverDelayTimerRef.current !== null) {
         window.clearTimeout(hoverDelayTimerRef.current);
         hoverDelayTimerRef.current = null;
@@ -333,7 +366,26 @@ function Scene3D({ modelUrl }: Scene3DProps) {
       setHoverSample(null);
       setHoverLayerColors([]);
     }
-  }, [previewGlbUrl]);
+  }, [previewGlbUrl, resetLayerImages]);
+
+  useEffect(() => {
+    if (!isOrbiting) {
+      return;
+    }
+    if (hoverDelayTimerRef.current !== null) {
+      window.clearTimeout(hoverDelayTimerRef.current);
+      hoverDelayTimerRef.current = null;
+      sceneHoverPerfStatsRef.current.timerCancelCount += 1;
+    }
+    pendingHoverSampleRef.current = null;
+    setHoverSample((previous) => {
+      if (previous !== null) {
+        sceneHoverPerfStatsRef.current.hoverHideCount += 1;
+      }
+      return previous === null ? previous : null;
+    });
+    setHoverLayerColors((previous) => (previous.length === 0 ? previous : []));
+  }, [isOrbiting]);
 
   useEffect(() => {
     const stats = sceneHoverPerfStatsRef.current;
@@ -350,7 +402,7 @@ function Scene3D({ modelUrl }: Scene3DProps) {
   useEffect(() => {
     let cancelled = false;
 
-    if (layerImages.length === 0) {
+    if (activeLayerImages.length === 0) {
       layerCanvasBuffersRef.current = [];
       layerSampleCacheRef.current.clear();
       return () => {
@@ -358,9 +410,9 @@ function Scene3D({ modelUrl }: Scene3DProps) {
       };
     }
 
-    const buildBuffers = async () => {
+      const buildBuffers = async () => {
       const loaded = await Promise.all(
-        layerImages.map(
+        activeLayerImages.map(
           (layer) =>
             new Promise<LayerCanvasBuffer | null>((resolve) => {
               const image = new Image();
@@ -405,7 +457,7 @@ function Scene3D({ modelUrl }: Scene3DProps) {
     return () => {
       cancelled = true;
     };
-  }, [layerImages]);
+  }, [activeLayerImages]);
 
   useEffect(() => {
     if (hoverPixelX === null || hoverPixelY === null) {
@@ -473,7 +525,14 @@ function Scene3D({ modelUrl }: Scene3DProps) {
     layerSampleCacheRef.current.set(cacheKey, sampled);
     setHoverLayerColors((previous) => (areLayerSamplesEqual(previous, sampled) ? previous : sampled));
     maybeFlushScenePerfLog(sampleMs > 8);
-  }, [hoverPixelX, hoverPixelY, previewPixelWidth, previewPixelHeight, layerImages, maybeFlushScenePerfLog]);
+  }, [
+    hoverPixelX,
+    hoverPixelY,
+    previewPixelWidth,
+    previewPixelHeight,
+    activeLayerImages,
+    maybeFlushScenePerfLog,
+  ]);
 
   useEffect(() => {
     const magnifierCanvas = magnifierCanvasRef.current;
@@ -741,6 +800,8 @@ function Scene3D({ modelUrl }: Scene3DProps) {
           dampingFactor={0.1}
           minDistance={10}
           maxDistance={2000}
+          onStart={() => setIsOrbiting(true)}
+          onEnd={() => setIsOrbiting(false)}
         />
         <BedPlatform />
         {modelUrl ? (
@@ -766,6 +827,9 @@ function Scene3D({ modelUrl }: Scene3DProps) {
               enableCloisonne={enableCloisonne}
               wireWidthMm={wireWidthMm}
               wireHeightMm={wireHeightMm}
+              puzzleOverlayEnabled={puzzleEnabled && Boolean(puzzleOverlayUrl)}
+              puzzleOverlayUrl={puzzleOverlayUrl}
+              hoverEnabled={!isOrbiting}
               onHoverSample={handleHoverSample}
             />
           </Suspense>

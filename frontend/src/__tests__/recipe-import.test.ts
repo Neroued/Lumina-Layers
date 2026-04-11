@@ -48,7 +48,7 @@ function createTestRecipe(overrides?: Partial<LuminaRecipe>): LuminaRecipe {
           spacer_thick: 0.6,
           structure_mode: "single-sided",
           separate_backing: false,
-          add_loop: true,
+          add_loop: false,
           loop_width: 5,
           loop_length: 8,
           loop_hole: 3,
@@ -72,7 +72,23 @@ function createTestRecipe(overrides?: Partial<LuminaRecipe>): LuminaRecipe {
           ],
           free_color_set: ["#ff0000", "#00ff00"],
         },
-        large_format: { large_format_enabled: true, tile_width_mm: 150, tile_height_mm: 120 },
+        large_format: { large_format_enabled: false, tile_width_mm: 150, tile_height_mm: 120 },
+        puzzle: {
+          puzzle_enabled: true,
+          puzzle_style: "irregular",
+          puzzle_sizing_mode: "grid",
+          piece_width_mm: 20,
+          piece_height_mm: 20,
+          puzzle_rows: 4,
+          puzzle_cols: 5,
+          target_piece_count: 20,
+          puzzle_seed: 42,
+          connector_style: "classic",
+          labels_enabled: true,
+          engrave_back_labels: false,
+          irregularity_strength: 0.35,
+          min_neck_width_mm: 1.2,
+        },
         device: { printer_id: "bambu-h2d", slicer: "BambuStudio" },
       },
     },
@@ -158,7 +174,7 @@ describe("recipe/importRecipe", () => {
 
       // Geometry
       expect(state.spacer_thick).toBe(0.6);
-      expect(state.add_loop).toBe(true);
+      expect(state.add_loop).toBe(false);
       expect(state.loop_angle).toBe(45);
       expect(state.loop_position_preset).toBe("top-right");
 
@@ -173,8 +189,17 @@ describe("recipe/importRecipe", () => {
       expect(state.free_color_set).toEqual(new Set(["ff0000", "00ff00"]));
 
       // Large format
-      expect(state.largeFormatEnabled).toBe(true);
+      expect(state.largeFormatEnabled).toBe(false);
       expect(state.tileWidthMm).toBe(150);
+
+      // Puzzle
+      expect(state.puzzleEnabled).toBe(true);
+      expect(state.puzzleStyle).toBe("irregular");
+      expect(state.puzzleSizingMode).toBe("grid");
+      expect(state.puzzleRows).toBe(4);
+      expect(state.puzzleCols).toBe(5);
+      expect(state.connectorStyle).toBe("classic");
+      expect(state.labelsEnabled).toBe(true);
 
       // Asset
       expect(assetFile).toBeInstanceOf(File);
@@ -182,6 +207,61 @@ describe("recipe/importRecipe", () => {
 
       // No warnings for fingerprint match
       expect(warnings).toHaveLength(0);
+    });
+
+    it("normalizes puzzle-specific mutually exclusive settings from imported recipes", () => {
+      const recipe = createTestRecipe();
+      recipe.recipe.converter!.geometry.add_loop = true;
+      recipe.recipe.converter!.large_format.large_format_enabled = true;
+      recipe.recipe.converter!.puzzle!.labels_enabled = false;
+      recipe.recipe.converter!.puzzle!.engrave_back_labels = true;
+
+      const { state, warnings } = restoreConverterRecipe(
+        recipe,
+        LOCAL_LUTS,
+        LOCAL_FINGERPRINTS,
+      );
+
+      expect(state.puzzleEnabled).toBe(true);
+      expect(state.largeFormatEnabled).toBe(false);
+      expect(state.add_loop).toBe(false);
+      expect(state.labelsEnabled).toBe(false);
+      expect(state.engraveBackLabels).toBe(false);
+      expect(
+        warnings.some((warning) =>
+          warning.includes("puzzle mode and large-format tiling"),
+        ),
+      ).toBe(true);
+      expect(
+        warnings.some((warning) =>
+          warning.includes("puzzle mode and keychain loop generation"),
+        ),
+      ).toBe(true);
+      expect(
+        warnings.some((warning) =>
+          warning.includes("feature is currently unavailable"),
+        ),
+      ).toBe(true);
+    });
+
+    it("disables imported back-label engraving even when piece labels are enabled", () => {
+      const recipe = createTestRecipe();
+      recipe.recipe.converter!.puzzle!.labels_enabled = true;
+      recipe.recipe.converter!.puzzle!.engrave_back_labels = true;
+
+      const { state, warnings } = restoreConverterRecipe(
+        recipe,
+        LOCAL_LUTS,
+        LOCAL_FINGERPRINTS,
+      );
+
+      expect(state.labelsEnabled).toBe(true);
+      expect(state.engraveBackLabels).toBe(false);
+      expect(
+        warnings.some((warning) =>
+          warning.includes("feature is currently unavailable"),
+        ),
+      ).toBe(true);
     });
 
     it("adds warning for name-only LUT match", () => {

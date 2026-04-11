@@ -30,6 +30,7 @@ export const TAB_WIDGET_MAP: Record<TabId, WidgetId[]> = {
     "cloisonne-settings",
     "coating-settings",
     "keychain-loop",
+    "puzzle-settings",
     "action-bar",
   ],
   calibration: ["calibration"],
@@ -74,13 +75,22 @@ export const DEFAULT_LAYOUT: Record<WidgetId, WidgetLayoutState> = {
     stackOrder: 1,
     expandedHeight: EXPANDED_HEIGHT,
   },
+  "puzzle-settings": {
+    id: "puzzle-settings",
+    position: { x: 0, y: 0 },
+    collapsed: true,
+    visible: true,
+    snapEdge: "right",
+    stackOrder: 2,
+    expandedHeight: EXPANDED_HEIGHT,
+  },
   "coating-settings": {
     id: "coating-settings",
     position: { x: 0, y: 0 },
     collapsed: true,
     visible: true,
     snapEdge: "right",
-    stackOrder: 2,
+    stackOrder: 3,
     expandedHeight: EXPANDED_HEIGHT,
   },
   "cloisonne-settings": {
@@ -89,7 +99,7 @@ export const DEFAULT_LAYOUT: Record<WidgetId, WidgetLayoutState> = {
     collapsed: true,
     visible: true,
     snapEdge: "right",
-    stackOrder: 3,
+    stackOrder: 4,
     expandedHeight: EXPANDED_HEIGHT,
   },
   "outline-settings": {
@@ -98,7 +108,7 @@ export const DEFAULT_LAYOUT: Record<WidgetId, WidgetLayoutState> = {
     collapsed: true,
     visible: true,
     snapEdge: "right",
-    stackOrder: 4,
+    stackOrder: 5,
     expandedHeight: EXPANDED_HEIGHT,
   },
   "relief-settings": {
@@ -107,7 +117,7 @@ export const DEFAULT_LAYOUT: Record<WidgetId, WidgetLayoutState> = {
     collapsed: true,
     visible: true,
     snapEdge: "right",
-    stackOrder: 5,
+    stackOrder: 6,
     expandedHeight: EXPANDED_HEIGHT,
   },
   "advanced-settings": {
@@ -116,7 +126,7 @@ export const DEFAULT_LAYOUT: Record<WidgetId, WidgetLayoutState> = {
     collapsed: true,
     visible: true,
     snapEdge: "right",
-    stackOrder: 6,
+    stackOrder: 7,
     expandedHeight: EXPANDED_HEIGHT,
   },
   // --- 其他 4 个页面：各 1 个 Widget，左侧吸附，stackOrder 0 ---
@@ -208,6 +218,13 @@ export const WIDGET_REGISTRY: Omit<WidgetConfig, "component">[] = [
     id: "keychain-loop",
     titleKey: "widget.keychainLoop",
     icon: "link",
+    defaultWidth: 350,
+    minWidth: 300,
+  },
+  {
+    id: "puzzle-settings",
+    titleKey: "widget.puzzleSettings",
+    icon: "grid",
     defaultWidth: 350,
     minWidth: 300,
   },
@@ -527,7 +544,7 @@ export const useWidgetStore = create<WidgetStore>()(
     }),
     {
       name: "lumina-widget-layout",
-      version: 4,
+      version: 5,
       migrate: (persistedState, version) => {
         type PersistedWidgetState = {
           widgets?: Record<WidgetId, WidgetLayoutState>;
@@ -539,7 +556,7 @@ export const useWidgetStore = create<WidgetStore>()(
         if (version < 3) {
           return { widgets: { ...DEFAULT_LAYOUT }, activeTab: "converter" };
         }
-        if (version === 3) {
+        if (version === 3 || version === 4) {
           const state =
             typeof persistedState === "object" && persistedState !== null
               ? (persistedState as PersistedWidgetState)
@@ -549,6 +566,9 @@ export const useWidgetStore = create<WidgetStore>()(
           };
           delete widgets["palette-panel"];
           delete widgets["lut-color-grid"];
+          if (!widgets["puzzle-settings"]) {
+            widgets["puzzle-settings"] = { ...DEFAULT_LAYOUT["puzzle-settings"] };
+          }
           // Recalculate stackOrder for converter widgets on left edge
           const converterIds = TAB_WIDGET_MAP.converter;
           const leftConverterWidgets = converterIds

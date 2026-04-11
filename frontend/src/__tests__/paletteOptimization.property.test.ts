@@ -20,14 +20,14 @@ vi.mock('../api/converter', async () => {
 
 // ========== Generators ==========
 
-/** Arbitrary RGB tuple with integer values 0-255. (0-255 鏁存暟鐨?RGB 鍏冪粍鐢熸垚鍣? */
+/** Arbitrary RGB tuple with integer values 0-255. (0-255 整数 RGB 元组生成器) */
 const arbRgb = fc.tuple(
   fc.integer({ min: 0, max: 255 }),
   fc.integer({ min: 0, max: 255 }),
   fc.integer({ min: 0, max: 255 }),
 ) as fc.Arbitrary<[number, number, number]>;
 
-/** Arbitrary LutColorEntry from a random RGB. (浠庨殢鏈?RGB 生成 LutColorEntry) */
+/** Arbitrary LutColorEntry from a random RGB. (从随机 RGB 生成 LutColorEntry) */
 const arbLutColorEntry: fc.Arbitrary<LutColorEntry> = arbRgb.map((rgb) => {
   const hex =
     '#' +

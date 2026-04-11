@@ -16,14 +16,17 @@ Performance notes:
 """
 
 import io
+import os
 import re
 import sys
+import tempfile
 import time
 import threading
 from datetime import datetime
 from pathlib import Path
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[mGKHF]")
+_REPO_ROOT = Path(__file__).resolve().parents[1]
 _logging_initialized = False
 _tee_instance: "_Tee | None" = None
 
@@ -137,19 +140,78 @@ def setup_file_logging(log_path=None) -> Path | None:
     if _logging_initialized:
         return None
 
-    _logging_initialized = True
+    tee: _Tee | None = None
+    selected_path: Path | None = None
+    for candidate_path in _resolve_log_candidates(Path(log_path) if log_path is not None else None):
+        try:
+            candidate_path.parent.mkdir(parents=True, exist_ok=True)
+            tee = _Tee(candidate_path, console_stream=sys.stdout)
+            selected_path = candidate_path
+            break
+        except OSError as exc:
+            _emit_log_setup_warning(candidate_path, exc)
 
-    if log_path is not None:
-        log_path = Path(log_path)
-    else:
-        log_dir = Path("logs")
-        log_dir.mkdir(exist_ok=True)
-        log_path = log_dir / f"lumina_{time.strftime('%Y%m%d_%H%M%S')}.log"
+    if tee is None or selected_path is None:
+        _logging_initialized = False
+        _tee_instance = None
+        return None
 
-    tee = _Tee(log_path, console_stream=sys.stdout)
     sys.stdout = tee
     _tee_instance = tee
+    _logging_initialized = True
 
     # First log line mirrors old lumina_*.log convention.
-    print(f"[LOG] {log_path}")
-    return log_path
+    print(f"[LOG] {selected_path}")
+    return selected_path
+
+
+def _resolve_log_candidates(explicit_path: Path | None) -> list[Path]:
+    """Return candidate log paths in preference order.
+    返回按优先级排序的日志路径候选列表。
+
+    Args:
+        explicit_path: Preferred path supplied by the caller. (调用方提供的优先路径)
+
+    Returns:
+        list[Path]: Candidate log paths. (候选日志路径列表)
+    """
+
+    filename = explicit_path.name if explicit_path is not None else f"lumina_{time.strftime('%Y%m%d_%H%M%S')}.log"
+    candidates: list[Path] = []
+
+    if explicit_path is not None:
+        candidates.append(explicit_path)
+    else:
+        env_dir = os.environ.get("LUMINA_LOG_DIR")
+        if env_dir:
+            candidates.append(Path(env_dir) / filename)
+        candidates.append(_REPO_ROOT / "logs" / filename)
+
+    candidates.append(Path(tempfile.gettempdir()) / "lumina-logs" / filename)
+
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key not in seen:
+            seen.add(key)
+            deduped.append(candidate)
+    return deduped
+
+
+def _emit_log_setup_warning(log_path: Path, exc: OSError) -> None:
+    """Emit a stderr warning when one log target cannot be opened.
+    当某个日志目标无法打开时向 stderr 输出警告。
+
+    Args:
+        log_path: Failing log path. (失败的日志路径)
+        exc: Raised OS error. (触发的系统错误)
+    """
+
+    try:
+        sys.__stderr__.write(
+            f"[LOG][WARNING] File logging disabled for '{log_path}': {type(exc).__name__}: {exc}\n"
+        )
+        sys.__stderr__.flush()
+    except Exception:
+        pass

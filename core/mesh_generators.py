@@ -25,6 +25,9 @@ import logging
 import numpy as np
 import cv2
 import trimesh
+from shapely.affinity import affine_transform
+from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, box
+from shapely.ops import unary_union
 from config import ModelingMode
 
 try:
@@ -36,6 +39,135 @@ except ImportError:
     HAS_NUMBA = False
 
 log = logging.getLogger(__name__)
+
+
+def _normalize_polygonal_geometry(geometry):
+    """Normalize polygonal geometry and drop non-polygon parts.
+    规范化多边形几何并丢弃非多边形部分。
+    """
+    if geometry is None or getattr(geometry, "is_empty", True):
+        return None
+
+    candidate = geometry.buffer(0) if not geometry.is_valid else geometry
+    if candidate.is_empty:
+        return None
+    if isinstance(candidate, Polygon):
+        return candidate
+    if isinstance(candidate, MultiPolygon):
+        return candidate
+    if isinstance(candidate, GeometryCollection):
+        parts = [part for part in candidate.geoms if isinstance(part, (Polygon, MultiPolygon)) and not part.is_empty]
+        if not parts:
+            return None
+        return _normalize_polygonal_geometry(unary_union(parts))
+    return None
+
+
+def _iter_polygon_parts(geometry):
+    """Yield individual polygon parts from arbitrary polygonal geometry.
+    将任意多边形几何展开为单独 Polygon 片段。
+    """
+    normalized = _normalize_polygonal_geometry(geometry)
+    if normalized is None:
+        return ()
+    if isinstance(normalized, Polygon):
+        return (normalized,)
+    if isinstance(normalized, MultiPolygon):
+        return tuple(part for part in normalized.geoms if not part.is_empty)
+    return ()
+
+
+def _flip_geometry_to_world(geometry, height_px):
+    """Flip a y-down pixel-space geometry into y-up world coordinates.
+    将 y 向下的像素空间几何翻转到 y 向上的世界坐标。
+    """
+    normalized = _normalize_polygonal_geometry(geometry)
+    if normalized is None:
+        return None
+    world = affine_transform(normalized, [1.0, 0.0, 0.0, -1.0, 0.0, float(height_px)])
+    return _normalize_polygonal_geometry(world)
+
+
+def _merge_mesh_list(meshes):
+    """Concatenate and lightly clean a list of meshes.
+    合并并轻度清理 mesh 列表。
+    """
+    clean_meshes = [mesh for mesh in meshes if mesh is not None and len(mesh.faces) > 0]
+    if not clean_meshes:
+        return None
+
+    combined = trimesh.util.concatenate(clean_meshes) if len(clean_meshes) > 1 else clean_meshes[0]
+    combined.merge_vertices()
+    combined.update_faces(combined.unique_faces())
+    return combined
+
+
+def _extrude_polygon_geometry(geometry, height, z_offset, extrude_cache=None):
+    """Extrude polygonal geometry into 3D meshes.
+    将多边形几何挤出为 3D mesh。
+    """
+    meshes = []
+    if geometry is None or geometry.is_empty:
+        return meshes
+
+    for poly in _iter_polygon_parts(geometry):
+        if poly.is_empty or getattr(poly, "area", 0.0) <= 0.0:
+            continue
+
+        cache_key = None
+        cached_base = None
+        if extrude_cache is not None:
+            cache_key = (poly.wkb, round(float(height), 8))
+            cached_base = extrude_cache.get(cache_key)
+
+        if cached_base is None:
+            try:
+                base_mesh = trimesh.creation.extrude_polygon(poly, height=1.0)
+            except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as exc:
+                log.warning(
+                    "[HIGH_FIDELITY] Failed to extrude polygon: %s",
+                    exc,
+                    extra={"event": "polygon_extrusion_failed", "error_type": type(exc).__name__},
+                )
+                continue
+            if extrude_cache is not None and cache_key is not None:
+                extrude_cache[cache_key] = base_mesh.copy()
+            cached_base = base_mesh
+
+        mesh = cached_base.copy()
+        mesh.apply_scale([1.0, 1.0, float(height)])
+        mesh.apply_translation([0.0, 0.0, float(z_offset)])
+        meshes.append(mesh)
+
+    return meshes
+
+
+def _merge_layers_no_dilation(voxel_matrix, mat_id):
+    """Group consecutive Z-layers with identical masks (no dilation).
+    将连续相同掩码的 Z 层合并为组（不做膨胀）。
+    """
+    layer_groups = []
+    prev_mask = None
+    start_z = 0
+    for z in range(voxel_matrix.shape[0]):
+        curr_mask = voxel_matrix[z] == mat_id
+        if not np.any(curr_mask):
+            if prev_mask is not None:
+                layer_groups.append((start_z, z - 1, prev_mask))
+                prev_mask = None
+            continue
+        if prev_mask is None:
+            start_z = z
+            prev_mask = curr_mask
+        elif np.array_equal(curr_mask, prev_mask):
+            pass
+        else:
+            layer_groups.append((start_z, z - 1, prev_mask))
+            start_z = z
+            prev_mask = curr_mask
+    if prev_mask is not None:
+        layer_groups.append((start_z, voxel_matrix.shape[0] - 1, prev_mask))
+    return layer_groups
 
 
 if HAS_NUMBA:
@@ -183,6 +315,13 @@ class BaseMesher(ABC):
             return np.empty((0, 4), dtype=np.float64)
         return np.array(rectangles, dtype=np.float64)
 
+    @staticmethod
+    def _merge_layers_no_dilation(voxel_matrix, mat_id):
+        """Group consecutive Z-layers with identical masks (no dilation).
+        将连续相同掩码的 Z 层合并为组（不做膨胀）。
+        """
+        return _merge_layers_no_dilation(voxel_matrix, mat_id)
+
     def _build_mesh_from_layer_rects(self, layer_rectangles, height_px):
         """Build trimesh from list of (z_bottom, z_top, rects_array) tuples.
         从层矩形列表构建 trimesh。
@@ -263,6 +402,29 @@ class BaseMesher(ABC):
         mesh.update_faces(mesh.unique_faces())
         return mesh
 
+    def _build_mesh_from_layer_polygons(self, layer_polygons, height_px):
+        """Build trimesh from list of (z_bottom, z_top, geometry) tuples.
+        从层多边形列表构建 trimesh。
+        """
+        meshes = []
+        extrude_cache = {}
+
+        for z_bottom, z_top, geometry in layer_polygons:
+            if geometry is None or geometry.is_empty:
+                continue
+
+            height = float(z_top - z_bottom)
+            if height <= 0:
+                continue
+
+            world_geometry = _flip_geometry_to_world(geometry, height_px)
+            if world_geometry is None or world_geometry.is_empty:
+                continue
+
+            meshes.extend(_extrude_polygon_geometry(world_geometry, height, z_bottom, extrude_cache=extrude_cache))
+
+        return _merge_mesh_list(meshes)
+
 
 class VoxelMesher(BaseMesher):
     """
@@ -308,28 +470,7 @@ class VoxelMesher(BaseMesher):
     def _merge_layers_no_dilation(voxel_matrix, mat_id):
         """Group consecutive Z-layers with identical masks (no dilation).
         将连续相同掩码的 Z 层合并为组（不做膨胀）。"""
-        layer_groups = []
-        prev_mask = None
-        start_z = 0
-        for z in range(voxel_matrix.shape[0]):
-            curr_mask = voxel_matrix[z] == mat_id
-            if not np.any(curr_mask):
-                if prev_mask is not None:
-                    layer_groups.append((start_z, z - 1, prev_mask))
-                    prev_mask = None
-                continue
-            if prev_mask is None:
-                start_z = z
-                prev_mask = curr_mask
-            elif np.array_equal(curr_mask, prev_mask):
-                pass
-            else:
-                layer_groups.append((start_z, z - 1, prev_mask))
-                start_z = z
-                prev_mask = curr_mask
-        if prev_mask is not None:
-            layer_groups.append((start_z, voxel_matrix.shape[0] - 1, prev_mask))
-        return layer_groups
+        return _merge_layers_no_dilation(voxel_matrix, mat_id)
 
 
 class HighFidelityMesher(BaseMesher):
@@ -353,7 +494,44 @@ class HighFidelityMesher(BaseMesher):
     - Vertices match pixel coordinates exactly
     """
 
-    def generate_mesh(self, voxel_matrix, mat_id, height_px):
+    def __init__(self, disable_material_dilation: bool = False, boundary_geometry=None):
+        """Create a configurable high-fidelity mesher.
+        创建可配置的高保真 mesher。
+
+        Args:
+            disable_material_dilation: If True, skip per-material dilation.
+                (若为 True，则跳过每材质膨胀)
+            boundary_geometry: Optional polygonal boundary in pixel space.
+                (可选的像素空间 polygon 边界)
+        """
+        self.disable_material_dilation = bool(disable_material_dilation)
+        self.boundary_geometry = _normalize_polygonal_geometry(boundary_geometry)
+
+    @staticmethod
+    def _log_boundary_clip_fallback(exc, rect, mat_id):
+        """Emit structured logging when polygon clipping falls back to rect extrusion.
+        在多边形裁剪回退到矩形挤出时输出结构化日志。
+        """
+        x0, y0, x1, y1 = (float(value) for value in rect)
+        log.warning(
+            "[HIGH_FIDELITY] Boundary clip fallback for material %s rect=(%.3f, %.3f, %.3f, %.3f): %s",
+            mat_id,
+            x0,
+            y0,
+            x1,
+            y1,
+            exc,
+            extra={"event": "boundary_polygon_clip_fallback", "error_type": type(exc).__name__},
+        )
+
+    def generate_mesh(
+        self,
+        voxel_matrix,
+        mat_id,
+        height_px,
+        boundary_geometry=None,
+        disable_material_dilation=None,
+    ):
         """Generate high-fidelity mode mesh with greedy rect merging and dilation.
         生成高保真模式网格（贪婪矩形合并 + 形态学膨胀）。
 
@@ -365,20 +543,64 @@ class HighFidelityMesher(BaseMesher):
         Returns:
             trimesh.Trimesh or None
         """
-        layer_groups = self._merge_layers_with_dilation(voxel_matrix, mat_id)
+        boundary_geometry = self.boundary_geometry if boundary_geometry is None else _normalize_polygonal_geometry(boundary_geometry)
+        use_no_dilation = self.disable_material_dilation if disable_material_dilation is None else bool(disable_material_dilation)
+
+        if use_no_dilation:
+            layer_groups = self._merge_layers_no_dilation(voxel_matrix, mat_id)
+        else:
+            layer_groups = self._merge_layers_with_dilation(voxel_matrix, mat_id)
         if not layer_groups:
             return None
 
         mesh_type = "Backing" if mat_id == -2 else f"Mat ID {mat_id}"
-        log.info(f"[HIGH_FIDELITY] {mesh_type}: Merged {voxel_matrix.shape[0]} layers -> {len(layer_groups)} groups")
+        boundary_enabled = boundary_geometry is not None
+        log.info(
+            "[HIGH_FIDELITY] %s: Merged %s layers -> %s groups%s%s",
+            mesh_type,
+            voxel_matrix.shape[0],
+            len(layer_groups),
+            " [no-dilation]" if use_no_dilation else "",
+            " [boundary-aware]" if boundary_enabled else "",
+        )
 
         layer_rects = []
+        layer_polygons = []
         for start_z, end_z, mask in layer_groups:
             rects = self._greedy_rect_merge(mask)
-            if rects.shape[0] > 0:
-                layer_rects.append((float(start_z), float(end_z + 1), rects))
+            if rects.shape[0] == 0:
+                continue
 
-        mesh = self._build_mesh_from_layer_rects(layer_rects, height_px)
+            if not boundary_enabled:
+                layer_rects.append((float(start_z), float(end_z + 1), rects))
+                continue
+
+            interior_rects = []
+            clipped_geoms = []
+            for rect in rects:
+                x0, y0, x1, y1 = rect
+                rect_geom = box(float(x0), float(y0), float(x1), float(y1))
+                try:
+                    clipped = _normalize_polygonal_geometry(rect_geom.intersection(boundary_geometry))
+                except (ValueError, TypeError, RuntimeError, AttributeError, OSError) as exc:
+                    self._log_boundary_clip_fallback(exc, rect, mat_id)
+                    interior_rects.append(rect)
+                    continue
+                if clipped is None or clipped.is_empty:
+                    continue
+                if clipped.equals(rect_geom):
+                    interior_rects.append(rect)
+                else:
+                    clipped_geoms.append(clipped)
+
+            if interior_rects:
+                layer_rects.append((float(start_z), float(end_z + 1), np.array(interior_rects, dtype=np.float64)))
+            if clipped_geoms:
+                layer_polygons.append((float(start_z), float(end_z + 1), _normalize_polygonal_geometry(unary_union(clipped_geoms))))
+
+        rect_mesh = self._build_mesh_from_layer_rects(layer_rects, height_px) if layer_rects else None
+        polygon_mesh = self._build_mesh_from_layer_polygons(layer_polygons, height_px) if layer_polygons else None
+        mesh = _merge_mesh_list([rect_mesh, polygon_mesh])
         if mesh is not None:
             total_rects = sum(r.shape[0] for _, _, r in layer_rects)
             log.info(
@@ -433,7 +655,7 @@ class HighFidelityMesher(BaseMesher):
 # ========== Factory Method ==========
 
 
-def get_mesher(mode_name: ModelingMode):
+def get_mesher(mode_name: ModelingMode, disable_material_dilation: bool = False, boundary_geometry=None):
     """
     Return corresponding Mesher instance based on mode name
 
@@ -449,12 +671,18 @@ def get_mesher(mode_name: ModelingMode):
     # High-Fidelity mode (replaces Vector and Woodblock)
     if mode_name == ModelingMode.HIGH_FIDELITY:
         log.info("[MESHER_FACTORY] Selected: HighFidelityMesher (RLE-based with Dilation)")
-        return HighFidelityMesher()
+        return HighFidelityMesher(
+            disable_material_dilation=disable_material_dilation,
+            boundary_geometry=boundary_geometry,
+        )
 
     # Vector mode uses same algorithm as High-Fidelity
     if mode_name == ModelingMode.VECTOR:
         log.info("[MESHER_FACTORY] Selected: HighFidelityMesher (Vector mode)")
-        return HighFidelityMesher()
+        return HighFidelityMesher(
+            disable_material_dilation=disable_material_dilation,
+            boundary_geometry=boundary_geometry,
+        )
 
     # Pixel Art mode (legacy voxel)
     if mode_name == ModelingMode.PIXEL:
@@ -463,4 +691,7 @@ def get_mesher(mode_name: ModelingMode):
 
     # Default fallback to High-Fidelity
     log.info(f"[MESHER_FACTORY] Unknown mode '{mode_name}', defaulting to HighFidelityMesher")
-    return HighFidelityMesher()
+    return HighFidelityMesher(
+        disable_material_dilation=disable_material_dilation,
+        boundary_geometry=boundary_geometry,
+    )

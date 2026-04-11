@@ -269,15 +269,17 @@ class LuminaImageProcessor:
         """计算目标尺寸和像素比例。 Calculate target dimensions and pixel scale."""
         if modeling_mode == ModelingMode.HIGH_FIDELITY:
             PIXELS_PER_MM = 10
-            target_w = int(target_width_mm * PIXELS_PER_MM)
+            # Round instead of truncating so crop-derived puzzle pieces don't lose
+            # a pixel from float epsilon (e.g. 17.799999999999997mm -> 177px).
+            target_w = int(round(target_width_mm * PIXELS_PER_MM))
             pixel_scale = 1.0 / PIXELS_PER_MM
             log.info(f"[IMAGE_PROCESSOR] High-res mode: {PIXELS_PER_MM} px/mm")
         else:
-            target_w = int(target_width_mm / PrinterConfig.NOZZLE_WIDTH)
+            target_w = int(round(target_width_mm / PrinterConfig.NOZZLE_WIDTH))
             pixel_scale = PrinterConfig.NOZZLE_WIDTH
             log.info(f"[IMAGE_PROCESSOR] Pixel mode: {1.0/pixel_scale:.2f} px/mm")
         target_w = max(1, target_w)
-        target_h = max(1, int(target_w * img.height / img.width))
+        target_h = max(1, int(round(target_w * img.height / img.width)))
         log.info(
             f"[IMAGE_PROCESSOR] Target: {target_w}x{target_h}px ({target_w*pixel_scale:.1f}x{target_h*pixel_scale:.1f}mm)"
         )

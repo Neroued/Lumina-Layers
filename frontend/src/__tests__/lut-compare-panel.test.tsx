@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import LutComparePanel from "../components/LutComparePanel";
+import { ColorMode } from "../api/types";
 import { useLutCompareStore } from "../stores/lutCompareStore";
 
 const mockFetchLutInfo = vi.fn();
@@ -27,11 +28,11 @@ beforeEach(() => {
     ],
   });
 
-  useLutCompareStore.setState({
-    lutList: [
-      { name: "LUT A", color_mode: "4-Color (RYBW)" as any, path: "/fake/a.json" },
-      { name: "LUT B", color_mode: "4-Color (RYBW)" as any, path: "/fake/b.json" },
-    ],
+    useLutCompareStore.setState({
+      lutList: [
+        { name: "LUT A", color_mode: ColorMode.FOUR_COLOR_RYBW, path: "/fake/a.json" },
+        { name: "LUT B", color_mode: ColorMode.FOUR_COLOR_RYBW, path: "/fake/b.json" },
+      ],
     lutListLoading: false,
     lutAName: "",
     lutBName: "",

@@ -10,10 +10,12 @@ from hypothesis import HealthCheck, settings
 SMOKE_TEST_FILES = {
     "test_api_app_unit.py",
     "test_api_errors_unit.py",
+    "test_converter_puzzle_unit.py",
     "test_converter_structure_contract_unit.py",
     "test_logging_exception_governance_unit.py",
     "test_heightmap_upload_unit.py",
     "test_converter_preview_unit.py",
+    "test_puzzle_3mf_unit.py",
 }
 
 
