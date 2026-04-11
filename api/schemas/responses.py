@@ -77,6 +77,33 @@ class LargeFormatGenerateResponse(BaseModel):
     grid_rows: int
 
 
+class PuzzleLayoutPreviewResponse(BaseModel):
+    """拼图布局预览响应。"""
+
+    status: str
+    message: str
+    overlay_url: str
+    piece_count: int
+    grid_cols: int
+    grid_rows: int
+    derived_piece_width_mm: float
+    derived_piece_height_mm: float
+    warnings: list[str] = Field(default_factory=list)
+
+
+class PuzzleGenerateResponse(BaseModel):
+    """拼图生成响应。"""
+
+    status: str
+    message: str
+    download_url: str
+    threemf_disk_path: Optional[str] = None
+    piece_count: int
+    grid_cols: int
+    grid_rows: int
+    warnings: list[str] = Field(default_factory=list)
+
+
 class BatchItemResult(BaseModel):
     """批量转换单项结果。"""
 

@@ -28,6 +28,10 @@ export enum StructureMode {
   SINGLE_SIDED = "Single-sided",
 }
 
+export type PuzzleStyle = "regular" | "irregular";
+export type PuzzleSizingMode = "piece_size" | "grid" | "piece_count";
+export type PuzzleConnectorStyle = "classic" | "easy_cut";
+
 // ========== Request Models ==========
 
 export interface ConvertPreviewRequest {
@@ -79,6 +83,27 @@ export interface ColorReplacementItem {
   quantized_hex: string;
   matched_hex: string;
   replacement_hex: string;
+}
+
+export interface PuzzleLayoutPreviewRequest {
+  target_height_mm: number;
+  puzzle_style: PuzzleStyle;
+  sizing_mode: PuzzleSizingMode;
+  piece_width_mm: number;
+  piece_height_mm: number;
+  rows: number;
+  cols: number;
+  target_piece_count: number;
+  seed: number;
+  connector_style: PuzzleConnectorStyle;
+  labels_enabled: boolean;
+  engrave_back_labels: boolean;
+  irregularity_strength: number;
+  min_neck_width_mm: number;
+}
+
+export interface PuzzleGenerateRequest extends PuzzleLayoutPreviewRequest {
+  params: ConvertGenerateRequest;
 }
 
 // ========== Palette & Height Types ==========
@@ -149,6 +174,29 @@ export interface LargeFormatGenerateResponse {
   tile_count: number;
   grid_cols: number;
   grid_rows: number;
+}
+
+export interface PuzzleLayoutPreviewResponse {
+  status: string;
+  message: string;
+  overlay_url: string;
+  piece_count: number;
+  grid_cols: number;
+  grid_rows: number;
+  derived_piece_width_mm: number;
+  derived_piece_height_mm: number;
+  warnings: string[];
+}
+
+export interface PuzzleGenerateResponse {
+  status: string;
+  message: string;
+  download_url: string;
+  threemf_disk_path?: string | null;
+  piece_count: number;
+  grid_cols: number;
+  grid_rows: number;
+  warnings: string[];
 }
 
 /** 生成接口响应，包含下载 URL 和可选的 3D 预览 URL */

@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { useConverterStore } from "../stores/converter";
 import OutlineFrame3D from "./OutlineFrame3D";
 import CloisonneWire3D from "./CloisonneWire3D";
+import PuzzleOverlay3D from "./PuzzleOverlay3D";
 
 // ========== Exported pure utility functions (testable without Three.js) ==========
 
@@ -53,7 +54,10 @@ export interface InteractiveModelViewerProps {
   enableCloisonne?: boolean;   // 是否启用景泰蓝预览，默认 false
   wireWidthMm?: number;        // 金丝宽度 (mm)，默认 0.4
   wireHeightMm?: number;       // 金丝高度 (mm)，默认 0.1
+  puzzleOverlayEnabled?: boolean;
+  puzzleOverlayUrl?: string | null;
   onHoverSample?: (sample: ViewerHoverSample | null) => void;
+  hoverEnabled?: boolean;
 }
 
 export interface ViewerHoverSample {
@@ -104,6 +108,9 @@ function InteractiveModelViewer({
   enableCloisonne = false,
   wireWidthMm = 0.4,
   wireHeightMm = 0.1,
+  puzzleOverlayEnabled = false,
+  puzzleOverlayUrl = null,
+  hoverEnabled = true,
 }: InteractiveModelViewerProps) {
   const { scene } = useGLTF(url);
   const groupRef = useRef<THREE.Group>(null);
@@ -493,7 +500,7 @@ function InteractiveModelViewer({
   );
 
   const processHoverPointer = useCallback(() => {
-    if (!onHoverSample) return;
+    if (!onHoverSample || !hoverEnabled) return;
     const processStart = performance.now();
     const stats = hoverPerfStatsRef.current;
     stats.processCount += 1;
@@ -564,11 +571,11 @@ function InteractiveModelViewer({
     stats.totalProcessMs += totalMs;
     stats.maxProcessMs = Math.max(stats.maxProcessMs, totalMs);
     maybeFlushHoverPerfLog(totalMs > 8);
-  }, [threeCtx.gl, threeCtx.camera, colorMeshes, mapWorldToPreviewPixel, onHoverSample, emitHoverSample, maybeFlushHoverPerfLog]);
+  }, [threeCtx.gl, threeCtx.camera, colorMeshes, mapWorldToPreviewPixel, onHoverSample, hoverEnabled, emitHoverSample, maybeFlushHoverPerfLog]);
 
   const handlePointerMove = useCallback(
     (event: PointerEvent) => {
-      if (!onHoverSample) return;
+      if (!onHoverSample || !hoverEnabled) return;
       hoverPerfStatsRef.current.pointerMoveCount += 1;
 
       hoverPointerRef.current = { clientX: event.clientX, clientY: event.clientY };
@@ -582,7 +589,7 @@ function InteractiveModelViewer({
         processHoverPointer();
       });
     },
-    [onHoverSample, processHoverPointer],
+    [onHoverSample, hoverEnabled, processHoverPointer],
   );
 
   const handleWheel = useCallback(() => {
@@ -604,6 +611,18 @@ function InteractiveModelViewer({
     }
     emitHoverSample(null);
   }, [emitHoverSample]);
+
+  useEffect(() => {
+    if (hoverEnabled) {
+      return;
+    }
+    hoverPointerRef.current = null;
+    if (hoverRafRef.current !== null) {
+      window.cancelAnimationFrame(hoverRafRef.current);
+      hoverRafRef.current = null;
+    }
+    emitHoverSample(null);
+  }, [hoverEnabled, emitHoverSample]);
 
   useEffect(() => {
     return () => {
@@ -906,6 +925,17 @@ function InteractiveModelViewer({
         colorMeshes={colorMeshes}
         backingPlateMesh={backingMesh}
         spacerThick={spacerThick}
+      />
+      <PuzzleOverlay3D
+        enabled={puzzleOverlayEnabled}
+        overlayUrl={puzzleOverlayUrl}
+        modelBounds={modelBounds}
+        spacerThick={spacerThick}
+        enableRelief={enableRelief}
+        colorHeightMap={colorHeightMap}
+        enableOutline={enableOutline}
+        enableCloisonne={enableCloisonne}
+        wireHeightMm={wireHeightMm}
       />
     </group>
   );

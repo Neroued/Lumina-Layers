@@ -8,6 +8,7 @@ packaging, and injects Bambu/Orca vendor metadata via CustomPart.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import io
 import os
 import sys
@@ -15,6 +16,7 @@ import time
 import xml.etree.ElementTree as ET
 import json
 import copy
+import re
 from typing import List, Dict, Optional
 import numpy as np
 
@@ -44,6 +46,27 @@ def _get_n3mf():
 
 _CONFIG_TEMPLATE_CACHE = None
 _PRINTER_TEMPLATE_CACHE: dict[str, dict] = {}
+
+
+@dataclass(frozen=True)
+class _MeshExportEntry:
+    """Internal 3MF mesh export descriptor.
+
+    内部 3MF 网格导出描述。
+
+    Attributes:
+        mesh: Trimesh geometry to export. (待导出的 Trimesh 几何体)
+        object_name: Unique object name stored in the 3MF object list.
+            (写入 3MF 对象列表的唯一对象名)
+        material_name: Shared material/slot name used for global filament tables.
+            (用于全局耗材表的共享材料或槽位名)
+        color_rgb: RGB tuple for the shared material. (共享材料的 RGB 颜色)
+    """
+
+    mesh: object
+    object_name: str
+    material_name: str
+    color_rgb: tuple[int, int, int]
 
 
 def load_printer_template(printer_id: str, slicer: str = "BambuStudio") -> dict:
@@ -155,7 +178,7 @@ class BambuStudio3MFWriter:
 
         self.output_path = output_path
         self.settings = {**self.DEFAULT_SETTINGS, **(settings or {})}
-        self.objects: list[tuple[_get_trimesh().Trimesh, str, tuple]] = []
+        self.objects: list[_MeshExportEntry] = []
         self.color_mode = color_mode
         self.printer_id = printer_id
         self.slicer = normalize_slicer_software_id(slicer)
@@ -180,7 +203,36 @@ class BambuStudio3MFWriter:
         if v_count == 0 or f_count == 0:
             raise ValueError(f"[BAMBU_3MF] Cannot add mesh '{name}': empty geometry (v={v_count}, f={f_count})")
 
-        self.objects.append((mesh, name, color_rgb))
+        metadata = getattr(mesh, "metadata", {}) or {}
+        material_name = str(metadata.get("bambu_material_name") or name)
+        self.objects.append(
+            _MeshExportEntry(
+                mesh=mesh,
+                object_name=name,
+                material_name=material_name,
+                color_rgb=tuple(int(channel) for channel in color_rgb[:3]),
+            )
+        )
+
+    def _build_material_palette(self) -> tuple[list[tuple[str, tuple[int, int, int]]], dict[str, int]]:
+        """Build a stable shared material palette from the queued mesh objects.
+
+        从待导出的网格对象中构建稳定的共享材料调色板。
+
+        Returns:
+            tuple[list[tuple[str, tuple[int, int, int]]], dict[str, int]]:
+                Ordered shared-material palette and material-name to palette-index map.
+                （有序共享材料调色板，以及材料名到调色板索引的映射）
+        """
+
+        palette: list[tuple[str, tuple[int, int, int]]] = []
+        name_to_index: dict[str, int] = {}
+        for entry in self.objects:
+            if entry.material_name in name_to_index:
+                continue
+            name_to_index[entry.material_name] = len(palette)
+            palette.append((entry.material_name, entry.color_rgb))
+        return palette, name_to_index
 
     def export(self) -> str:
         """Export all meshes to a BambuStudio-compatible 3MF file.
@@ -209,23 +261,28 @@ class BambuStudio3MFWriter:
         builder.add_metadata("BambuStudio:3mfVersion", "1")
         builder.add_external_model_metadata("BambuStudio:3mfVersion", "1")
 
+        material_palette, material_indices = self._build_material_palette()
         materials = [
-            n3mf.BaseMaterial(name, n3mf.Color(rgb[0], rgb[1], rgb[2])) for _, name, rgb in self.objects
+            n3mf.BaseMaterial(name, n3mf.Color(rgb[0], rgb[1], rgb[2]))
+            for name, rgb in material_palette
         ]
         mat_group_id = builder.add_base_material_group(materials)
 
         object_ids: list[int] = []
-        for idx, (mesh, name, _) in enumerate(self.objects):
+        material_index_by_object: list[int] = []
+        for entry in self.objects:
             n3mf_mesh = n3mf.Mesh.from_arrays(
-                np.ascontiguousarray(mesh.vertices, dtype=np.float64),
-                np.ascontiguousarray(mesh.faces, dtype=np.int64),
+                np.ascontiguousarray(entry.mesh.vertices, dtype=np.float64),
+                np.ascontiguousarray(entry.mesh.faces, dtype=np.int64),
             )
-            obj_id = builder.add_mesh_object(name, n3mf_mesh, mat_group_id, idx)
+            material_index = material_indices[entry.material_name]
+            obj_id = builder.add_mesh_object(entry.object_name, n3mf_mesh, mat_group_id, material_index)
             builder.add_build_item(obj_id)
             object_ids.append(obj_id)
+            material_index_by_object.append(material_index)
 
         assembly_id = object_ids[-1] + 1 if object_ids else mat_group_id + 1
-        self._inject_metadata_parts(builder, object_ids, assembly_id)
+        self._inject_metadata_parts(builder, object_ids, assembly_id, material_index_by_object)
 
         doc = builder.build()
 
@@ -292,12 +349,17 @@ class BambuStudio3MFWriter:
         builder: _get_n3mf().DocumentBuilder,
         object_ids: list[int],
         assembly_id: int,
+        material_index_by_object: list[int] | None = None,
     ) -> None:
         """Inject all Bambu vendor metadata files into the 3MF via CustomPart.
         通过 CustomPart 向 3MF 中注入所有 Bambu 厂商元数据。
         """
         parts = [
-            ("Metadata/model_settings.config", "text/xml", self._build_model_settings_bytes(object_ids, assembly_id)),
+            (
+                "Metadata/model_settings.config",
+                "text/xml",
+                self._build_model_settings_bytes(object_ids, assembly_id, material_index_by_object),
+            ),
             ("Metadata/project_settings.config", "text/xml", self._build_project_settings_bytes()),
             ("Metadata/slice_info.config", "text/xml", self._build_slice_info_bytes()),
         ]
@@ -323,7 +385,12 @@ class BambuStudio3MFWriter:
     # Individual metadata builders (return bytes, no filesystem I/O)
     # ------------------------------------------------------------------
 
-    def _build_model_settings_bytes(self, object_ids: list[int], assembly_id: int) -> bytes:
+    def _build_model_settings_bytes(
+        self,
+        object_ids: list[int],
+        assembly_id: int,
+        material_index_by_object: list[int] | None = None,
+    ) -> bytes:
         """Build model_settings.config XML as bytes.
         构建 model_settings.config XML（字节形式）。
         """
@@ -333,9 +400,15 @@ class BambuStudio3MFWriter:
         ET.SubElement(obj_elem, "metadata", attrib={"key": "extruder", "value": "1"})
 
         source_file = os.path.basename(self.output_path)
+        if material_index_by_object is None:
+            resolved_material_indices = list(range(len(self.objects)))
+        else:
+            resolved_material_indices = material_index_by_object
 
-        for idx, ((mesh, name, _), obj_id) in enumerate(zip(self.objects, object_ids)):
-            bounds = np.asarray(getattr(mesh, "bounds", np.zeros((2, 3))), dtype=np.float64)
+        for idx, (entry, obj_id, material_index) in enumerate(
+            zip(self.objects, object_ids, resolved_material_indices)
+        ):
+            bounds = np.asarray(getattr(entry.mesh, "bounds", np.zeros((2, 3))), dtype=np.float64)
             if bounds.shape != (2, 3):
                 bounds = np.zeros((2, 3), dtype=np.float64)
             center_x, center_y, center_z = bounds.mean(axis=0)
@@ -350,7 +423,7 @@ class BambuStudio3MFWriter:
                 "0 0 0 1"
             )
             part = ET.SubElement(obj_elem, "part", attrib={"id": str(obj_id), "subtype": "normal_part"})
-            ET.SubElement(part, "metadata", attrib={"key": "name", "value": name})
+            ET.SubElement(part, "metadata", attrib={"key": "name", "value": entry.object_name})
             ET.SubElement(part, "metadata", attrib={"key": "matrix", "value": matrix_value})
             ET.SubElement(part, "metadata", attrib={"key": "source_file", "value": source_file})
             ET.SubElement(part, "metadata", attrib={"key": "source_object_id", "value": "0"})
@@ -358,7 +431,7 @@ class BambuStudio3MFWriter:
             ET.SubElement(part, "metadata", attrib={"key": "source_offset_x", "value": self._format_number(center_x)})
             ET.SubElement(part, "metadata", attrib={"key": "source_offset_y", "value": self._format_number(center_y)})
             ET.SubElement(part, "metadata", attrib={"key": "source_offset_z", "value": self._format_number(center_z)})
-            ET.SubElement(part, "metadata", attrib={"key": "extruder", "value": str(idx + 1)})
+            ET.SubElement(part, "metadata", attrib={"key": "extruder", "value": str(material_index + 1)})
             ET.SubElement(
                 part,
                 "mesh_stat",
@@ -401,7 +474,8 @@ class BambuStudio3MFWriter:
         """Build project_settings.config JSON as bytes.
         构建 project_settings.config JSON（字节形式）。
         """
-        num_colors = len(self.objects)
+        material_palette, _ = self._build_material_palette()
+        num_colors = len(material_palette)
 
         settings = self._get_base_config_template()
 
@@ -440,7 +514,7 @@ class BambuStudio3MFWriter:
                         template_value = value[0] if value else "0"
                         settings[key] = [template_value] * num_colors
 
-        settings.update(self._build_filament_arrays(num_colors))
+        settings.update(self._build_filament_arrays(material_palette))
 
         settings.setdefault("single_extruder_multi_material", "1")
         settings.setdefault("enable_prime_tower", "1")
@@ -579,20 +653,22 @@ class BambuStudio3MFWriter:
             "nozzle_temperature_initial_layer": ["220"] * 8,
         }
 
-    def _build_filament_arrays(self, num_colors: int) -> dict:
-        """Build filament-related arrays with length matching num_colors.
-        构建长度匹配 num_colors 的耗材相关数组。
+    def _build_filament_arrays(self, material_palette: list[tuple[str, tuple[int, int, int]]]) -> dict:
+        """Build filament-related arrays for the shared material palette.
+        为共享材料调色板构建耗材相关数组。
 
         Args:
-            num_colors: Number of colors in the mode (2, 4, 6, or 8)
+            material_palette: Ordered shared material palette.
+                （有序的共享材料调色板）
 
         Returns:
-            dict: Filament arrays with correct lengths
+            dict: Filament arrays with correct lengths.
+                （长度正确的耗材数组）
         """
         arrays: dict[str, list] = {}
 
         arrays["filament_colour"] = []
-        for _, _, color_rgb in self.objects:
+        for _, color_rgb in material_palette:
             hex_color = f"#{color_rgb[0]:02X}{color_rgb[1]:02X}{color_rgb[2]:02X}"
             arrays["filament_colour"].append(hex_color)
 
@@ -660,15 +736,13 @@ def export_scene_with_bambu_metadata(
     name_to_color: dict[str, tuple] = {}
     print("[BAMBU_3MF] Building color mapping:")
     for idx, slot_name in enumerate(slot_names):
-        if slot_name in preview_colors:
-            name_to_color[slot_name] = tuple(preview_colors[slot_name][:3])
-            print(f"[BAMBU_3MF]   {idx}: '{slot_name}' -> RGB{name_to_color[slot_name]} (by name)")
-        elif idx in preview_colors:
-            name_to_color[slot_name] = tuple(preview_colors[idx][:3])
-            print(f"[BAMBU_3MF]   {idx}: '{slot_name}' -> RGB{name_to_color[slot_name]} (by ID)")
-        else:
-            name_to_color[slot_name] = (200, 200, 200)
-            print(f"[BAMBU_3MF]   {idx}: '{slot_name}' -> RGB(200,200,200) (fallback)")
+        color_rgb, source = _resolve_preview_color_for_slot_name(
+            slot_name=slot_name,
+            slot_index=idx,
+            preview_colors=preview_colors,
+        )
+        name_to_color[slot_name] = color_rgb
+        print(f"[BAMBU_3MF]   {idx}: '{slot_name}' -> RGB{color_rgb} ({source})")
 
     print(f"[BAMBU_3MF] Color mapping complete: {list(name_to_color.keys())}")
 
@@ -689,3 +763,78 @@ def export_scene_with_bambu_metadata(
         raise ValueError("[BAMBU_3MF] Missing geometries for slot names: " + ", ".join(unmatched))
 
     return writer.export()
+
+
+def _resolve_preview_color_for_slot_name(
+    slot_name: str,
+    slot_index: int,
+    preview_colors: Dict,
+) -> tuple[tuple[int, int, int], str]:
+    """Resolve a slot color from preview metadata.
+
+    根据预览颜色元数据解析槽位颜色。
+
+    Args:
+        slot_name: User-facing slot/material name.
+            用户可见的槽位或材料名称。
+        slot_index: Compact slot index in the current export order.
+            当前导出顺序中的紧凑槽位索引。
+        preview_colors: Preview color mapping from the pipeline cache.
+            来自流水线缓存的预览颜色映射。
+
+    Returns:
+        tuple[tuple[int, int, int], str]:
+            Resolved RGB color and a short resolution source label.
+            解析得到的 RGB 颜色，以及解析来源标记。
+    """
+
+    if slot_name in preview_colors:
+        return _coerce_preview_rgb(preview_colors[slot_name]), "by name"
+
+    slot_number = _parse_slot_number(slot_name)
+    if slot_number is not None:
+        slot_key = slot_number - 1
+        if slot_key in preview_colors:
+            return _coerce_preview_rgb(preview_colors[slot_key]), "by slot"
+        slot_key_str = str(slot_key)
+        if slot_key_str in preview_colors:
+            return _coerce_preview_rgb(preview_colors[slot_key_str]), "by slot"
+
+    if slot_index in preview_colors:
+        return _coerce_preview_rgb(preview_colors[slot_index]), "by index"
+
+    slot_index_str = str(slot_index)
+    if slot_index_str in preview_colors:
+        return _coerce_preview_rgb(preview_colors[slot_index_str]), "by index"
+
+    return (200, 200, 200), "fallback"
+
+
+def _parse_slot_number(slot_name: str) -> int | None:
+    """Extract a 1-based slot number from a slot label when present.
+
+    从槽位名称中提取 1-based 槽位编号。
+    """
+
+    match = re.match(r"Slot\s+(\d+)\b", slot_name)
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+def _coerce_preview_rgb(value: object) -> tuple[int, int, int]:
+    """Coerce a preview-color value into an RGB tuple.
+
+    将预览颜色值转换为 RGB 元组。
+    """
+
+    if isinstance(value, np.ndarray):
+        channels = value.tolist()
+    elif isinstance(value, (list, tuple)):
+        channels = list(value)
+    else:
+        raise ValueError(f"Unsupported preview color value: {type(value)!r}")
+
+    if len(channels) < 3:
+        raise ValueError("Preview color value must have at least 3 channels.")
+    return tuple(int(channel) for channel in channels[:3])

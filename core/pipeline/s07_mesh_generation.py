@@ -11,10 +11,12 @@ S07 — 多材质 3D 网格生成（支持并行 ThreadPoolExecutor）。
 import os
 import time
 import logging
+import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 import trimesh
+from shapely.geometry import Polygon
 
 from config import PrinterConfig
 from core.mesh_generators import get_mesher
@@ -27,6 +29,29 @@ def _timed_generate_mesh(mesher, full_matrix, mat_id, target_h):
     _t = time.perf_counter()
     result = mesher.generate_mesh(full_matrix, mat_id, target_h)
     return result, time.perf_counter() - _t
+
+
+def _load_boundary_geometry(boundary_path: str | None):
+    """Load optional puzzle boundary geometry from a JSON payload.
+    从 JSON 载荷加载可选的拼图边界几何。
+    """
+    if not boundary_path:
+        return None
+
+    with open(boundary_path, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+
+    polygon_px = payload.get("polygon_px") or []
+    holes_px = payload.get("holes_px") or []
+    if len(polygon_px) < 3:
+        raise ValueError("piece_boundary_geometry_path is missing a valid polygon_px ring.")
+
+    geometry = Polygon(polygon_px, holes=holes_px)
+    if not geometry.is_valid:
+        geometry = geometry.buffer(0)
+    if geometry.is_empty:
+        raise ValueError("Loaded piece boundary geometry is empty after normalization.")
+    return geometry
 
 
 def run(ctx: dict) -> dict:
@@ -52,6 +77,9 @@ def run(ctx: dict) -> dict:
     modeling_mode = ctx["modeling_mode"]
     target_h = ctx["target_h"]
     pixel_scale = ctx["pixel_scale"]
+    piece_boundary_geometry_path = ctx.get("piece_boundary_geometry_path")
+    disable_material_dilation = bool(ctx.get("disable_material_dilation", False))
+    boundary_geometry = _load_boundary_geometry(piece_boundary_geometry_path)
 
     _bench_enabled = ctx.get("_bench_enabled", True)
     _mesh_t0 = time.perf_counter() if _bench_enabled else None
@@ -66,7 +94,11 @@ def run(ctx: dict) -> dict:
 
     _log.info(f"[S07] Transform: XY={pixel_scale}mm/px, Z={PrinterConfig.LAYER_HEIGHT}mm/layer")
 
-    mesher = get_mesher(modeling_mode)
+    mesher = get_mesher(
+        modeling_mode,
+        disable_material_dilation=disable_material_dilation,
+        boundary_geometry=boundary_geometry,
+    )
     _log.info(f"[S07] Using mesher: {mesher.__class__.__name__}")
 
     valid_slot_names = []
@@ -135,5 +167,7 @@ def run(ctx: dict) -> dict:
     ctx["valid_slot_names"] = valid_slot_names
     ctx["transform"] = transform
     ctx["mesher"] = mesher
+    ctx["boundary_geometry"] = boundary_geometry
+    ctx["disable_material_dilation"] = disable_material_dilation
 
     return ctx

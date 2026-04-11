@@ -40,17 +40,17 @@ def calculate_target_dimensions(
     if modeling_mode == ModelingMode.HIGH_FIDELITY:
         # High-precision mode: 10 pixels/mm
         PIXELS_PER_MM = 10
-        target_w = int(target_width_mm * PIXELS_PER_MM)
+        target_w = int(round(target_width_mm * PIXELS_PER_MM))
         pixel_scale = 1.0 / PIXELS_PER_MM  # 0.1 mm per pixel
         _log.info(f"[IMAGE_PROCESSOR] High-res mode: {PIXELS_PER_MM} px/mm")
     else:
         # Pixel mode: Based on nozzle width
-        target_w = int(target_width_mm / PrinterConfig.NOZZLE_WIDTH)
+        target_w = int(round(target_width_mm / PrinterConfig.NOZZLE_WIDTH))
         pixel_scale = PrinterConfig.NOZZLE_WIDTH
         _log.info(f"[IMAGE_PROCESSOR] Pixel mode: {1.0/pixel_scale:.2f} px/mm")
 
     target_w = max(1, target_w)
-    target_h = max(1, int(target_w * img_height / img_width))
+    target_h = max(1, int(round(target_w * img_height / img_width)))
     _log.info(
         f"[IMAGE_PROCESSOR] Target: {target_w}×{target_h}px ({target_w*pixel_scale:.1f}×{target_h*pixel_scale:.1f}mm)"
     )

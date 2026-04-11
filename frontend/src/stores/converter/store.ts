@@ -8,6 +8,9 @@ import type {
   PaletteEntry,
   AutoHeightMode,
   BatchResponse,
+  PuzzleConnectorStyle,
+  PuzzleSizingMode,
+  PuzzleStyle,
 } from "../../api/types";
 import {
   ColorMode as ColorModeEnum,
@@ -19,6 +22,9 @@ import {
   convertPreview as apiConvertPreview,
   convertGenerate as apiConvertGenerate,
   convertGenerateLargeFormat as apiConvertGenerateLargeFormat,
+  convertGeneratePuzzle as apiConvertGeneratePuzzle,
+  convertPuzzleLayoutPreview as apiConvertPuzzleLayoutPreview,
+  fetchLayerImages as apiFetchLayerImages,
   fetchBedSizes as apiFetchBedSizes,
   uploadHeightmap as apiUploadHeightmap,
   fetchLutColors as apiFetchLutColors,
@@ -85,7 +91,7 @@ export interface RegionData {
 // ========== Pending Replacement Types ==========
 
 export interface PendingReplacement {
-  sourceHex: string; // 原色 hex锛堜笉甯?#锛?
+  sourceHex: string; // 原色 hex（不带 #）
   targetHex: string; // 目标色 hex（不带 #）
   mode: SelectionMode; // 触发时的选择模式
   sourceColors?: string[]; // select-all 批量模式下的多个源色
@@ -114,6 +120,25 @@ function getPreviewBaseUrl(
   state: Pick<ConverterState, "previewBaseImageUrl" | "originalPreviewUrl" | "previewImageUrl">,
 ): string | null {
   return state.previewBaseImageUrl ?? state.originalPreviewUrl ?? state.previewImageUrl;
+}
+
+function extractFileIdFromApiUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const match = url.match(/\/api\/files\/([^/?#]+)/);
+  return match ? match[1] : null;
+}
+
+function collectKeepFileIds(
+  urls: Array<string | null | undefined>,
+): string[] {
+  const keepIds = new Set<string>();
+  for (const url of urls) {
+    const fileId = extractFileIdFromApiUrl(url);
+    if (fileId) {
+      keepIds.add(fileId);
+    }
+  }
+  return Array.from(keepIds);
 }
 
 const VALID_IMAGE_TYPES = new Set([
@@ -212,6 +237,26 @@ export interface ConverterState {
   largeFormatEnabled: boolean;
   tileWidthMm: number;
   tileHeightMm: number;
+  puzzleEnabled: boolean;
+  puzzleStyle: PuzzleStyle;
+  puzzleSizingMode: PuzzleSizingMode;
+  pieceWidthMm: number;
+  pieceHeightMm: number;
+  puzzleRows: number;
+  puzzleCols: number;
+  targetPieceCount: number;
+  connectorStyle: PuzzleConnectorStyle;
+  labelsEnabled: boolean;
+  engraveBackLabels: boolean;
+  irregularityStrength: number;
+  minNeckWidthMm: number;
+  puzzleOverlayUrl: string | null;
+  puzzleWarnings: string[];
+  puzzleResolvedRows: number | null;
+  puzzleResolvedCols: number | null;
+  puzzleResolvedPieceCount: number | null;
+  puzzleDerivedPieceWidthMm: number | null;
+  puzzleDerivedPieceHeightMm: number | null;
 
   // 颜色替换
   replacement_regions: ColorReplacementItem[];
@@ -300,6 +345,7 @@ export interface ConverterState {
   layerImages: { layer_index: number; name: string; url: string }[];
   layerImagesLoading: boolean;
   layerImagesOpen: boolean;
+  layerImagesSourceKey: string | null;
 
   // 颜色选择模式
   selectionMode: SelectionMode;
@@ -361,6 +407,21 @@ export interface ConverterActions {
   setLargeFormatEnabled: (enabled: boolean) => void;
   setTileWidthMm: (width: number) => void;
   setTileHeightMm: (height: number) => void;
+  setPuzzleEnabled: (enabled: boolean) => void;
+  setPuzzleStyle: (style: PuzzleStyle) => void;
+  setPuzzleSizingMode: (mode: PuzzleSizingMode) => void;
+  setPieceWidthMm: (width: number) => void;
+  setPieceHeightMm: (height: number) => void;
+  setPuzzleRows: (rows: number) => void;
+  setPuzzleCols: (cols: number) => void;
+  setTargetPieceCount: (count: number) => void;
+  setConnectorStyle: (style: PuzzleConnectorStyle) => void;
+  setLabelsEnabled: (enabled: boolean) => void;
+  setEngraveBackLabels: (enabled: boolean) => void;
+  setIrregularityStrength: (strength: number) => void;
+  setMinNeckWidthMm: (width: number) => void;
+  submitPuzzleLayoutPreview: () => Promise<boolean>;
+  clearPuzzleLayoutPreview: () => void;
 
   // 热床尺寸
   setBedLabel: (label: string) => void;
@@ -448,7 +509,8 @@ export interface ConverterActions {
   clearError: () => void;
 
   // 分层预览
-  fetchLayerImages: () => Promise<void>;
+  fetchLayerImages: (previewGlbUrl?: string | null) => Promise<void>;
+  resetLayerImages: () => void;
   setLayerImagesOpen: (open: boolean) => void;
 
   // 配方导入
@@ -476,6 +538,13 @@ function loadLutName(): string {
 }
 
 // ========== Default State ==========
+
+const DEFAULT_LAYER_IMAGES_STATE = {
+  layerImages: [] as { layer_index: number; name: string; url: string }[],
+  layerImagesLoading: false,
+  layerImagesOpen: false,
+  layerImagesSourceKey: null as string | null,
+};
 
 export const DEFAULT_STATE: ConverterState = {
   imageFile: null,
@@ -517,6 +586,26 @@ export const DEFAULT_STATE: ConverterState = {
   largeFormatEnabled: false,
   tileWidthMm: 250,
   tileHeightMm: 250,
+  puzzleEnabled: false,
+  puzzleStyle: "regular",
+  puzzleSizingMode: "piece_size",
+  pieceWidthMm: 20,
+  pieceHeightMm: 20,
+  puzzleRows: 3,
+  puzzleCols: 3,
+  targetPieceCount: 12,
+  connectorStyle: "classic",
+  labelsEnabled: false,
+  engraveBackLabels: false,
+  irregularityStrength: 0.35,
+  minNeckWidthMm: 1.2,
+  puzzleOverlayUrl: null,
+  puzzleWarnings: [],
+  puzzleResolvedRows: null,
+  puzzleResolvedCols: null,
+  puzzleResolvedPieceCount: null,
+  puzzleDerivedPieceWidthMm: null,
+  puzzleDerivedPieceHeightMm: null,
   replacement_regions: [],
   free_color_set: new Set(),
   selectedColor: null,
@@ -549,7 +638,7 @@ export const DEFAULT_STATE: ConverterState = {
   lutColors: [],
   lutColorsLoading: false,
   lutColorsLutName: "",
-  bed_label: "256脳256 mm",
+  bed_label: "256 x 256 mm",
   bedSizes: [],
   bedSizesLoading: false,
   batchMode: false,
@@ -561,9 +650,7 @@ export const DEFAULT_STATE: ConverterState = {
   previewBaseImageUrl: null,
   threemfDiskPath: null,
   downloadUrl: null,
-  layerImages: [],
-  layerImagesLoading: false,
-  layerImagesOpen: false,
+  ...DEFAULT_LAYER_IMAGES_STATE,
   selectionMode: "current" as SelectionMode,
   selectedColors: new Set<string>(),
   regionData: null,
@@ -624,6 +711,71 @@ function _clientLog(label: string) {
   }).catch(() => {});
 }
 
+const DEFAULT_PUZZLE_PREVIEW_STATE = {
+  puzzleOverlayUrl: null,
+  puzzleWarnings: [] as string[],
+  puzzleResolvedRows: null,
+  puzzleResolvedCols: null,
+  puzzleResolvedPieceCount: null,
+  puzzleDerivedPieceWidthMm: null,
+  puzzleDerivedPieceHeightMm: null,
+};
+
+const DEFAULT_PUZZLE_LAYOUT_SEED = 0;
+
+export function buildLayerImagesSourceKey(
+  state: Pick<
+    ConverterState,
+    "sessionId" | "previewGlbUrl" | "previewBaseImageUrl" | "previewImageUrl"
+  >,
+): string | null {
+  if (!state.sessionId) {
+    return null;
+  }
+
+  return [
+    state.sessionId,
+    state.previewGlbUrl ?? "",
+    state.previewBaseImageUrl ?? state.previewImageUrl ?? "",
+  ].join("|");
+}
+
+function buildPuzzlePreviewParams(
+  state: Pick<
+    ConverterState,
+    | "target_height_mm"
+    | "puzzleStyle"
+    | "puzzleSizingMode"
+    | "pieceWidthMm"
+    | "pieceHeightMm"
+    | "puzzleRows"
+    | "puzzleCols"
+    | "targetPieceCount"
+    | "connectorStyle"
+    | "labelsEnabled"
+    | "engraveBackLabels"
+    | "irregularityStrength"
+    | "minNeckWidthMm"
+  >,
+) {
+  return {
+    target_height_mm: state.target_height_mm,
+    puzzle_style: state.puzzleStyle,
+    sizing_mode: state.puzzleSizingMode,
+    piece_width_mm: state.pieceWidthMm,
+    piece_height_mm: state.pieceHeightMm,
+    rows: state.puzzleRows,
+    cols: state.puzzleCols,
+    target_piece_count: state.targetPieceCount,
+    seed: DEFAULT_PUZZLE_LAYOUT_SEED,
+    connector_style: state.connectorStyle,
+    labels_enabled: state.labelsEnabled,
+    engrave_back_labels: false,
+    irregularity_strength: state.irregularityStrength,
+    min_neck_width_mm: state.minNeckWidthMm,
+  } as const;
+}
+
 // ========== Store ==========
 
 export const useConverterStore = create<ConverterState & ConverterActions>(
@@ -652,6 +804,10 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           selectedColors: new Set<string>(),
           regionData: null,
           selectedRegions: [],
+          modelUrl: null,
+          threemfDiskPath: null,
+          downloadUrl: null,
+          ...DEFAULT_PUZZLE_PREVIEW_STATE,
         });
         return;
       }
@@ -673,8 +829,11 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           selectedRegions: [],
           cropModalOpen: shouldOpenCrop,
           hasManualPreview: false,
-          layerImages: [],
-          layerImagesOpen: false,
+          ...DEFAULT_LAYER_IMAGES_STATE,
+          modelUrl: null,
+          threemfDiskPath: null,
+          downloadUrl: null,
+          ...DEFAULT_PUZZLE_PREVIEW_STATE,
         });
         uploadImagePreview(file)
           .then(({ preview_url, width, height }) => {
@@ -714,10 +873,12 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         selectedRegions: [],
         cropModalOpen: shouldOpenCrop,
         hasManualPreview: false,
-        layerImages: [],
-        layerImagesOpen: false,
+        ...DEFAULT_LAYER_IMAGES_STATE,
+        modelUrl: null,
+        threemfDiskPath: null,
+        downloadUrl: null,
+        ...DEFAULT_PUZZLE_PREVIEW_STATE,
       });
-      console.log("[DEBUG] setImageFile: cleared layerImages");
     },
 
     // --- 基础参数 ---
@@ -775,9 +936,15 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
               10,
               max,
             ),
+            threemfDiskPath: null,
+            downloadUrl: null,
           };
         }
-        return { target_height_mm: clamped };
+        return {
+          target_height_mm: clamped,
+          threemfDiskPath: null,
+          downloadUrl: null,
+        };
       }),
 
     setSpacerThick: (thick: number) =>
@@ -830,9 +997,15 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
     setSeparateBacking: (enabled: boolean) =>
       set({ separate_backing: enabled }),
 
-    // --- 鎸備欢鐜?---
+    // --- 挂件环 ---
     setAddLoop: (enabled: boolean) =>
-      set({ add_loop: enabled, threemfDiskPath: null, downloadUrl: null }),
+      set((state) => ({
+        add_loop: enabled,
+        puzzleEnabled: enabled ? false : state.puzzleEnabled,
+        ...DEFAULT_PUZZLE_PREVIEW_STATE,
+        threemfDiskPath: null,
+        downloadUrl: null,
+      })),
     setLoopWidth: (width: number) =>
       set({ loop_width: clampValue(width, 2, 10) }),
     setLoopLength: (length: number) =>
@@ -938,11 +1111,13 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
 
     // --- 大画幅 ---
     setLargeFormatEnabled: (enabled: boolean) =>
-      set({
+      set((state) => ({
         largeFormatEnabled: enabled,
+        puzzleEnabled: enabled ? false : state.puzzleEnabled,
+        ...DEFAULT_PUZZLE_PREVIEW_STATE,
         threemfDiskPath: null,
         downloadUrl: null,
-      }),
+      })),
     setTileWidthMm: (width: number) =>
       set({
         tileWidthMm: clampValue(width, 50, 500),
@@ -955,6 +1130,145 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         threemfDiskPath: null,
         downloadUrl: null,
       }),
+    setPuzzleEnabled: (enabled: boolean) =>
+      set((state) => ({
+        puzzleEnabled: enabled && !state.batchMode,
+        largeFormatEnabled: enabled ? false : state.largeFormatEnabled,
+        add_loop: enabled ? false : state.add_loop,
+        ...(!enabled ? DEFAULT_PUZZLE_PREVIEW_STATE : {}),
+        threemfDiskPath: null,
+        downloadUrl: null,
+      })),
+    setPuzzleStyle: (style: PuzzleStyle) =>
+      set({
+        puzzleStyle: style,
+        threemfDiskPath: null,
+        downloadUrl: null,
+      }),
+    setPuzzleSizingMode: (mode: PuzzleSizingMode) =>
+      set({
+        puzzleSizingMode: mode,
+        threemfDiskPath: null,
+        downloadUrl: null,
+      }),
+    setPieceWidthMm: (width: number) =>
+      set({
+        pieceWidthMm: clampValue(width, 5, 200),
+        threemfDiskPath: null,
+        downloadUrl: null,
+      }),
+    setPieceHeightMm: (height: number) =>
+      set({
+        pieceHeightMm: clampValue(height, 5, 200),
+        threemfDiskPath: null,
+        downloadUrl: null,
+      }),
+    setPuzzleRows: (rows: number) =>
+      set({
+        puzzleRows: clampValue(Math.round(rows), 1, 200),
+        threemfDiskPath: null,
+        downloadUrl: null,
+      }),
+    setPuzzleCols: (cols: number) =>
+      set({
+        puzzleCols: clampValue(Math.round(cols), 1, 200),
+        threemfDiskPath: null,
+        downloadUrl: null,
+      }),
+    setTargetPieceCount: (count: number) =>
+      set({
+        targetPieceCount: clampValue(Math.round(count), 2, 2000),
+        threemfDiskPath: null,
+        downloadUrl: null,
+      }),
+    setConnectorStyle: (style: PuzzleConnectorStyle) =>
+      set({
+        connectorStyle: style,
+        threemfDiskPath: null,
+        downloadUrl: null,
+      }),
+    setLabelsEnabled: (enabled: boolean) =>
+      set({
+        labelsEnabled: enabled,
+        engraveBackLabels: false,
+        threemfDiskPath: null,
+        downloadUrl: null,
+      }),
+    setEngraveBackLabels: (enabled: boolean) => {
+      void enabled;
+      set({
+        engraveBackLabels: false,
+        threemfDiskPath: null,
+        downloadUrl: null,
+      });
+    },
+    setIrregularityStrength: (strength: number) =>
+      set({
+        irregularityStrength: clampValue(strength, 0, 1),
+        threemfDiskPath: null,
+        downloadUrl: null,
+      }),
+    setMinNeckWidthMm: (width: number) =>
+      set({
+        minNeckWidthMm: clampValue(width, 0.2, 20),
+        threemfDiskPath: null,
+        downloadUrl: null,
+      }),
+    submitPuzzleLayoutPreview: async () => {
+      const state = _get();
+      if (!state.puzzleEnabled || !state.sessionId) {
+        set({ ...DEFAULT_PUZZLE_PREVIEW_STATE });
+        return false;
+      }
+
+      const requestedSessionId = state.sessionId;
+      const requestedParams = buildPuzzlePreviewParams(state);
+
+      try {
+        const response = await apiConvertPuzzleLayoutPreview(
+          requestedSessionId,
+          requestedParams,
+        );
+        const latestState = _get();
+        const latestParams = buildPuzzlePreviewParams(latestState);
+        if (
+          latestState.sessionId !== requestedSessionId
+          || !latestState.puzzleEnabled
+          || JSON.stringify(latestParams) !== JSON.stringify(requestedParams)
+        ) {
+          return false;
+        }
+        set({
+          puzzleOverlayUrl:
+            normalizeResourceUrl(response.overlay_url) ?? response.overlay_url,
+          puzzleWarnings: response.warnings ?? [],
+          puzzleResolvedRows: response.grid_rows,
+          puzzleResolvedCols: response.grid_cols,
+          puzzleResolvedPieceCount: response.piece_count,
+          puzzleDerivedPieceWidthMm: response.derived_piece_width_mm,
+          puzzleDerivedPieceHeightMm: response.derived_piece_height_mm,
+          error: null,
+        });
+        return true;
+      } catch (err) {
+        const latestState = _get();
+        const latestParams = buildPuzzlePreviewParams(latestState);
+        if (
+          latestState.sessionId !== requestedSessionId
+          || !latestState.puzzleEnabled
+          || JSON.stringify(latestParams) !== JSON.stringify(requestedParams)
+        ) {
+          return false;
+        }
+        set({
+          ...DEFAULT_PUZZLE_PREVIEW_STATE,
+          error:
+            err instanceof Error ? err.message : "Puzzle layout preview failed",
+        });
+        return false;
+      }
+    },
+    clearPuzzleLayoutPreview: () => set({ ...DEFAULT_PUZZLE_PREVIEW_STATE }),
 
     // --- 热床尺寸 ---
     setBedLabel: (label: string) => {
@@ -1467,6 +1781,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         const thumbnailUrl = `${response.thumbnail_url}`;
         set({
           isLoading: false,
+          ...DEFAULT_PUZZLE_PREVIEW_STATE,
           heightmapThumbnailUrl: thumbnailUrl,
           color_height_map: response.color_height_map,
         });
@@ -1610,10 +1925,9 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         isLoading: true,
         error: null,
         hasManualPreview: false,
-        layerImages: [],
-        layerImagesOpen: false,
+        ...DEFAULT_LAYER_IMAGES_STATE,
+        ...DEFAULT_PUZZLE_PREVIEW_STATE,
       });
-      console.log("[DEBUG] submitPreview: cleared layerImages");
       try {
         const response = await apiConvertPreview(
           state.imageFile,
@@ -1664,12 +1978,9 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           previewPixelWidth: response.dimensions?.width ?? null,
           previewPixelHeight: response.dimensions?.height ?? null,
           hasManualPreview: true,
-          layerImages: [],
-          layerImagesOpen: false,
+          ...DEFAULT_LAYER_IMAGES_STATE,
+          ...DEFAULT_PUZZLE_PREVIEW_STATE,
         });
-        console.log(
-          "[DEBUG] submitPreview success: cleared layerImages for new sessionId",
-        );
       } catch (err) {
         // Ignore aborted requests (user started a new preview)
         if (err instanceof Error && err.name === "CanceledError") {
@@ -1775,6 +2086,27 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           use_cached_matched_rgb: state.regionReplacementCount > 0,
         } as const;
 
+        if (state.puzzleEnabled) {
+          const puzzleResponse = await apiConvertGeneratePuzzle(
+            state.sessionId,
+            {
+              ...buildPuzzlePreviewParams(state),
+              params: baseParams,
+            },
+          );
+          set({
+            isGenerating: false,
+            modelUrl: null,
+            threemfDiskPath: puzzleResponse.threemf_disk_path ?? null,
+            downloadUrl: puzzleResponse.download_url
+              ? `${puzzleResponse.download_url}`
+              : null,
+          });
+          _logGenerateTimer('puzzle 3mf received');
+          _clientLog('generate: puzzle 3mf received');
+          return null;
+        }
+
         if (state.largeFormatEnabled) {
           const lfResponse = await apiConvertGenerateLargeFormat(
             state.sessionId!,
@@ -1786,7 +2118,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
             },
           );
           set({
-            isLoading: false,
+            isGenerating: false,
             modelUrl: null,
             threemfDiskPath: null,
             downloadUrl: lfResponse.download_url
@@ -1876,6 +2208,7 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           aspectRatio: ratio,
           cropModalOpen: false,
           isCropping: false,
+          ...DEFAULT_PUZZLE_PREVIEW_STATE,
         });
       } catch (err) {
         set({
@@ -1916,7 +2249,11 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
     addBatchFiles: (files: File[]) => {
       const valid = files.filter((f) => isValidImageType(f.type, f.name));
       if (valid.length === 0) return;
-      set((state) => ({ batchFiles: [...state.batchFiles, ...valid] }));
+      set((state) => ({
+        batchFiles: [...state.batchFiles, ...valid],
+        puzzleEnabled: false,
+        ...DEFAULT_PUZZLE_PREVIEW_STATE,
+      }));
     },
 
     removeBatchFile: (index: number) => {
@@ -1932,8 +2269,16 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
             imageFile: lastFile,
             imagePreviewUrl: null,
             aspectRatio: null,
+            previewImageUrl: null,
+            previewBaseImageUrl: null,
+            sessionId: null,
+            previewGlbUrl: null,
+            modelUrl: null,
+            threemfDiskPath: null,
+            downloadUrl: null,
             batchMode: false,
             hasManualPreview: false,
+            ...DEFAULT_PUZZLE_PREVIEW_STATE,
           });
           uploadImagePreview(lastFile)
             .then(({ preview_url, width, height }) => {
@@ -1957,8 +2302,16 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
             batchFiles: [],
             imageFile: lastFile,
             imagePreviewUrl: previewUrl,
+            previewImageUrl: null,
+            previewBaseImageUrl: null,
+            sessionId: null,
+            previewGlbUrl: null,
+            modelUrl: null,
+            threemfDiskPath: null,
+            downloadUrl: null,
             batchMode: false,
             hasManualPreview: false,
+            ...DEFAULT_PUZZLE_PREVIEW_STATE,
           });
         }
       } else if (remaining.length === 0) {
@@ -1976,20 +2329,31 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           previewBaseImageUrl: null,
           sessionId: null,
           previewGlbUrl: null,
+          modelUrl: null,
+          threemfDiskPath: null,
+          downloadUrl: null,
           selectedColor: null,
           selectedColors: new Set<string>(),
           regionData: null,
           selectedRegions: [],
           batchMode: false,
           hasManualPreview: false,
+          ...DEFAULT_PUZZLE_PREVIEW_STATE,
         });
       } else {
         // Still in BatchMode with multiple files
-        set({ batchFiles: remaining });
+        set({ batchFiles: remaining, ...DEFAULT_PUZZLE_PREVIEW_STATE });
       }
     },
 
-    clearBatchFiles: () => set({ batchFiles: [] }),
+    clearBatchFiles: () =>
+      set({
+        batchFiles: [],
+        puzzleEnabled: false,
+        threemfDiskPath: null,
+        downloadUrl: null,
+        ...DEFAULT_PUZZLE_PREVIEW_STATE,
+      }),
 
     handleFilesSelect: (files: File[]) => {
       // Filter out falsy values and invalid formats
@@ -2006,6 +2370,8 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         set({
           batchFiles: [...state.batchFiles, ...validFiles],
           batchMode: true,
+          puzzleEnabled: false,
+          ...DEFAULT_PUZZLE_PREVIEW_STATE,
         });
         return;
       }
@@ -2028,11 +2394,14 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
             previewBaseImageUrl: null,
             sessionId: null,
             previewGlbUrl: null,
+            modelUrl: null,
+            threemfDiskPath: null,
+            downloadUrl: null,
             batchMode: false,
             hasManualPreview: false,
             cropModalOpen: state.enableCrop,
-            layerImages: [],
-            layerImagesOpen: false,
+            ...DEFAULT_LAYER_IMAGES_STATE,
+            ...DEFAULT_PUZZLE_PREVIEW_STATE,
           });
           uploadImagePreview(singleFile)
             .then(({ preview_url, width, height }) => {
@@ -2065,11 +2434,14 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
             previewBaseImageUrl: null,
             sessionId: null,
             previewGlbUrl: null,
+            modelUrl: null,
+            threemfDiskPath: null,
+            downloadUrl: null,
             batchMode: false,
             hasManualPreview: false,
             cropModalOpen: isSvg ? false : state.enableCrop,
-            layerImages: [],
-            layerImagesOpen: false,
+            ...DEFAULT_LAYER_IMAGES_STATE,
+            ...DEFAULT_PUZZLE_PREVIEW_STATE,
             ...(autoModelingMode ? { modeling_mode: autoModelingMode } : {}),
           });
         } else {
@@ -2083,11 +2455,18 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
           set({
             imageFile: singleFile,
             imagePreviewUrl: previewUrl,
+            previewImageUrl: null,
+            previewBaseImageUrl: null,
+            sessionId: null,
+            previewGlbUrl: null,
+            modelUrl: null,
+            threemfDiskPath: null,
+            downloadUrl: null,
             batchMode: false,
             hasManualPreview: false,
             cropModalOpen: isSvg ? false : state.enableCrop,
-            layerImages: [],
-            layerImagesOpen: false,
+            ...DEFAULT_LAYER_IMAGES_STATE,
+            ...DEFAULT_PUZZLE_PREVIEW_STATE,
             ...(autoModelingMode ? { modeling_mode: autoModelingMode } : {}),
           });
         }
@@ -2113,12 +2492,15 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         previewBaseImageUrl: null,
         sessionId: null,
         previewGlbUrl: null,
+        modelUrl: null,
+        threemfDiskPath: null,
+        downloadUrl: null,
         batchMode: true,
+        puzzleEnabled: false,
         hasManualPreview: false,
-        layerImages: [],
-        layerImagesOpen: false,
+        ...DEFAULT_LAYER_IMAGES_STATE,
+        ...DEFAULT_PUZZLE_PREVIEW_STATE,
       });
-      console.log("[DEBUG] handleFilesSelect (batch): cleared layerImages");
     },
 
     submitBatch: async () => {
@@ -2282,29 +2664,52 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
     clearError: () => set({ error: null }),
 
     // --- 分层预览 ---
-    fetchLayerImages: async () => {
-      const { sessionId } = _get();
-      if (!sessionId) return;
-      set({ layerImagesLoading: true });
+    fetchLayerImages: async (previewSourceKey) => {
+      const currentState = _get();
+      const requestedSourceKey =
+        previewSourceKey ?? buildLayerImagesSourceKey(currentState);
+      if (!currentState.sessionId || !requestedSourceKey) return;
+      const requestedSessionId = currentState.sessionId;
+      const shouldClearStaleLayers =
+        currentState.layerImages.length > 0 &&
+        currentState.layerImagesSourceKey !== requestedSourceKey;
+
+      set({
+        ...(shouldClearStaleLayers ? DEFAULT_LAYER_IMAGES_STATE : {}),
+        layerImagesLoading: true,
+      });
       try {
-          const { fetchLayerImages: apiFetch } = await import("../../api/converter");
-        const res = await apiFetch(sessionId);
+        const res = await apiFetchLayerImages(requestedSessionId);
+        const latestState = _get();
+        if (
+          latestState.sessionId !== requestedSessionId ||
+          res.session_id !== requestedSessionId ||
+          buildLayerImagesSourceKey(latestState) !== requestedSourceKey
+        ) {
+          set({ layerImagesLoading: false });
+          return;
+        }
         set({
           layerImages: res.layers,
           layerImagesLoading: false,
           layerImagesOpen: true,
+          layerImagesSourceKey: requestedSourceKey,
         });
       } catch (e) {
         console.error("fetchLayerImages failed:", e);
         set({ layerImagesLoading: false });
       }
     },
+    resetLayerImages: () =>
+      set({
+        ...DEFAULT_LAYER_IMAGES_STATE,
+      }),
     setLayerImagesOpen: (open: boolean) => set({ layerImagesOpen: open }),
 
     importRecipeState: (partial: Partial<ConverterState>, imageFile: File, heightmapFile?: File | null) => {
       // 1. Apply restored parameters (without triggering crop modal)
       const prevEnableCrop = _get().enableCrop;
-      set({ ...partial, enableCrop: false });
+      set({ ...partial, engraveBackLabels: false, enableCrop: false });
 
       // 2. Set image file (creates blob URL, triggers preview flow)
       _get().setImageFile(imageFile);
@@ -2321,7 +2726,6 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
     cleanupAfterDownload: () => {
       const state = _get();
       if (!state.sessionId) return;
-      const keepIds: string[] = [];
       // Preserve download, preview, and GLB files so share card export
       // and 3D viewer still work after slicer launch / download.
       const urlsToKeep = [
@@ -2330,12 +2734,12 @@ export const useConverterStore = create<ConverterState & ConverterActions>(
         state.previewBaseImageUrl,
         state.originalPreviewUrl,
         state.previewGlbUrl,
+        state.puzzleOverlayUrl,
+        state.regionData?.previewUrl ?? null,
+        ...state.selectedRegions.map((region) => region.previewUrl),
+        ...state.layerImages.map((layer) => layer.url),
       ];
-      for (const url of urlsToKeep) {
-        if (!url) continue;
-        const match = url.match(/\/api\/files\/([^/?#]+)/);
-        if (match) keepIds.push(match[1]);
-      }
+      const keepIds = collectKeepFileIds(urlsToKeep);
       apiCleanupSessionFiles(state.sessionId, keepIds);
     },
   }),

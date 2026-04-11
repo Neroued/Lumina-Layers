@@ -21,6 +21,19 @@ _kmeans_cache: dict = {}
 _KMEANS_CACHE_MAX = 4
 
 
+def _resolve_cluster_count(requested_colors: int, sample_count: int) -> int:
+    """Clamp the cluster count to the available sample count.
+
+    OpenCV ``cv2.kmeans`` requires ``K <= N`` where ``N`` is the number of
+    samples. Tiny SVG puzzle pieces can easily rasterize to fewer pixels than
+    the requested quantization count, so we degrade gracefully instead of
+    raising inside OpenCV.
+    """
+    if sample_count <= 0:
+        return 0
+    return max(1, min(requested_colors, sample_count))
+
+
 def quantize_colors(rgb: np.ndarray, n_colors: int, seed: int = 42) -> np.ndarray:
     """K-Means 颜色量化（含预缩放优化、K-Means++ 初始化、后量化去噪）。
     K-Means color quantization with pre-scaling optimization and post-quantization cleanup.
@@ -35,10 +48,21 @@ def quantize_colors(rgb: np.ndarray, n_colors: int, seed: int = 42) -> np.ndarra
     """
     h, w = rgb.shape[:2]
     total_pixels = h * w
+    if total_pixels == 0:
+        return rgb.copy()
+
+    effective_n_colors = _resolve_cluster_count(n_colors, total_pixels)
+    if effective_n_colors != n_colors:
+        _log.info(
+            "[IMAGE_PROCESSOR] Clamping K-Means colors from %s to %s for %s pixels",
+            n_colors,
+            effective_n_colors,
+            total_pixels,
+        )
 
     # 缓存查找：用轻量指纹（shape + 采样像素 + 参数）避免全量 hash
     _sample = rgb[:: max(1, rgb.shape[0] // 32), :: max(1, rgb.shape[1] // 32)].tobytes()
-    _cache_key = f"{rgb.shape}_{len(_sample)}_{hash(_sample)}_{n_colors}_{seed}"
+    _cache_key = f"{rgb.shape}_{len(_sample)}_{hash(_sample)}_{effective_n_colors}_{seed}"
     if _cache_key in _kmeans_cache:
         _log.info(f"[IMAGE_PROCESSOR] K-Means cache hit: {_cache_key}")
         return _kmeans_cache[_cache_key].copy()
@@ -67,9 +91,9 @@ def quantize_colors(rgb: np.ndarray, n_colors: int, seed: int = 42) -> np.ndarra
         flags = cv2.KMEANS_PP_CENTERS  # K-Means++ 初始化
 
         t_kmeans = time.time()
-        _log.info(f"[IMAGE_PROCESSOR] K-Means++ on downscaled image ({n_colors} colors)...")
+        _log.info(f"[IMAGE_PROCESSOR] K-Means++ on downscaled image ({effective_n_colors} colors)...")
         cv2.setRNGSeed(seed)  # 固定随机种子，确保 K-Means 结果可复现
-        _, _, centers = cv2.kmeans(pixels_small, n_colors, None, criteria, 5, flags)
+        _, _, centers = cv2.kmeans(pixels_small, effective_n_colors, None, criteria, 5, flags)
         _log.info(f"[IMAGE_PROCESSOR] ⏱️ K-Means: {time.time() - t_kmeans:.2f}s")
 
         # 用得到的 centers 直接映射原图（不再迭代，只做最近邻查找）
@@ -91,13 +115,13 @@ def quantize_colors(rgb: np.ndarray, n_colors: int, seed: int = 42) -> np.ndarra
         _log.info(f"[IMAGE_PROCESSOR] ✅ Pre-scaling optimization complete!")
     else:
         # 小图直接做 K-Means
-        _log.info(f"[IMAGE_PROCESSOR] K-Means++ quantization to {n_colors} colors...")
+        _log.info(f"[IMAGE_PROCESSOR] K-Means++ quantization to {effective_n_colors} colors...")
         pixels = rgb.reshape(-1, 3).astype(np.float32)
         criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.2)
         flags = cv2.KMEANS_PP_CENTERS
 
         cv2.setRNGSeed(seed)  # 固定随机种子，确保 K-Means 结果可复现
-        _, labels, centers = cv2.kmeans(pixels, n_colors, None, criteria, 10, flags)
+        _, labels, centers = cv2.kmeans(pixels, effective_n_colors, None, criteria, 10, flags)
 
         centers = centers.astype(np.uint8)
         quantized_pixels = centers[labels.flatten()]

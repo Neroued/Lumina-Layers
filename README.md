@@ -185,12 +185,14 @@ Converts images into printable 3D models using calibrated data.
 
 - **KD-Tree Color Matching**: Maps image pixels to actual printable colors found in your LUT
 - **Live 3D Preview**: Interactive WebGL preview with true matched colors—rotate, zoom, and inspect before printing
+- **Puzzle Mode**: Generates puzzle-layout overlays in 2D/3D, supports regular/irregular puzzle styles plus classic/easy-cut connectors, lets you size by piece size / grid / target piece count, and exports all generated pieces as one combined 3MF package
 - **Keychain Loop Generator**: Automatically adds functional hanging loops with:
   - Smart color detection (matches nearby model colors)
   - Customizable dimensions (width, length, hole diameter)
   - Rectangle base + semicircle top + hollow hole geometry
   - 2D preview shows loop placement
 - **Structure Options**: Double-sided (keychain) or Single-sided (relief) modes
+- **Mode Guards**: Puzzle mode automatically disables large-format tiling and keychain loops to keep exported state valid; back-label engraving remains reserved until geometry export support lands
 - **Smart Background Removal**: Automatic transparency detection with adjustable tolerance
 - **Correct 3MF Naming**: Objects are named by color (e.g., "Cyan", "Magenta") instead of "geometry_0" for easy slicer identification
 

@@ -1,0 +1,447 @@
+"""Unit tests for puzzle 3MF assembly."""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import tempfile
+import zipfile
+import xml.etree.ElementTree as ET
+
+from core.puzzle_3mf import PuzzlePiece3MFSource, assemble_puzzle_3mf
+
+_CORE_NS = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
+_PROD_NS = "http://schemas.microsoft.com/3dmanufacturing/production/2015/06"
+_NS = {"m": _CORE_NS, "p": _PROD_NS}
+
+
+def test_assemble_puzzle_3mf_preserves_per_piece_local_models_and_offsets() -> None:
+    """Combined puzzle 3MF should keep per-piece local geometry and top-level placement."""
+
+    piece_a1 = _reserve_temp_path(".3mf")
+    piece_a2 = _reserve_temp_path(".3mf")
+    output_path = _reserve_temp_path(".3mf")
+    try:
+        _write_piece_package(piece_a1, width=10.0, height=8.0)
+        _write_piece_package(piece_a2, width=14.0, height=8.0)
+
+        assemble_puzzle_3mf(
+            piece_sources=[
+                PuzzlePiece3MFSource(label="A1", threemf_path=str(piece_a1), offset_x_mm=0.0, offset_y_mm=20.0),
+                PuzzlePiece3MFSource(label="A2", threemf_path=str(piece_a2), offset_x_mm=12.5, offset_y_mm=20.0),
+            ],
+            output_path=str(output_path),
+            preview_colors=None,
+            slot_names=None,
+            printer_id="bambu-h2d",
+            slicer="BambuStudio",
+        )
+
+        with zipfile.ZipFile(output_path, "r") as archive:
+            content_types = archive.read("[Content_Types].xml").decode("utf-8")
+            root_model_text = archive.read("3D/3dmodel.model").decode("utf-8")
+            root_model = ET.fromstring(archive.read("3D/3dmodel.model"))
+            model_settings = ET.fromstring(archive.read("Metadata/model_settings.config"))
+            cut_information = ET.fromstring(archive.read("Metadata/cut_information.xml"))
+            first_object_model = ET.fromstring(archive.read("3D/Objects/object_1.model"))
+            relationships = archive.read("3D/_rels/3dmodel.model.rels").decode("utf-8")
+    finally:
+        _cleanup_temp_paths(piece_a1, piece_a2, output_path)
+
+    assert 'xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06"' in root_model_text
+    assert 'requiredextensions="p"' in root_model_text
+    assert '/3D/Objects/object_1.model' in content_types
+    root_objects = root_model.findall("m:resources/m:object", _NS)
+    assert [node.get("id") for node in root_objects] == ["10", "11"]
+    component_paths = [
+        component.get(f"{{{_PROD_NS}}}path")
+        for node in root_objects
+        for component in node.findall("m:components/m:component", _NS)
+    ]
+    assert component_paths == [
+        "/3D/Objects/object_1.model",
+        "/3D/Objects/object_1.model",
+        "/3D/Objects/object_1.model",
+        "/3D/Objects/object_1.model",
+    ]
+    component_ids = [
+        component.get("objectid")
+        for node in root_objects
+        for component in node.findall("m:components/m:component", _NS)
+    ]
+    assert component_ids == ["2", "3", "4", "5"]
+
+    build_items = root_model.findall("m:build/m:item", _NS)
+    assert [item.get("transform") for item in build_items] == [
+        "1 0 0 0 1 0 0 0 1 0 20 0",
+        "1 0 0 0 1 0 0 0 1 12.5 20 0",
+    ]
+
+    settings_objects = model_settings.findall("object")
+    assert [_metadata_value(node, "name") for node in settings_objects] == ["A1", "A2"]
+    assert [
+        [_metadata_value(part, "source_file") for part in node.findall("part")]
+        for node in settings_objects
+    ] == [
+        [output_path.name, output_path.name],
+        [output_path.name, output_path.name],
+    ]
+
+    assemble_items = model_settings.findall("assemble/assemble_item")
+    assert [item.get("transform") for item in assemble_items] == [
+        "1 0 0 0 1 0 0 0 1 0 20 0",
+        "1 0 0 0 1 0 0 0 1 12.5 20 0",
+    ]
+
+    cut_objects = cut_information.findall("object")
+    assert [node.get("id") for node in cut_objects] == ["1", "2"]
+
+    first_nodes = first_object_model.findall("m:resources/m:object", _NS)
+    assert [node.get("id") for node in first_nodes] == ["2", "3", "4", "5"]
+    assert _bounds_width(first_nodes[:2]) == 10.0
+    assert _bounds_width(first_nodes[2:]) == 14.0
+    assert "/3D/Objects/object_1.model" in relationships
+    assert "/3D/Objects/object_2.model" not in relationships
+
+
+def test_assemble_puzzle_3mf_restores_global_slot_palette_for_sparse_piece() -> None:
+    """Combined puzzle 3MF should map sparse local slots back to the global palette."""
+
+    piece_path = _reserve_temp_path(".3mf")
+    output_path = _reserve_temp_path(".3mf")
+    try:
+        _write_sparse_piece_package(
+            piece_path,
+            materials=[
+                ("Slot 1 (White)", "1"),
+                ("Slot 3 (Green)", "2"),
+            ],
+            filament_colours=["#FFFFFF", "#00AE42"],
+        )
+
+        assemble_puzzle_3mf(
+            piece_sources=[
+                PuzzlePiece3MFSource(label="A1", threemf_path=str(piece_path), offset_x_mm=0.0, offset_y_mm=0.0),
+            ],
+            output_path=str(output_path),
+            preview_colors={
+                0: [255, 255, 255, 255],
+                1: [0, 0, 0, 255],
+                2: [0, 174, 66, 255],
+            },
+            slot_names=["Slot 1 (White)", "Slot 2 (Black)", "Slot 3 (Green)"],
+            printer_id="bambu-h2d",
+            slicer="BambuStudio",
+        )
+
+        with zipfile.ZipFile(output_path, "r") as archive:
+            model_settings = ET.fromstring(archive.read("Metadata/model_settings.config"))
+            project_settings = json.loads(archive.read("Metadata/project_settings.config").decode("utf-8"))
+            object_model = ET.fromstring(archive.read("3D/Objects/object_1.model"))
+    finally:
+        _cleanup_temp_paths(piece_path, output_path)
+
+    parts = {
+        _metadata_value(part, "name"): _metadata_value(part, "extruder")
+        for part in model_settings.findall("./object/part")
+    }
+    assert parts == {
+        "Slot 1 (White)": "1",
+        "Slot 3 (Green)": "3",
+    }
+    assert project_settings["filament_colour"] == ["#FFFFFF", "#000000", "#00AE42"]
+    pindices = {
+        node.get("name"): node.get("pindex")
+        for node in object_model.findall("m:resources/m:object", _NS)
+    }
+    assert pindices == {
+        "Slot 1 (White)": "0",
+        "Slot 3 (Green)": "2",
+    }
+
+
+def test_assemble_puzzle_3mf_refreshes_metadata_files_and_preview_assets() -> None:
+    """Combined puzzle 3MF should rebuild shared metadata and preview PNG assets."""
+
+    piece_path = _reserve_temp_path(".3mf")
+    output_path = _reserve_temp_path(".3mf")
+    overview_png = b"\x89PNG\r\n\x1a\ncombined-preview"
+    try:
+        _write_piece_package(piece_path, width=10.0, height=8.0)
+
+        assemble_puzzle_3mf(
+            piece_sources=[
+                PuzzlePiece3MFSource(label="A1", threemf_path=str(piece_path), offset_x_mm=0.0, offset_y_mm=0.0),
+            ],
+            output_path=str(output_path),
+            preview_colors=None,
+            slot_names=["Slot 1 (White)"],
+            printer_id="bambu-h2d",
+            slicer="BambuStudio",
+            overview_png_bytes=overview_png,
+        )
+
+        with zipfile.ZipFile(output_path, "r") as archive:
+            slice_info = archive.read("Metadata/slice_info.config").decode("utf-8")
+            filament_sequence = json.loads(
+                archive.read("Metadata/filament_sequence.json").decode("utf-8")
+            )
+
+            assert "X-BBL-Client-Type" in slice_info
+            assert filament_sequence == {"plate_1": {"sequence": []}}
+            for preview_asset_path in (
+                "Metadata/plate_1.png",
+                "Metadata/plate_no_light_1.png",
+                "Metadata/top_1.png",
+                "Metadata/pick_1.png",
+            ):
+                assert archive.read(preview_asset_path) == overview_png
+    finally:
+        _cleanup_temp_paths(piece_path, output_path)
+
+
+def _write_piece_package(path, *, width: float, height: float) -> None:
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("3D/3dmodel.model", _piece_root_model_bytes())
+        archive.writestr("3D/Objects/object_1.model", _piece_object_model_bytes(width=width, height=height))
+        archive.writestr("Metadata/model_settings.config", _piece_model_settings_bytes(width=width, height=height))
+        archive.writestr("Metadata/project_settings.config", b"{}")
+        archive.writestr("Metadata/slice_info.config", b"<config/>")
+        archive.writestr("Metadata/filament_sequence.json", b"{}")
+        archive.writestr("Metadata/cut_information.xml", _cut_information_bytes())
+        archive.writestr("3D/_rels/3dmodel.model.rels", _relationships_bytes())
+        archive.writestr("_rels/.rels", _root_relationships_bytes())
+        archive.writestr("[Content_Types].xml", b"<Types/>")
+
+
+def _write_sparse_piece_package(path, *, materials: list[tuple[str, str]], filament_colours: list[str]) -> None:
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("3D/3dmodel.model", _piece_root_model_bytes())
+        archive.writestr("3D/Objects/object_1.model", _sparse_piece_object_model_bytes(materials))
+        archive.writestr("Metadata/model_settings.config", _sparse_piece_model_settings_bytes(materials))
+        archive.writestr(
+            "Metadata/project_settings.config",
+            json.dumps(
+                {
+                    "filament_colour": filament_colours,
+                    "filament_type": ["PLA"] * len(filament_colours),
+                },
+                ensure_ascii=False,
+            ).encode("utf-8"),
+        )
+        archive.writestr("Metadata/slice_info.config", b"<config/>")
+        archive.writestr("Metadata/filament_sequence.json", b"{}")
+        archive.writestr("Metadata/cut_information.xml", _cut_information_bytes())
+        archive.writestr("3D/_rels/3dmodel.model.rels", _relationships_bytes())
+        archive.writestr("_rels/.rels", _root_relationships_bytes())
+        archive.writestr("[Content_Types].xml", b"<Types/>")
+
+
+def _piece_root_model_bytes() -> bytes:
+    return (
+        b'<?xml version="1.0" encoding="UTF-8"?>\n'
+        b'<model unit="millimeter" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" '
+        b'xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06" requiredextensions="p">'
+        b"<resources>"
+        b'<object id="10" type="model"><components>'
+        b'<component p:path="/3D/Objects/object_1.model" objectid="2"/>'
+        b'<component p:path="/3D/Objects/object_1.model" objectid="3"/>'
+        b"</components></object>"
+        b"</resources>"
+        b'<build><item objectid="10" printable="1"/></build>'
+        b"</model>"
+    )
+
+
+def _reserve_temp_path(suffix: str) -> Path:
+    fd, path = tempfile.mkstemp(suffix=suffix)
+    os.close(fd)
+    return Path(path)
+
+
+def _cleanup_temp_paths(*paths: Path) -> None:
+    for path in paths:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _piece_object_model_bytes(*, width: float, height: float) -> bytes:
+    mesh_template = (
+        '<object id="{object_id}" name="{name}" type="model">'
+        "<mesh>"
+        "<vertices>"
+        '<vertex x="0" y="0" z="0"/>'
+        '<vertex x="{width}" y="0" z="0"/>'
+        '<vertex x="0" y="{height}" z="0"/>'
+        "</vertices>"
+        "<triangles>"
+        '<triangle v1="0" v2="1" v3="2"/>'
+        "</triangles>"
+        "</mesh>"
+        "</object>"
+    )
+    payload = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<model unit="millimeter" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">'
+        "<resources>"
+        + mesh_template.format(object_id=2, name="Slot 1 (White)", width=width, height=height)
+        + mesh_template.format(object_id=3, name="Slot 2 (Black)", width=width, height=height)
+        + "</resources>"
+        "</model>"
+    )
+    return payload.encode("utf-8")
+
+
+def _sparse_piece_object_model_bytes(materials: list[tuple[str, str]]) -> bytes:
+    object_nodes = []
+    for index, (material_name, _) in enumerate(materials, start=2):
+        object_nodes.append(
+            (
+                f'<object id="{index}" name="{material_name}" type="model">'
+                "<mesh>"
+                "<vertices>"
+                '<vertex x="0" y="0" z="0"/>'
+                '<vertex x="1" y="0" z="0"/>'
+                '<vertex x="0" y="1" z="0"/>'
+                "</vertices>"
+                "<triangles>"
+                '<triangle v1="0" v2="1" v3="2"/>'
+                "</triangles>"
+                "</mesh>"
+                "</object>"
+            )
+        )
+    payload = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<model unit="millimeter" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">'
+        "<resources>"
+        + "".join(object_nodes)
+        + "</resources>"
+        "</model>"
+    )
+    return payload.encode("utf-8")
+
+
+def _piece_model_settings_bytes(*, width: float, height: float) -> bytes:
+    payload = f"""
+<?xml version="1.0" encoding="UTF-8"?>
+<config>
+  <object id="10">
+    <metadata key="extruder" value="1"/>
+    <part id="2" subtype="normal_part">
+      <metadata key="name" value="Slot 1 (White)"/>
+      <metadata key="source_file" value="piece.3mf"/>
+      <metadata key="source_object_id" value="0"/>
+      <metadata key="source_volume_id" value="0"/>
+      <metadata key="matrix" value="1 0 0 {width} 0 1 0 {height} 0 0 1 2 0 0 0 1"/>
+      <metadata key="extruder" value="1"/>
+      <mesh_stat face_count="12" />
+    </part>
+    <part id="3" subtype="normal_part">
+      <metadata key="name" value="Slot 2 (Black)"/>
+      <metadata key="source_file" value="piece.3mf"/>
+      <metadata key="source_object_id" value="0"/>
+      <metadata key="source_volume_id" value="1"/>
+      <metadata key="matrix" value="1 0 0 {width} 0 1 0 {height} 0 0 1 2 0 0 0 1"/>
+      <metadata key="extruder" value="2"/>
+      <mesh_stat face_count="10" />
+    </part>
+  </object>
+  <plate>
+    <metadata key="plater_id" value="1"/>
+    <metadata key="plater_name" value=""/>
+    <metadata key="locked" value="false"/>
+    <metadata key="filament_map_mode" value="Auto For Flush"/>
+    <metadata key="thumbnail_file" value="Metadata/plate_1.png"/>
+    <metadata key="thumbnail_no_light_file" value="Metadata/plate_no_light_1.png"/>
+    <metadata key="top_file" value="Metadata/top_1.png"/>
+    <metadata key="pick_file" value="Metadata/pick_1.png"/>
+  </plate>
+</config>
+"""
+    return payload.strip().encode("utf-8")
+
+
+def _sparse_piece_model_settings_bytes(materials: list[tuple[str, str]]) -> bytes:
+    parts = []
+    for index, (material_name, extruder) in enumerate(materials, start=2):
+        parts.append(
+            f"""
+    <part id="{index}" subtype="normal_part">
+      <metadata key="name" value="{material_name}"/>
+      <metadata key="source_file" value="piece_sparse.3mf"/>
+      <metadata key="source_object_id" value="0"/>
+      <metadata key="source_volume_id" value="{index - 2}"/>
+      <metadata key="matrix" value="1 0 0 1 0 1 0 1 0 0 1 2 0 0 0 1"/>
+      <metadata key="extruder" value="{extruder}"/>
+      <mesh_stat face_count="1" />
+    </part>"""
+        )
+
+    payload = f"""
+<?xml version="1.0" encoding="UTF-8"?>
+<config>
+  <object id="10">
+    <metadata key="extruder" value="1"/>
+{''.join(parts)}
+  </object>
+  <plate>
+    <metadata key="plater_id" value="1"/>
+    <metadata key="plater_name" value=""/>
+    <metadata key="locked" value="false"/>
+    <metadata key="filament_map_mode" value="Auto For Flush"/>
+    <metadata key="thumbnail_file" value="Metadata/plate_1.png"/>
+    <metadata key="thumbnail_no_light_file" value="Metadata/plate_no_light_1.png"/>
+    <metadata key="top_file" value="Metadata/top_1.png"/>
+    <metadata key="pick_file" value="Metadata/pick_1.png"/>
+  </plate>
+</config>
+"""
+    return payload.strip().encode("utf-8")
+
+
+def _cut_information_bytes() -> bytes:
+    return (
+        b'<?xml version="1.0" encoding="utf-8"?>\n'
+        b"<objects>"
+        b'<object id="1"><cut_id id="0" check_sum="1" connectors_cnt="0"/></object>'
+        b"</objects>"
+    )
+
+
+def _relationships_bytes() -> bytes:
+    return (
+        b'<?xml version="1.0" encoding="UTF-8"?>\n'
+        b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        b'<Relationship Target="/3D/Objects/object_1.model" Id="rel-1" '
+        b'Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>'
+        b"</Relationships>"
+    )
+
+
+def _root_relationships_bytes() -> bytes:
+    return (
+        b'<?xml version="1.0" encoding="UTF-8"?>\n'
+        b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        b'<Relationship Target="/3D/3dmodel.model" Id="rel0" '
+        b'Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>'
+        b"</Relationships>"
+    )
+
+
+def _bounds_width(nodes: list[ET.Element]) -> float:
+    xs: list[float] = []
+    for node in nodes:
+        for vertex in node.findall("m:mesh/m:vertices/m:vertex", _NS):
+            xs.append(float(vertex.get("x", "0")))
+    return max(xs) - min(xs)
+
+
+def _metadata_value(node: ET.Element, key: str) -> str | None:
+    for metadata_node in node.findall("metadata"):
+        if metadata_node.get("key") == key:
+            return metadata_node.get("value")
+    return None

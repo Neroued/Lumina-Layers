@@ -197,6 +197,46 @@ export function restoreConverterRecipe(
     colorHeightMap[stripHash(hex)] = height;
   }
 
+  const puzzle = conv.puzzle ?? {
+    puzzle_enabled: false,
+    puzzle_style: "regular",
+    puzzle_sizing_mode: "piece_size",
+    piece_width_mm: 20,
+    piece_height_mm: 20,
+    puzzle_rows: 3,
+    puzzle_cols: 3,
+    target_piece_count: 12,
+    puzzle_seed: 0,
+    connector_style: "classic",
+    labels_enabled: false,
+    engrave_back_labels: false,
+    irregularity_strength: 0.35,
+    min_neck_width_mm: 1.2,
+  };
+
+  const puzzleEnabled = Boolean(puzzle.puzzle_enabled);
+  const largeFormatEnabled = puzzleEnabled
+    ? false
+    : conv.large_format.large_format_enabled;
+  const addLoop = puzzleEnabled ? false : conv.geometry.add_loop;
+  const engraveBackLabels = false;
+
+  if (puzzleEnabled && conv.large_format.large_format_enabled) {
+    warnings.push(
+      "Imported recipe enabled both puzzle mode and large-format tiling. Large Format was disabled to keep the state valid.",
+    );
+  }
+  if (puzzleEnabled && conv.geometry.add_loop) {
+    warnings.push(
+      "Imported recipe enabled both puzzle mode and keychain loop generation. Keychain Loop was disabled to keep the state valid.",
+    );
+  }
+  if (puzzle.engrave_back_labels) {
+    warnings.push(
+      "Imported recipe requested back-label engraving, but this feature is currently unavailable. Back-label engraving was disabled.",
+    );
+  }
+
   // --- Build partial state ---
   const state: Partial<ConverterState> = {
     // Base
@@ -216,7 +256,7 @@ export function restoreConverterRecipe(
     spacer_thick: conv.geometry.spacer_thick,
     structure_mode: conv.geometry.structure_mode as ConverterState["structure_mode"],
     separate_backing: conv.geometry.separate_backing,
-    add_loop: conv.geometry.add_loop,
+    add_loop: addLoop,
     loop_width: conv.geometry.loop_width,
     loop_length: conv.geometry.loop_length,
     loop_hole: conv.geometry.loop_hole,
@@ -252,9 +292,22 @@ export function restoreConverterRecipe(
     remapHistory: [],
 
     // Large format
-    largeFormatEnabled: conv.large_format.large_format_enabled,
+    largeFormatEnabled: largeFormatEnabled,
     tileWidthMm: conv.large_format.tile_width_mm,
     tileHeightMm: conv.large_format.tile_height_mm,
+    puzzleEnabled,
+    puzzleStyle: puzzle.puzzle_style as ConverterState["puzzleStyle"],
+    puzzleSizingMode: puzzle.puzzle_sizing_mode as ConverterState["puzzleSizingMode"],
+    pieceWidthMm: puzzle.piece_width_mm,
+    pieceHeightMm: puzzle.piece_height_mm,
+    puzzleRows: puzzle.puzzle_rows,
+    puzzleCols: puzzle.puzzle_cols,
+    targetPieceCount: puzzle.target_piece_count,
+    connectorStyle: puzzle.connector_style as ConverterState["connectorStyle"],
+    labelsEnabled: puzzle.labels_enabled,
+    engraveBackLabels,
+    irregularityStrength: puzzle.irregularity_strength,
+    minNeckWidthMm: puzzle.min_neck_width_mm,
 
     // Clear session/preview state (will be rebuilt on next preview)
     sessionId: null,
@@ -266,11 +319,19 @@ export function restoreConverterRecipe(
     hasManualPreview: false,
     layerImages: [],
     layerImagesOpen: false,
+    layerImagesSourceKey: null,
     regionData: null,
     selectedRegions: [],
     pendingReplacement: null,
     regionReplacementCount: 0,
     error: null,
+    puzzleOverlayUrl: null,
+    puzzleWarnings: [],
+    puzzleResolvedRows: null,
+    puzzleResolvedCols: null,
+    puzzleResolvedPieceCount: null,
+    puzzleDerivedPieceWidthMm: null,
+    puzzleDerivedPieceHeightMm: null,
   };
 
   return {

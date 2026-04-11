@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
-import { useConverterStore } from "../../stores/converter";
+import { act, render, screen, waitFor } from "@testing-library/react";
+import { buildLayerImagesSourceKey, useConverterStore } from "../../stores/converter";
 import ActionBar from "../sections/ActionBar";
 
 let capturedZoomableImageProps: Record<string, unknown> | null = null;
@@ -49,6 +49,7 @@ describe("ActionBar — auto batch mode", () => {
       sessionId: null,
       layerImages: [],
       layerImagesLoading: false,
+      layerImagesSourceKey: null,
       fetchLayerImages: vi.fn(),
       modelUrl: null,
     });
@@ -316,5 +317,94 @@ describe("ActionBar — auto batch mode", () => {
     expect(magnifierDrawCall).toBeDefined();
     expect(magnifierDrawCall?.[1]).toBeCloseTo(174.6667, 3);
     expect(magnifierDrawCall?.[2]).toBeCloseTo(94.6667, 3);
+  });
+
+  it("uses previewBaseImageUrl when puzzle overlay is active", () => {
+    useConverterStore.setState({
+      batchMode: false,
+      imageFile: makeFile("preview.png"),
+      lut_name: "test_lut",
+      sessionId: "session-1",
+      previewImageUrl: "/api/files/preview-bed.png",
+      previewBaseImageUrl: "/api/files/preview-raw.png",
+      puzzleOverlayUrl: "/api/files/puzzle-overlay.png",
+      layerImages: [],
+      layerImagesLoading: false,
+    });
+
+    render(<ActionBar />);
+
+    expect(capturedZoomableImageProps?.src).toBe("/api/files/preview-raw.png");
+  });
+
+  it("refetches layer images when the 2D preview changes within the same session", async () => {
+    const fetchLayerImages = vi.fn();
+
+    useConverterStore.setState({
+      batchMode: false,
+      imageFile: makeFile("preview.png"),
+      lut_name: "test_lut",
+      sessionId: "session-1",
+      previewImageUrl: "/api/files/preview-a.png",
+      previewBaseImageUrl: "/api/files/preview-a.png",
+      layerImages: [{ layer_index: 0, name: "Layer 1", url: "/api/files/layer-a" }],
+      layerImagesLoading: false,
+      layerImagesOpen: true,
+      fetchLayerImages,
+    });
+    useConverterStore.setState({
+      layerImagesSourceKey: buildLayerImagesSourceKey(useConverterStore.getState()),
+    });
+
+    render(<ActionBar />);
+
+    expect(fetchLayerImages).not.toHaveBeenCalled();
+
+    act(() => {
+      useConverterStore.setState({
+        previewImageUrl: "/api/files/preview-b.png",
+        previewBaseImageUrl: "/api/files/preview-b.png",
+      });
+    });
+
+    await waitFor(() => {
+      expect(fetchLayerImages).toHaveBeenCalledWith(
+        buildLayerImagesSourceKey(useConverterStore.getState()),
+      );
+    });
+  });
+
+  it("does not refetch layer images for highlight-only preview churn when the base preview is unchanged", async () => {
+    const fetchLayerImages = vi.fn();
+
+    useConverterStore.setState({
+      batchMode: false,
+      imageFile: makeFile("preview.png"),
+      lut_name: "test_lut",
+      sessionId: "session-1",
+      previewImageUrl: "/api/files/highlight-a.png",
+      previewBaseImageUrl: "/api/files/preview-base.png",
+      layerImages: [{ layer_index: 0, name: "Layer 1", url: "/api/files/layer-a" }],
+      layerImagesLoading: false,
+      layerImagesOpen: true,
+      fetchLayerImages,
+    });
+    useConverterStore.setState({
+      layerImagesSourceKey: buildLayerImagesSourceKey(useConverterStore.getState()),
+    });
+
+    render(<ActionBar />);
+
+    act(() => {
+      useConverterStore.setState({
+        previewImageUrl: "/api/files/highlight-b.png",
+      });
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(fetchLayerImages).not.toHaveBeenCalled();
   });
 });

@@ -11,82 +11,7 @@
 import { useRef, useCallback, useMemo, useState, useEffect } from 'react';
 import { useConverterStore } from '../../stores/converter';
 import { useI18n } from '../../i18n/context';
-
-/**
- * Convert a click on an <img> with object-contain to image pixel coordinates.
- * 将 object-contain 模式下 <img> 上的点击转换为图像像素坐标。
- *
- * @param event - The mouse event on the image element.
- * @param imgEl - The <img> DOM element.
- * @param naturalW - The intrinsic image width in pixels.
- * @param naturalH - The intrinsic image height in pixels.
- * @returns [pixelX, pixelY] in image space, or null if click is in letterbox padding.
- */
-export function imgClickToPixel(
-  event: React.MouseEvent<HTMLImageElement>,
-  imgEl: HTMLImageElement,
-  naturalW: number,
-  naturalH: number,
-): [number, number] | null {
-  const rect = imgEl.getBoundingClientRect();
-  const clientW = rect.width;
-  const clientH = rect.height;
-
-  if (naturalW <= 0 || naturalH <= 0 || clientW <= 0 || clientH <= 0) {
-    return null;
-  }
-
-  // Compute the rendered image rect within the element (object-contain)
-  const scale = Math.min(clientW / naturalW, clientH / naturalH);
-  const renderedW = naturalW * scale;
-  const renderedH = naturalH * scale;
-  const offsetX = (clientW - renderedW) / 2;
-  const offsetY = (clientH - renderedH) / 2;
-
-  const relX = event.clientX - rect.left - offsetX;
-  const relY = event.clientY - rect.top - offsetY;
-
-  // Click in letterbox padding
-  if (relX < 0 || relX >= renderedW || relY < 0 || relY >= renderedH) {
-    return null;
-  }
-
-  const pixelX = Math.floor((relX / renderedW) * naturalW);
-  const pixelY = Math.floor((relY / renderedH) * naturalH);
-
-  return [
-    Math.max(0, Math.min(naturalW - 1, pixelX)),
-    Math.max(0, Math.min(naturalH - 1, pixelY)),
-  ];
-}
-
-/**
- * Read the color of a pixel from an image via an off-screen canvas.
- * 通过离屏 canvas 读取图像某像素的颜色。
- *
- * @param imgEl - A loaded <img> element.
- * @param x - Pixel X coordinate.
- * @param y - Pixel Y coordinate.
- * @returns Hex string without '#' (e.g. "ff0000"), or null on failure.
- */
-export function readPixelColor(
-  imgEl: HTMLImageElement,
-  x: number,
-  y: number,
-): string | null {
-  try {
-    const canvas = document.createElement('canvas');
-    canvas.width = imgEl.naturalWidth;
-    canvas.height = imgEl.naturalHeight;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return null;
-    ctx.drawImage(imgEl, 0, 0);
-    const [r, g, b] = ctx.getImageData(x, y, 1, 1).data;
-    return [r, g, b].map((c) => c.toString(16).padStart(2, '0')).join('');
-  } catch {
-    return null;
-  }
-}
+import { readPixelColor } from './colorPreview2DUtils';
 
 /**
  * Find the closest palette entry to a given hex color.
@@ -133,6 +58,7 @@ const ZOOM_STEP = 1.15;
 
 export default function ColorPreview2D() {
   const { t } = useI18n();
+  const previewAltText = t('converter_preview_2d_alt');
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
 
@@ -161,6 +87,7 @@ export default function ColorPreview2D() {
 
   const previewPixelWidth = useConverterStore((s) => s.previewPixelWidth);
   const previewPixelHeight = useConverterStore((s) => s.previewPixelHeight);
+  const puzzleOverlayUrl = useConverterStore((s) => s.puzzleOverlayUrl);
   const selectionMode = useConverterStore((s) => s.selectionMode);
   const selectedColor = useConverterStore((s) => s.selectedColor);
   const selectedColors = useConverterStore((s) => s.selectedColors);
@@ -480,13 +407,21 @@ export default function ColorPreview2D() {
             <img
               ref={imgRef}
               src={displayUrl ?? undefined}
-              alt="2D color preview"
+              alt={previewAltText}
               crossOrigin="anonymous"
               onLoad={handleImgLoad}
               className="block h-full w-full"
               style={replacePreviewLoading ? { opacity: 0.6 } : undefined}
               draggable={false}
             />
+            {puzzleOverlayUrl && (
+              <img
+                src={puzzleOverlayUrl}
+                alt=""
+                className="pointer-events-none absolute inset-0 h-full w-full"
+                draggable={false}
+              />
+            )}
 
             {/* SVG contour overlays — raw pixel coordinate space */}
             {svgContours.length > 0 && previewPixelWidth && previewPixelHeight && (
@@ -533,7 +468,7 @@ export default function ColorPreview2D() {
           <img
             ref={imgRef}
             src={displayUrl ?? undefined}
-            alt="2D color preview"
+            alt={previewAltText}
             crossOrigin="anonymous"
             onLoad={handleImgLoad}
             className="max-h-full max-w-full"

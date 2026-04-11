@@ -96,6 +96,23 @@ export interface ConverterRecipeLargeFormat {
   tile_height_mm: number;
 }
 
+export interface ConverterRecipePuzzle {
+  puzzle_enabled: boolean;
+  puzzle_style: string;
+  puzzle_sizing_mode: string;
+  piece_width_mm: number;
+  piece_height_mm: number;
+  puzzle_rows: number;
+  puzzle_cols: number;
+  target_piece_count: number;
+  puzzle_seed: number;
+  connector_style: string;
+  labels_enabled: boolean;
+  engrave_back_labels: boolean;
+  irregularity_strength: number;
+  min_neck_width_mm: number;
+}
+
 export interface ConverterRecipeDevice {
   printer_id: string;
   slicer: string;
@@ -112,6 +129,7 @@ export interface ConverterRecipe {
   coating: ConverterRecipeCoating;
   color_ops: ConverterRecipeColorOps;
   large_format: ConverterRecipeLargeFormat;
+  puzzle: ConverterRecipePuzzle;
   device: ConverterRecipeDevice;
 }
 

@@ -6,6 +6,22 @@ All notable changes to Lumina Studio are documented in this file.
 
 ---
 
+## Unreleased
+
+### Features
+- **Puzzle Mode Finish Pass** - Added puzzle-layout overlay preview in the converter workspace, a dedicated puzzle settings widget, 2D/3D overlay rendering, recipe import/export support, and combined 3MF assembly for per-piece puzzle generation
+
+### Fixes
+- **Puzzle Preview Reliability** - Fixed stale failure races that could clear a newer successful overlay, and allowed same-parameter puzzle overlay retries after transient failures
+- **Puzzle Import Normalization** - Imported recipes now normalize puzzle-vs-large-format and puzzle-vs-keychain-loop conflicts, and clear the reserved back-label engraving flag during import
+- **Combined Puzzle 3MF Metadata** - Combined exports now rebuild slice metadata, filament-sequence metadata, and package preview images instead of inheriting stale first-piece metadata
+- **Puzzle Export Boundary Accuracy** - Puzzle exports now preserve crop-local polygon boundaries through meshing, disable puzzle-only material dilation, and keep coating/outline geometry aligned to the authoritative piece silhouette to reduce XY overlap and oversized tabs
+- **SVG Puzzle Piece Stability** - SVG puzzle generation now aligns per-piece helper rasters and boundary JSON to the worker's exact rebuild grid, and rounds float-epsilon piece widths instead of truncating them to avoid empty meshes
+- **Unsupported Back Engraving Guard** - Back-label engraving is now treated as reserved and rejected during generation instead of silently exporting without geometry changes
+- **Smoke Coverage** - Added puzzle backend/frontend coverage to the fast smoke gate
+
+---
+
 ## v1.6.4 (2026-03-20)
 
 ### Improvements (PR #159 by @sandboxdream)
